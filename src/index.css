@@ -1,3 +1,58 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  :root {
+    --status-removed: #f4776b;
+    --status-removed-bg: #4a2626;
+    --status-deleted: #d6a35c;
+    --status-deleted-bg: #41371f;
+    --status-admin: #ff5c8a;
+    --status-admin-bg: color-mix(in srgb, #ff5c8a 10%, var(--bg));
+    --status-mod: #ff6a33;
+    --status-mod-bg: color-mix(in srgb, #ff6a33 10%, var(--bg));
+
+    --bg: #0d0d0d;
+    --accent: #e6e4e1;
+    --accent-2: color-mix(in srgb, var(--accent) 60%, var(--bg));
+    --text: color-mix(in srgb, var(--accent) 90%, var(--bg));
+    --text-muted: color-mix(in srgb, var(--accent) 60%, var(--bg));
+    --text-faint: color-mix(in srgb, var(--accent) 35%, var(--bg));
+    --border: color-mix(in srgb, var(--accent) 15%, var(--bg));
+    --border-hover: color-mix(in srgb, var(--accent) 25%, var(--bg));
+    --bg-elevated: color-mix(in srgb, var(--accent) 4%, var(--bg));
+}
+
+  body {
+    font-family: ui-monospace, 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+    background-color: var(--bg);
+    color: var(--text);
+    color-scheme: dark;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+}
+
+
+/* Custom color for date picker calendar icon using CSS mask */
+input[type="date"]::-webkit-calendar-picker-indicator {
+    background-image: none !important;
+    background-color: var(--text);
+    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='currentColor'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z'/%3E%3C/svg%3E");
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='currentColor'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z'/%3E%3C/svg%3E");
+    mask-size: 80%;
+    -webkit-mask-size: 80%;
+    mask-position: center;
+    -webkit-mask-position: center;
+    mask-repeat: no-repeat;
+    -webkit-mask-repeat: no-repeat;
+    cursor: pointer;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator:hover {
+    background-color: var(--accent);
+}

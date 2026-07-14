@@ -1,4 +1,17 @@
-import { useState, useCallback, useEffect, useMemo, useRef, Component } from "react";
+import { useState, useCallback, useEffect, useMemo, Component, memo, useRef } from "react";
+
+
+function downloadFile(filename, text, mime) {
+    const blob = new Blob([text], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
 
 // ─── API Config ───────────────────────────────────────────────────────────────
 
@@ -94,7 +107,7 @@ function normalizeUsername(input) {
     // Leading slashes, then optional u/ /user/ prefix, then a leading @
     s = s.replace(/^\/+/, "").replace(/^(u|user)\//i, "").replace(/^@/, "");
     // Drop any trailing slash / query / whitespace
-    s = s.replace(/[\/?#].*$/, "").trim();
+    s = s.replace(/[/?#].*$/, "").trim();
     return s;
 }
 
@@ -175,7 +188,7 @@ function HoverTime({ utc }) {
     return (
         <span className="relative inline-block group/time">
             {timeAgo(utc)}
-            <span className="pointer-events-none absolute top-full left-0 mt-1 z-50 whitespace-nowrap rounded border border-[#343536] bg-[#0d0d0d] px-2 py-1 text-[11px] text-[#d7dadc] opacity-0 group-hover/time:opacity-100 transition-opacity duration-75 shadow-lg shadow-black/40">
+            <span className="pointer-events-none absolute top-full left-0 mt-1 z-50 whitespace-nowrap rounded border border-[color:var(--border-hover)] bg-[color:var(--bg)] px-2 py-1 text-[11px] text-[color:var(--text)] opacity-0 group-hover/time:opacity-100 transition-opacity duration-75 shadow-lg shadow-black/40">
                 {fullTimestamp(utc)}
             </span>
         </span>
@@ -201,7 +214,7 @@ function HoverImageHint({ hint, className = "", children }) {
             {children}
             {pos && (
                 <span
-                    className="pointer-events-none fixed z-[100] whitespace-nowrap rounded border border-[#343536] bg-[#0d0d0d] px-2 py-1 text-[11px] text-[#d7dadc] shadow-lg shadow-black/40"
+                    className="pointer-events-none fixed z-[100] whitespace-nowrap rounded border border-[color:var(--border-hover)] bg-[color:var(--bg)] px-2 py-1 text-[11px] text-[color:var(--text)] shadow-lg shadow-black/40"
                     style={style}
                 >
                     {hint}
@@ -253,15 +266,30 @@ function getCommentImage(comment) {
     return null;
 }
 
-async function safeFetch(url) {
-    try {
-        const res = await fetch(url, { headers: { Accept: "application/json" } });
-        if (!res.ok) return { data: [], ok: false };
-        const json = await res.json();
-        return { data: json?.data ?? [], ok: true };
-    } catch {
-        return { data: [], ok: false };
+const FETCH_CACHE = new Map();
+function safeFetch(url, { bypassCache = false } = {}) {
+    if (!bypassCache) {
+        const cached = FETCH_CACHE.get(url);
+        if (cached && (Date.now() - cached.ts < 5 * 60 * 1000)) {
+            return cached.promise;
+        }
     }
+    const promise = fetch(url, { headers: { Accept: "application/json" } })
+        .then(async (res) => {
+            if (!res.ok) return { data: [], ok: false };
+            const json = await res.json();
+            return { data: json?.data ?? [], ok: true };
+        })
+        .catch(() => ({ data: [], ok: false }));
+    
+    promise.then((res) => {
+        if (!res.ok || res.data.length === 0) {
+            FETCH_CACHE.delete(url);
+        }
+    });
+
+    FETCH_CACHE.set(url, { ts: Date.now(), promise });
+    return promise;
 }
 
 async function fetchTimeSeries(key, { precision = "hour", hours = 24 } = {}) {
@@ -355,11 +383,11 @@ function ratioSeries(numeratorSeries, denominatorSeries) {
         .filter(Boolean);
 }
 
-async function fetchBoth(username, type, pagination = {}, dateFilters = {}) {
+async function fetchBoth(username, type, pagination = {}, dateFilters = {}, { bypassCache = false } = {}) {
     const { arctic, pullpush } = buildUrls(username, type, pagination, dateFilters);
     const [arcticRes, pullpushRes] = await Promise.all([
-        safeFetch(arctic),
-        safeFetch(pullpush),
+        safeFetch(arctic, { bypassCache }),
+        safeFetch(pullpush, { bypassCache }),
     ]);
 
     const seen = new Set();
@@ -379,12 +407,12 @@ async function fetchBoth(username, type, pagination = {}, dateFilters = {}) {
     // PullPush ignores the over_18 param, so filter NSFW client-side (posts only;
     // comments have no over_18 field). Arctic results already match — harmless here.
     let result = merged;
-    if (type === "posts" && dateFilters.over18 != null) {
-        result = result.filter((p) => p.over_18 === dateFilters.over18);
+    if (type === "posts" && dateFilters.over18 === false) {
+        result = result.filter((p) => !p.over_18);
     }
 
     result.sort((a, b) => b.created_utc - a.created_utc);
-    return { items: result, sources, arcticDown: !arcticRes.ok };
+    return { items: result, sources, arcticDown: !arcticRes.ok, pullpushDown: !pullpushRes.ok };
 }
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
@@ -397,8 +425,8 @@ const IconSearch = () => (
 );
 
 const IconArrowUp = () => (
-    <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
-        <path d="M10 3l7 7H3l7-7z" />
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" />
     </svg>
 );
 
@@ -437,27 +465,7 @@ const IconChevronRight = () => (
 
 // ─── Anime Face SVG ───────────────────────────────────────────────────────────
 
-const AnimeFace = () => (
-    <svg className="anime-face-svg" viewBox="0 0 44 44" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="22" cy="22" r="19" fill="white" opacity="0.97"/>
-        <g className="face-eye-l">
-            <ellipse cx="15" cy="20" rx="4" ry="4.5" fill="#1a1a2e"/>
-            <ellipse cx="15" cy="20" rx="3" ry="3.5" fill="#3a3a6e"/>
-            <circle cx="16.5" cy="18.2" r="1.2" fill="white"/>
-            <circle cx="14" cy="21.5" r="0.5" fill="white" opacity="0.6"/>
-        </g>
-        <g className="face-eye-r">
-            <ellipse cx="29" cy="20" rx="4" ry="4.5" fill="#1a1a2e"/>
-            <ellipse cx="29" cy="20" rx="3" ry="3.5" fill="#3a3a6e"/>
-            <circle cx="30.5" cy="18.2" r="1.2" fill="white"/>
-            <circle cx="28" cy="21.5" r="0.5" fill="white" opacity="0.6"/>
-        </g>
-        <ellipse className="face-blush" cx="10" cy="26" rx="4.5" ry="2.2" fill="#fe5301" opacity="0.45"/>
-        <ellipse className="face-blush" cx="34" cy="26" rx="4.5" ry="2.2" fill="#fe5301" opacity="0.45"/>
-        <path d="M17 28 Q22 33 27 28" stroke="#1a1a2e" strokeWidth="1.8" strokeLinecap="round" fill="none"/>
-        <ellipse cx="28" cy="12" rx="3" ry="1.5" fill="white" opacity="0.35" transform="rotate(-30 28 12)"/>
-    </svg>
-);
+
 
 // ─── Error Boundary ───────────────────────────────────────────────────────────
 // Wraps each result card so one malformed archive record (e.g. a comment with a
@@ -470,7 +478,7 @@ class CardBoundary extends Component {
     render() {
         if (this.state.failed) {
             return (
-                <div className="bg-[#1a1a1b] border border-[#343536] rounded px-3 py-2.5 text-[12px] text-[#818384] italic">
+                <div className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-3 py-2.5 text-[12px] text-[color:var(--text-muted)] italic">
                     This item couldn't be displayed.
                 </div>
             );
@@ -495,14 +503,14 @@ function getStatus(item, type) {
 // Border color for a card, tinted red when mod-removed and amber when
 // author-deleted so scanning a long list surfaces the interesting rows.
 function statusBorderBase({ removed, deleted }) {
-    if (removed) return "border-[#4a2626]";
-    if (deleted) return "border-[#41371f]";
-    return "border-[#343536]";
+    if (removed) return "border-[color:var(--status-removed)]";
+    if (deleted) return "border-[color:var(--status-deleted)]";
+    return "border-[color:var(--border-hover)]";
 }
 function statusBorderHover({ removed, deleted }) {
-    if (removed) return "hover:border-[#6e3838]";
-    if (deleted) return "hover:border-[#5f4f28]";
-    return "hover:border-[#818384]";
+    if (removed) return "hover:border-[color:var(--status-removed)]/50";
+    if (deleted) return "hover:border-[color:var(--status-deleted)]/50";
+    return "hover:border-[color:var(--text-muted)]";
 }
 function statusBorder(status) {
     return `${statusBorderBase(status)} ${statusBorderHover(status)}`;
@@ -518,19 +526,19 @@ function StatusBadges({ item, type }) {
     }
     return (
         <>
-            {removed && <span className={`${BADGE} bg-[#3a1a1a] text-[#f4776b] border border-[#5a2626]`}>Removed</span>}
-            {deleted && <span className={`${BADGE} bg-[#2c2620] text-[#d6a35c] border border-[#4a3d29]`}>Deleted</span>}
-            {item.over_18 && <span className={`${BADGE} bg-[#3a1420] text-[#ff5c8a] border border-[#5a2038]`}>NSFW</span>}
-            {item.spoiler && <span className={`${BADGE} bg-[#272729] text-[#a8a8a9] border border-[#3a3a3b]`}>Spoiler</span>}
-            {dist === "admin" && <span className={`${BADGE} bg-[#3a1400] text-[#ff6a33] border border-[#5a2810]`}>Admin</span>}
-            {dist === "moderator" && <span className={`${BADGE} bg-[#12312f] text-[#4fbdba] border border-[#1d4d4a]`}>Mod</span>}
+            {removed && <span className={`${BADGE} text-[color:var(--status-removed)] bg-[color:var(--status-removed)]/10 border border-[color:var(--status-removed)]/20`}>Removed</span>}
+            {deleted && <span className={`${BADGE} text-[color:var(--status-deleted)] bg-[color:var(--status-deleted)]/10 border border-[color:var(--status-deleted)]/20`}>Deleted</span>}
+            {item.over_18 && <span className={`${BADGE} text-[color:var(--status-admin)] bg-[color:var(--status-admin)]/10 border border-[color:var(--status-admin)]/20`}>NSFW</span>}
+            {item.spoiler && <span className={`${BADGE} bg-[color:var(--border)] text-[color:var(--text)] border border-[color:var(--border)]`}>Spoiler</span>}
+            {dist === "admin" && <span className={`${BADGE} text-[color:var(--status-mod)] bg-[color:var(--status-mod)]/10 border border-[color:var(--status-mod)]/20`}>Admin</span>}
+            {dist === "moderator" && <span className={`${BADGE} text-[color:var(--accent)] bg-[color:var(--accent)]/10 border border-[color:var(--accent)]/20`}>Mod</span>}
         </>
     );
 }
 
 // ─── Post Card ────────────────────────────────────────────────────────────────
 
-function PostCard({ post, embedded = false }) {
+const PostCard = memo(function PostCard({ post, embedded = false }) {
     const [bodyOpen, setBodyOpen]               = useState(false);
     const [comments, setComments]               = useState(null); // null = not fetched
     const [commentsLoading, setCommentsLoading] = useState(false);
@@ -564,43 +572,43 @@ function PostCard({ post, embedded = false }) {
 
     return (
         <>
-            <div className={`bg-[#1a1a1b] border ${statusBorder(status)} rounded overflow-hidden transition-all duration-150 hover:shadow-lg group`}>
+            <div className={`bg-[color:var(--bg-elevated)] border ${statusBorder(status)} rounded overflow-hidden transition-all duration-150 hover:shadow-lg group`}>
                 <a href={postUrl} target="_blank" rel="noopener noreferrer" className="block">
                     <div className="flex">
-                        <div className="flex flex-col items-center justify-start gap-1 px-2.5 py-3 bg-[#161617] min-w-[44px]">
+                        <div className="flex flex-col items-center justify-start gap-1 px-2.5 py-3 bg-[color:var(--bg)] min-w-[44px]">
                             <IconArrowUp />
-                            <span className="text-[11px] font-bold text-[#d7dadc] leading-none">{fmtNum(post.score)}</span>
+                            <span className="text-[11px] font-bold text-[color:var(--text)] leading-none">{fmtNum(post.score)}</span>
                         </div>
                         <div className="flex-1 p-3 min-w-0">
                             <div className="flex gap-3">
                                 <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-1.5 text-[11px] text-[#818384] mb-1.5 flex-wrap">
-                                        <span className="font-medium text-[#d7dadc]">{post.subreddit_name_prefixed}</span>
+                                    <div className="flex items-center gap-1.5 text-[11px] text-[color:var(--text-muted)] mb-1.5 flex-wrap">
+                                        <span className="font-medium text-[color:var(--text)]">{post.subreddit_name_prefixed}</span>
                                         <span>·</span>
                                         <HoverTime utc={post.created_utc} />
                                         <StatusBadges item={post} type="posts" />
                                         {post.link_flair_text && (
                                             <>
                                                 <span>·</span>
-                                                <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-[#272729] text-[#d7dadc] border border-[#343536]">
+                                                <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-[color:var(--border)] text-[color:var(--text)] border border-[color:var(--border-hover)]">
                                                 {post.link_flair_text}
                                             </span>
                                             </>
                                         )}
                                     </div>
-                                    <p className="text-sm font-medium text-[#d7dadc] leading-snug mb-1.5 group-hover:text-white transition-colors break-words">
+                                    <p className="text-sm font-medium text-[color:var(--text)] leading-snug mb-1.5 transition-colors break-words">
                                         {post.title}
                                     </p>
-                                    <div className="flex items-center gap-3 text-[11px] text-[#818384]">
+                                    <div className="flex items-center gap-3 text-[11px] text-[color:var(--text-muted)]">
                                         <button
                                             onClick={(e) => { e.preventDefault(); if (!comments) handleLoadComments(); }}
                                             disabled={commentsLoading}
-                                            className="flex items-center gap-1 hover:text-[#fe5301] transition-colors disabled:opacity-50 cursor-pointer"
+                                            className="flex items-center gap-1 hover:text-[color:var(--accent)] transition-colors disabled:opacity-50 cursor-pointer"
                                         >
                                             <IconComment />{embedded ? "" : "show "}{fmtNum(post.num_comments)} comments
                                         </button>
                                         {post.domain && !post.is_self && (
-                                            <span className="flex items-center gap-1 text-[#4fbdba] truncate max-w-[200px]">
+                                            <span className="flex items-center gap-1 text-[color:var(--accent)] truncate max-w-[200px]">
                                             <IconExternal /><span className="truncate">{post.domain}</span>
                                         </span>
                                         )}
@@ -608,7 +616,7 @@ function PostCard({ post, embedded = false }) {
                                             <button
                                                 aria-label={bodyOpen ? "Hide post body" : "Show post body"}
                                                 onClick={(e) => { e.preventDefault(); setBodyOpen(o => !o); }}
-                                                className="flex items-center gap-1 ml-auto text-[#818384] hover:text-[#fe5301] transition-colors"
+                                                className="flex items-center gap-1 ml-auto text-[color:var(--text-muted)] hover:text-[color:var(--accent)] transition-colors"
                                             >
                                                 <svg aria-hidden="true" className={`w-3 h-3 transition-transform duration-200 ${bodyOpen ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -624,7 +632,7 @@ function PostCard({ post, embedded = false }) {
                                             role="button"
                                             tabIndex={0}
                                             onClick={(e) => { e.preventDefault(); e.stopPropagation(); window.open(thumb, "_blank", "noopener,noreferrer"); }}
-                                            className="w-[70px] h-[52px] rounded overflow-hidden bg-[#272729] cursor-zoom-in">
+                                            className="w-[70px] h-[52px] rounded overflow-hidden bg-[color:var(--border)] cursor-zoom-in">
                                             <img src={thumb} alt="" width="70" height="52" className="w-full h-full object-cover" loading="lazy"
                                                  onError={(e) => { e.target.style.display = "none"; }} />
                                         </div>
@@ -632,11 +640,11 @@ function PostCard({ post, embedded = false }) {
                                 )}
                             </div>
                             {hasBody && thumb && (
-                                <div className="flex items-center mt-2 text-[11px] text-[#818384]">
+                                <div className="flex items-center mt-2 text-[11px] text-[color:var(--text-muted)]">
                                     <button
                                         aria-label={bodyOpen ? "Hide post body" : "Show post body"}
                                         onClick={(e) => { e.preventDefault(); setBodyOpen(o => !o); }}
-                                        className="flex items-center gap-1 ml-auto hover:text-[#fe5301] transition-colors"
+                                        className="flex items-center gap-1 ml-auto hover:text-[color:var(--accent)] transition-colors"
                                     >
                                         <svg aria-hidden="true" className={`w-3 h-3 transition-transform duration-200 ${bodyOpen ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -650,8 +658,8 @@ function PostCard({ post, embedded = false }) {
                 </a>
 
                 {hasBody && bodyOpen && (
-                    <div className="border-t border-[#272729] px-4 pt-3 pb-3 ml-[44px]">
-                        <p className="text-[12px] text-[#d7dadc] leading-relaxed whitespace-pre-wrap break-words">
+                    <div className="border-t border-[color:var(--border)] px-4 pt-3 pb-3 ml-[44px]">
+                        <p className="text-[12px] text-[color:var(--text)] leading-relaxed whitespace-pre-wrap break-words">
                             {post.selftext}
                         </p>
                     </div>
@@ -659,17 +667,17 @@ function PostCard({ post, embedded = false }) {
 
                 {/* ── Loaded comments — merged inside the post card ── */}
                 {!embedded && (commentsLoading || comments !== null) && (
-                    <div className="border-t border-[#272729]">
+                    <div className="border-t border-[color:var(--border)]">
                         {commentsLoading ? (
-                            <div className="flex items-center gap-2 px-3 py-3 text-[#818384]">
+                            <div className="flex items-center gap-2 px-3 py-3 text-[color:var(--text-muted)]">
                                 <IconSpinner />
                                 <span className="text-[11px]">Loading comments…</span>
                             </div>
                         ) : comments.length === 0 ? (
-                            <p className="text-[11px] text-[#818384] italic px-3 py-2">No archived comments found.</p>
+                            <p className="text-[11px] text-[color:var(--text-muted)] italic px-3 py-2">No archived comments found.</p>
                         ) : (
                             <div className="flex flex-col gap-0">
-                                <div className="px-3 py-1.5 text-[11px] text-[#818384]">
+                                <div className="px-3 py-1.5 text-[11px] text-[color:var(--text-muted)]">
                                     {comments.length} comment{comments.length !== 1 ? "s" : ""} loaded
                                     {moreCommentsCount > 0 ? ` · +${moreCommentsCount} more not shown` : ""}
                                 </div>
@@ -685,7 +693,8 @@ function PostCard({ post, embedded = false }) {
             </div>
         </>
     );
-}
+});
+
 
 // ─── Parent Chain ─────────────────────────────────────────────────────────────
 // Recursively loads and displays parent comments above the main comment.
@@ -710,33 +719,33 @@ function ParentChain({ parentId }) {
     }
 
     return (
-        <div className="border-b border-[#272729]">
+        <div className="border-b border-[color:var(--border)]">
             {/* Recurse: if this parent also has a parent comment, show its chain above */}
             {comment && <ParentChain parentId={comment.parent_id} />}
 
             {comment ? (
                 /* Loaded parent — rendered as a dimmed summary row */
                 <div className="flex opacity-80">
-                    <div className="w-5 bg-[#161617] flex-shrink-0" />
-                    <div className="flex flex-col items-center justify-start gap-1 px-2.5 py-2.5 bg-[#161617] min-w-[44px]">
+                    <div className="w-5 bg-[color:var(--bg)] flex-shrink-0" />
+                    <div className="flex flex-col items-center justify-start gap-1 px-2.5 py-2.5 bg-[color:var(--bg)] min-w-[44px]">
                         <IconArrowUp />
-                        <span className="text-[11px] font-bold text-[#d7dadc] leading-none">{fmtNum(comment.score)}</span>
+                        <span className="text-[11px] font-bold text-[color:var(--text)] leading-none">{fmtNum(comment.score)}</span>
                     </div>
                     <div className="flex-1 px-3 py-2.5 min-w-0">
-                        <div className="flex items-center gap-1.5 text-[11px] text-[#818384] mb-1 flex-wrap">
+                        <div className="flex items-center gap-1.5 text-[11px] text-[color:var(--text-muted)] mb-1 flex-wrap">
                             <a href={`${REDDIT_BASE}/r/${comment.subreddit}`} target="_blank" rel="noopener noreferrer"
-                               className="font-medium text-[#d7dadc] hover:underline">
+                               className="font-medium text-[color:var(--text)] hover:underline">
                                 {comment.subreddit_name_prefixed || `r/${comment.subreddit}`}
                             </a>
                             <span>by</span>
                             <a href={`${REDDIT_BASE}/u/${comment.author}`} target="_blank" rel="noopener noreferrer"
-                               className="text-[#d7dadc] hover:underline">
+                               className="text-[color:var(--text)] hover:underline">
                                 u/{comment.author}
                             </a>
                             <span>·</span>
                             <HoverTime utc={comment.created_utc} />
                         </div>
-                        <p className="text-sm text-[#818384] leading-relaxed line-clamp-3 whitespace-pre-wrap break-words">
+                        <p className="text-sm text-[color:var(--text-muted)] leading-relaxed line-clamp-3 whitespace-pre-wrap break-words">
                             {comment.body || "(no content)"}
                         </p>
                     </div>
@@ -747,7 +756,7 @@ function ParentChain({ parentId }) {
                     <button
                         onClick={handleLoad}
                         disabled={loading}
-                        className="flex items-center gap-1 text-[11px] text-[#818384] hover:text-[#d7dadc] hover:bg-[#272729] rounded px-2 py-0.5 transition-all disabled:opacity-50"
+                        className="flex items-center gap-1 text-[11px] text-[color:var(--text-muted)] hover:text-[color:var(--accent)] hover:bg-[color:var(--border)] rounded px-2 py-0.5 transition-all disabled:opacity-50"
                     >
                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
@@ -762,7 +771,7 @@ function ParentChain({ parentId }) {
 
 // ─── Comment Card ─────────────────────────────────────────────────────────────
 
-function CommentCard({ comment, isNested = false, skipPostLoad = false }) {
+const CommentCard = memo(function CommentCard({ comment, isNested = false, skipPostLoad = false }) {
     const [collapsed, setCollapsed]           = useState(false);
     const [lineHovered, setLineHovered]       = useState(false);
     const [post, setPost]                     = useState(null);
@@ -812,11 +821,11 @@ function CommentCard({ comment, isNested = false, skipPostLoad = false }) {
     }
 
     return (
-        <div className={`bg-[#1a1a1b] border ${statusBorderBase(status)} rounded overflow-hidden transition-all duration-150 ${!isNested ? `${statusBorderHover(status)} hover:shadow-lg` : ""}`}>
+        <div className={`bg-[color:var(--bg)] border ${statusBorderBase(status)} rounded overflow-hidden transition-all duration-150 ${!isNested ? `${statusBorderHover(status)} hover:shadow-lg` : ""}`}>
 
             {/* ── Parent post shown after auto-loading ── */}
             {post && (
-                <div className="border-b border-[#343536]">
+                <div className="border-b border-[color:var(--border-hover)]">
                     <PostCard post={post} embedded={true} />
                 </div>
             )}
@@ -834,31 +843,31 @@ function CommentCard({ comment, isNested = false, skipPostLoad = false }) {
                     onClick={() => setCollapsed(o => !o)}
                     onMouseEnter={() => setLineHovered(true)}
                     onMouseLeave={() => setLineHovered(false)}
-                    className="relative flex-shrink-0 w-5 bg-[#161617] transition-colors"
+                    className="relative flex-shrink-0 w-5 bg-[color:var(--bg)] transition-colors"
                 >
                     <span
                         className="absolute left-1/2 top-2 w-0.5 -translate-x-1/2 rounded-full transition-all duration-150"
-                        style={{ background: collapsed ? "#fe5301" : lineHovered ? "#818384" : "#343536", bottom: collapsed ? 8 : 0 }}
+                        style={{ background: collapsed ? "var(--accent)" : lineHovered ? "var(--text-muted)" : "var(--border-hover)", bottom: collapsed ? 8 : 0 }}
                     />
                 </button>
 
                 {/* Score */}
-                <div className="flex flex-col items-center justify-start gap-1 px-2.5 py-3 bg-[#161617] min-w-[44px]">
+                <div className="flex flex-col items-center justify-start gap-1 px-2.5 py-3 bg-[color:var(--bg)] min-w-[44px]">
                     <IconArrowUp />
-                    <span className="text-[11px] font-bold text-[#d7dadc] leading-none">{fmtNum(comment.score)}</span>
+                    <span className="text-[11px] font-bold text-[color:var(--text)] leading-none">{fmtNum(comment.score)}</span>
                 </div>
 
                 {/* Content */}
                 <div className="flex-1 p-3 min-w-0">
                     {/* Header — always visible */}
-                    <div className="flex items-center gap-1.5 text-[11px] text-[#818384] mb-1.5 flex-wrap">
+                    <div className="flex items-center gap-1.5 text-[11px] text-[color:var(--text-muted)] mb-1.5 flex-wrap">
                         <a href={`${REDDIT_BASE}/r/${comment.subreddit}`} target="_blank" rel="noopener noreferrer"
-                           className="font-medium text-[#d7dadc] hover:underline">
+                           className="font-medium text-[color:var(--text)] hover:underline">
                             {comment.subreddit_name_prefixed || `r/${comment.subreddit}`}
                         </a>
                         <span>by</span>
                         <a href={`${REDDIT_BASE}/u/${comment.author}`} target="_blank" rel="noopener noreferrer"
-                           className="text-[#d7dadc] hover:underline">
+                           className="text-[color:var(--text)] hover:underline">
                             u/{comment.author}
                         </a>
                         <span>·</span>
@@ -866,12 +875,12 @@ function CommentCard({ comment, isNested = false, skipPostLoad = false }) {
                         <StatusBadges item={comment} type="comments" />
                         <span>·</span>
                         <a href={threadUrl} target="_blank" rel="noopener noreferrer"
-                           className="text-[#4fbdba] hover:underline flex items-center gap-0.5">
+                           className="text-[color:var(--accent)] hover:underline flex items-center gap-0.5">
                             view thread <IconExternal />
                         </a>
                         <span>·</span>
                         <a href={url} target="_blank" rel="noopener noreferrer"
-                           className="text-[#4fbdba] hover:underline flex items-center gap-0.5">
+                           className="text-[color:var(--accent)] hover:underline flex items-center gap-0.5">
                             view comment <IconExternal />
                         </a>
                     </div>
@@ -880,20 +889,20 @@ function CommentCard({ comment, isNested = false, skipPostLoad = false }) {
                     {!collapsed && (
                         <>
                             {status.removed || status.deleted ? (
-                                <p className="text-sm text-[#6f7071] italic leading-relaxed">
+                                <p className="text-sm text-[color:var(--text-muted)] italic leading-relaxed">
                                     {status.removed
                                         ? "This comment was removed by a moderator — the archive captured no text."
                                         : "This comment was deleted by its author — the archive captured no text."}
                                 </p>
                             ) : (
-                                <p className="text-sm text-[#d7dadc] leading-relaxed whitespace-pre-wrap break-words">
+                                <p className="text-sm text-[color:var(--text)] leading-relaxed whitespace-pre-wrap break-words">
                                     {comment.body || "(no content)"}
                                 </p>
                             )}
                             {img && (
                                 <HoverImageHint hint="Open image in new tab" className="inline-block mt-2">
                                     <a href={img} target="_blank" rel="noopener noreferrer"
-                                       className="block w-24 h-16 rounded overflow-hidden bg-[#272729] cursor-zoom-in">
+                                       className="block w-24 h-16 rounded overflow-hidden bg-[color:var(--border)] cursor-zoom-in">
                                         <img src={img} alt="" width="96" height="64" className="w-full h-full object-cover" loading="lazy"
                                              onError={(e) => { e.target.style.display = "none"; }} />
                                     </a>
@@ -920,7 +929,7 @@ function CommentCard({ comment, isNested = false, skipPostLoad = false }) {
                             >
                                 <svg width="20" height="32" viewBox="0 0 20 32" fill="none">
                                     <path d="M 1 0 L 1 17 Q 1 24 8 24 L 20 24"
-                                          stroke={lineHovered ? "#818384" : "#343536"} strokeWidth="1.5" strokeLinecap="round" fill="none"
+                                          stroke={lineHovered ? "var(--text-muted)" : "var(--border-hover)"} strokeWidth="1.5" strokeLinecap="round" fill="none"
                                           style={{ transition: "stroke 150ms" }} />
                                 </svg>
                             </button>
@@ -929,7 +938,7 @@ function CommentCard({ comment, isNested = false, skipPostLoad = false }) {
                                 onClick={handleLoadReplies}
                                 disabled={repliesLoading}
                                 aria-label="Load replies"
-                                className="w-[18px] h-[18px] rounded-full border-2 border-[#4a4a4b] bg-[#1a1a1b] flex items-center justify-center text-[#818384] hover:border-[#fe5301] hover:text-[#fe5301] transition-all disabled:opacity-40 flex-shrink-0 -ml-[1px]"
+                                className="w-[18px] h-[18px] rounded-full border-2 border-[color:var(--border)] bg-[color:var(--bg)] flex items-center justify-center text-[color:var(--text-muted)] hover:border-[color:var(--accent)] hover:text-[color:var(--accent)] transition-all disabled:opacity-40 flex-shrink-0 -ml-[1px]"
                             >
                                 {repliesLoading
                                     ? <span className="text-[9px] leading-none">…</span>
@@ -947,7 +956,7 @@ function CommentCard({ comment, isNested = false, skipPostLoad = false }) {
                         <div className="flex" style={{ paddingLeft: 9 }}>
                             {/* Single vertical line connecting down from parent collapse line */}
                             <div className="flex-shrink-0 w-5 relative" style={{ marginTop: -14 }}>
-                                <div className="absolute" style={{ left: 0, top: 0, bottom: 0, width: "1.5px", background: "#343536" }} />
+                                <div className="absolute" style={{ left: 0, top: 0, bottom: 0, width: "1.5px", background: "var(--border-hover)" }} />
                             </div>
                             {/* Replies column */}
                             <div className="flex-1 min-w-0">
@@ -957,7 +966,7 @@ function CommentCard({ comment, isNested = false, skipPostLoad = false }) {
                                             <div key={reply.id} className="flex items-start">
                                                 {/* Short horizontal branch off the vertical line */}
                                                 <svg width="12" height="44" viewBox="0 0 12 44" fill="none"
-                                                     className="flex-shrink-0 self-start" style={{ marginTop: 19, marginLeft: -20, color: "#343536" }}>
+                                                     className="flex-shrink-0 self-start" style={{ marginTop: 19, marginLeft: -20, color: "var(--border-hover)" }}>
                                                     <path d="M 1 0 Q 1 7 8 7 L 12 7"
                                                           stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" fill="none" />
                                                 </svg>
@@ -970,15 +979,15 @@ function CommentCard({ comment, isNested = false, skipPostLoad = false }) {
                                 ) : (
                                     <div className="flex items-center py-2">
                                         <svg width="12" height="14" viewBox="0 0 12 14" fill="none"
-                                             className="flex-shrink-0" style={{ marginLeft: -20, color: "#343536" }}>
+                                             className="flex-shrink-0" style={{ marginLeft: -20, color: "var(--border-hover)" }}>
                                             <path d="M 1 0 Q 1 7 8 7 L 12 7"
                                                   stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" fill="none" />
                                         </svg>
-                                        <p className="text-[11px] text-[#818384] italic">No archived replies found.</p>
+                                        <p className="text-[11px] text-[color:var(--text-muted)] italic">No archived replies found.</p>
                                     </div>
                                 )}
                                 {moreCount > 0 && (
-                                    <p className="text-[11px] text-[#818384] pl-1 pb-2">+{moreCount} more {moreCount === 1 ? "reply" : "replies"} not shown</p>
+                                    <p className="text-[11px] text-[color:var(--text-muted)] pl-1 pb-2">+{moreCount} more {moreCount === 1 ? "reply" : "replies"} not shown</p>
                                 )}
                             </div>
                         </div>
@@ -987,7 +996,8 @@ function CommentCard({ comment, isNested = false, skipPostLoad = false }) {
             )}
         </div>
     );
-}
+});
+
 
 // ─── User Summary ─────────────────────────────────────────────────────────────
 // Archive-wide stats for the searched account (totals, karma, first activity)
@@ -1019,14 +1029,14 @@ function UserSummary({ query }) {
         : null;
 
     return (
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-4 px-3 py-2 bg-[#1a1a1b] border border-[#343536] rounded text-[11px] text-[#818384]">
-            <span><span className="text-[#d7dadc] font-medium">{fmtBig(meta.num_posts)}</span> archived posts</span>
-            <span><span className="text-[#d7dadc] font-medium">{fmtBig(meta.num_comments)}</span> comments</span>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-4 px-3 py-2 bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded text-[11px] text-[color:var(--text-muted)]">
+            <span><span className="text-[color:var(--text)] font-medium">{fmtBig(meta.num_posts)}</span> archived posts</span>
+            <span><span className="text-[color:var(--text)] font-medium">{fmtBig(meta.num_comments)}</span> comments</span>
             {meta.total_karma != null && (
-                <span><span className="text-[#d7dadc] font-medium">{fmtBig(meta.total_karma)}</span> karma</span>
+                <span><span className="text-[color:var(--text)] font-medium">{fmtBig(meta.total_karma)}</span> karma</span>
             )}
             {firstSeen && (
-                <span>active since <span className="text-[#d7dadc] font-medium">{firstSeen}</span></span>
+                <span>active since <span className="text-[color:var(--text)] font-medium">{firstSeen}</span></span>
             )}
         </div>
     );
@@ -1034,24 +1044,24 @@ function UserSummary({ query }) {
 
 // ─── Empty / Error ────────────────────────────────────────────────────────────
 
-function EmptyState({ tab, hasFilters, query, onSwitchTab, onClearFilters }) {
+function EmptyState({ tab, hasFilters, query, onSwitchTab, onClearFilters, deletedOnly }) {
     const otherTab = tab === "posts" ? "comments" : "posts";
     return (
-        <div className="text-center py-16 text-[#818384]">
-            <p className="text-sm mb-2">No {tab} found for this user.</p>
-            <p className="text-[12px] text-[#5a5a5b] mb-4">Their history may not be fully indexed yet.</p>
+        <div className="text-center py-16 text-[color:var(--text-muted)]">
+            <p className="text-sm mb-2">{deletedOnly ? `No deleted ${tab} found on this page.` : `No ${tab} found for this user.`}</p>
+            <p className="text-[12px] text-[color:var(--text-muted)] mb-4">Their history may not be fully indexed yet.</p>
             <div className="flex flex-col items-center gap-2 text-[12px]">
-                <button type="button" onClick={onSwitchTab} className="text-[#ff4500] hover:underline">
+                <button type="button" onClick={onSwitchTab} className="text-[color:var(--accent)] hover:underline">
                     Switch to {otherTab} →
                 </button>
                 {hasFilters && (
-                    <button type="button" onClick={onClearFilters} className="text-[#ff4500] hover:underline">
+                    <button type="button" onClick={onClearFilters} className="text-[color:var(--accent)] hover:underline">
                         Clear date filters and retry →
                     </button>
                 )}
                 <a href={`https://www.reddit.com/search/?q=author%3A%22${query}%22&type=${tab}`}
                    target="_blank" rel="noopener noreferrer"
-                   className="text-[#4fbdba] hover:underline">
+                   className="text-[color:var(--accent)] hover:underline">
                     Search Reddit directly →
                 </a>
             </div>
@@ -1063,9 +1073,9 @@ function ErrorState({ message, onRetry }) {
     return (
         <div className="text-center py-16">
             <p className="text-sm text-red-400 mb-1">{message}</p>
-            <p className="text-[11px] text-[#5a5a5b] mb-3">The archive may be temporarily unavailable.</p>
+            <p className="text-[11px] text-[color:var(--text-muted)] mb-3">The archive may be temporarily unavailable.</p>
             {onRetry && (
-                <button type="button" onClick={onRetry} className="text-[12px] text-[#ff4500] hover:underline">
+                <button type="button" onClick={onRetry} className="text-[12px] text-[color:var(--accent)] hover:underline">
                     Try again →
                 </button>
             )}
@@ -1078,14 +1088,14 @@ function ErrorState({ message, onRetry }) {
 function TabBtn({ label, count, countIsPlus, active, onClick }) {
     return (
         <button onClick={onClick}
-                className={`relative px-2.5 py-2 text-[13px] sm:px-4 sm:py-2.5 sm:text-sm font-medium transition-colors ${active ? "text-white" : "text-[#818384] hover:text-[#d7dadc]"}`}>
+                className={`relative px-2.5 py-2 text-[13px] sm:px-4 sm:py-2.5 sm:text-sm font-medium transition-colors ${active ? "text-[color:var(--text)]" : "text-[color:var(--text-muted)] hover:text-[color:var(--accent)]"}`}>
             {label}
             {count > 0 && (
-                <span className={`ml-1.5 text-[11px] px-1.5 py-0.5 rounded-full ${active ? "bg-[#ff4500] text-white" : "bg-[#272729] text-[#818384]"}`}>
+                <span className={`ml-1.5 text-[11px] px-1.5 py-0.5 rounded-full ${active ? "bg-[color:var(--accent)] text-[color:var(--bg)] font-bold" : "bg-[color:var(--border)] text-[color:var(--text-muted)]"}`}>
                     {countIsPlus ? `${count}+` : count}
                 </span>
             )}
-            {active && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#ff4500] rounded-t" />}
+            {active && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[color:var(--accent)] rounded-t" />}
         </button>
     );
 }
@@ -1096,14 +1106,14 @@ function Pagination({ page, hasPrev, hasNext, onPrev, onNext, loading }) {
     return (
         <div className="flex items-center justify-center gap-3 mt-6">
             <button onClick={onPrev} disabled={!hasPrev || loading} aria-label="Previous page"
-                    className="flex items-center justify-center w-10 h-10 rounded border border-[#343536] hover:border-[#818384] text-[#d7dadc] transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+                    className="flex items-center justify-center w-10 h-10 rounded border border-[color:var(--border-hover)] hover:border-[color:var(--text-muted)] text-[color:var(--text)] transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
                 <IconChevronLeft />
             </button>
-            <span className="text-[12px] text-[#818384] min-w-[60px] text-center">
+            <span className="text-[12px] text-[color:var(--text-muted)] min-w-[60px] text-center">
                 {loading ? <span className="flex justify-center"><IconSpinner /></span> : `Page ${page}`}
             </span>
             <button onClick={onNext} disabled={!hasNext || loading} aria-label="Next page"
-                    className="flex items-center justify-center w-10 h-10 rounded border border-[#343536] hover:border-[#818384] text-[#d7dadc] transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+                    className="flex items-center justify-center w-10 h-10 rounded border border-[color:var(--border-hover)] hover:border-[color:var(--text-muted)] text-[color:var(--text)] transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
                 <IconChevronRight />
             </button>
         </div>
@@ -1198,22 +1208,22 @@ function TotalActivityChart() {
     );
 
     return (
-        <div className="bg-[#1a1a1b] border border-[#343536] rounded-lg overflow-hidden">
-            <div className="px-4 py-2 border-b border-[#272729]">
+        <div className="bg-[color:var(--bg-elevated)] border border-[color:var(--border-hover)] rounded-lg overflow-hidden">
+            <div className="px-4 py-2 border-b border-[color:var(--border)]">
                 <div className="flex items-center justify-between gap-3 flex-wrap">
                     <div>
-                        <h2 className="text-sm font-semibold text-white">Total Reddit posts and comments</h2>
-                        <p className="text-[11px] text-[#818384] mt-0.5 whitespace-nowrap overflow-hidden text-ellipsis">
+                        <h2 className="text-sm font-semibold text-[color:var(--text)]">Total Reddit posts and comments</h2>
+                        <p className="text-[11px] text-[color:var(--text-muted)] mt-0.5 whitespace-nowrap overflow-hidden text-ellipsis">
                             Global Reddit activity over the past week.
                         </p>
                     </div>
                     <div className="flex items-center gap-4 text-[12px]">
-                        <div className="flex items-center gap-2 text-[#d7dadc]">
-                            <span className="w-3 h-3 rounded-full bg-[#fe5301] inline-block"></span>
+                        <div className="flex items-center gap-2 text-[color:var(--text)]">
+                            <span className="w-3 h-3 rounded-full bg-[color:var(--accent)] inline-block"></span>
                             Posts
                         </div>
-                        <div className="flex items-center gap-2 text-[#d7dadc]">
-                            <span className="w-3 h-3 rounded-full bg-[#4fbdba] inline-block"></span>
+                        <div className="flex items-center gap-2 text-[color:var(--text)]">
+                            <span className="w-3 h-3 rounded-full bg-[color:var(--accent-2)] inline-block"></span>
                             Comments
                         </div>
                     </div>
@@ -1222,12 +1232,12 @@ function TotalActivityChart() {
 
             <div className="p-3">
                 {loading ? (
-                    <div className="flex items-center justify-center py-16 gap-3 text-[#818384]">
+                    <div className="flex items-center justify-center py-16 gap-3 text-[color:var(--text-muted)]">
                         <IconSpinner />
                         <span className="text-sm">Loading chart…</span>
                     </div>
                 ) : merged.length === 0 ? (
-                    <div className="text-center py-16 text-[#818384] text-sm">
+                    <div className="text-center py-16 text-[color:var(--text-muted)] text-sm">
                         No chart data available right now.
                     </div>
                 ) : (
@@ -1252,7 +1262,7 @@ function TotalActivityChart() {
                                             x2={width - padding.right}
                                             y1={y}
                                             y2={y}
-                                            stroke="#2a2a2b"
+                                            stroke="var(--border)"
                                             strokeWidth="1"
                                         />
                                         <text
@@ -1260,7 +1270,7 @@ function TotalActivityChart() {
                                             y={y + 4}
                                             textAnchor="end"
                                             fontSize="23"
-                                            fill="#818384"
+                                            fill="var(--text-muted)"
                                         >
                                             {fmtNum(Math.round(value))}
                                         </text>
@@ -1283,7 +1293,7 @@ function TotalActivityChart() {
                                             x2={x}
                                             y1={padding.top}
                                             y2={height - padding.bottom}
-                                            stroke="#202021"
+                                            stroke="var(--border)"
                                             strokeWidth="1"
                                         />
                                         <text
@@ -1291,7 +1301,7 @@ function TotalActivityChart() {
                                             y={height - 12}
                                             textAnchor="middle"
                                             fontSize="23"
-                                            fill="#818384"
+                                            fill="var(--text-muted)"
                                         >
                                             {formatChartTick(p.date, precision, hours)}
                                         </text>
@@ -1302,7 +1312,7 @@ function TotalActivityChart() {
                             <path
                                 d={postsPath}
                                 fill="none"
-                                stroke="#fe5301"
+                                stroke="var(--accent)"
                                 strokeWidth="3"
                                 strokeLinecap="square"
                                 strokeLinejoin="bevel"
@@ -1310,7 +1320,7 @@ function TotalActivityChart() {
                             <path
                                 d={commentsPath}
                                 fill="none"
-                                stroke="#4fbdba"
+                                stroke="var(--accent-2)"
                                 strokeWidth="3"
                                 strokeLinecap="square"
                                 strokeLinejoin="bevel"
@@ -1399,20 +1409,20 @@ function SecondaryGlobalChart({
     );
 
     return (
-        <div className="bg-[#1a1a1b] border border-[#343536] rounded-lg overflow-hidden">
-            <div className="px-4 py-2 border-b border-[#272729]">
+        <div className="bg-[color:var(--bg-elevated)] border border-[color:var(--border-hover)] rounded-lg overflow-hidden">
+            <div className="px-4 py-2 border-b border-[color:var(--border)]">
                 <div className="flex items-center justify-between gap-3 flex-wrap">
                     <div>
-                        <h2 className="text-sm font-semibold text-white">{title}</h2>
-                        <p className="text-[11px] text-[#818384] mt-0.5 whitespace-nowrap overflow-hidden text-ellipsis">{subtitle}</p>
+                        <h2 className="text-sm font-semibold text-[color:var(--text)]">{title}</h2>
+                        <p className="text-[11px] text-[color:var(--text-muted)] mt-0.5 whitespace-nowrap overflow-hidden text-ellipsis">{subtitle}</p>
                     </div>
                     <div className="flex items-center gap-4 text-[12px]">
-                        <div className="flex items-center gap-2 text-[#d7dadc]">
-                            <span className="w-3 h-3 rounded-full bg-[#fe5301] inline-block"></span>
+                        <div className="flex items-center gap-2 text-[color:var(--text)]">
+                            <span className="w-3 h-3 rounded-full bg-[color:var(--accent)] inline-block"></span>
                             {leftLabel}
                         </div>
-                        <div className="flex items-center gap-2 text-[#d7dadc]">
-                            <span className="w-3 h-3 rounded-full bg-[#4fbdba] inline-block"></span>
+                        <div className="flex items-center gap-2 text-[color:var(--text)]">
+                            <span className="w-3 h-3 rounded-full bg-[color:var(--accent-2)] inline-block"></span>
                             {rightLabel}
                         </div>
                     </div>
@@ -1421,12 +1431,12 @@ function SecondaryGlobalChart({
 
             <div className="p-3">
                 {loading ? (
-                    <div className="flex items-center justify-center py-16 gap-3 text-[#818384]">
+                    <div className="flex items-center justify-center py-16 gap-3 text-[color:var(--text-muted)]">
                         <IconSpinner />
                         <span className="text-sm">Loading chart...</span>
                     </div>
                 ) : merged.length === 0 ? (
-                    <div className="text-center py-16 text-[#818384] text-sm">
+                    <div className="text-center py-16 text-[color:var(--text-muted)] text-sm">
                         No chart data available right now.
                     </div>
                 ) : (
@@ -1446,8 +1456,8 @@ function SecondaryGlobalChart({
 
                                 return (
                                     <g key={i}>
-                                        <line x1={padding.left} x2={width - padding.right} y1={y} y2={y} stroke="#2a2a2b" strokeWidth="1" />
-                                        <text x={padding.left - 12} y={y + 4} textAnchor="end" fontSize="23" fill="#818384">
+                                        <line x1={padding.left} x2={width - padding.right} y1={y} y2={y} stroke="var(--border)" strokeWidth="1" />
+                                        <text x={padding.left - 12} y={y + 4} textAnchor="end" fontSize="23" fill="var(--text-muted)">
                                             {numberFormatter(value)}
                                         </text>
                                     </g>
@@ -1464,16 +1474,16 @@ function SecondaryGlobalChart({
 
                                 return (
                                     <g key={i}>
-                                        <line x1={x} x2={x} y1={padding.top} y2={height - padding.bottom} stroke="#202021" strokeWidth="1" />
-                                        <text x={x} y={height - 12} textAnchor="middle" fontSize="23" fill="#818384">
+                                        <line x1={x} x2={x} y1={padding.top} y2={height - padding.bottom} stroke="var(--border)" strokeWidth="1" />
+                                        <text x={x} y={height - 12} textAnchor="middle" fontSize="23" fill="var(--text-muted)">
                                             {formatChartTick(p.date, precision, hours)}
                                         </text>
                                     </g>
                                 );
                             })}
 
-                            <path d={leftPath} fill="none" stroke="#fe5301" strokeWidth="3" strokeLinecap="square" strokeLinejoin="bevel" />
-                            <path d={rightPath} fill="none" stroke="#4fbdba" strokeWidth="3" strokeLinecap="square" strokeLinejoin="bevel" />
+                            <path d={leftPath} fill="none" stroke="var(--accent)" strokeWidth="3" strokeLinecap="square" strokeLinejoin="bevel" />
+                            <path d={rightPath} fill="none" stroke="var(--accent-2)" strokeWidth="3" strokeLinecap="square" strokeLinejoin="bevel" />
                         </svg>
                     </div>
                 )}
@@ -1482,7 +1492,7 @@ function SecondaryGlobalChart({
     );
 }
 
-function GlobalChartsPanel({ compact }) {
+const GlobalChartsPanel = memo(function GlobalChartsPanel({ compact }) {
     return (
         <section className={`mx-auto px-4 mb-32 ${compact ? "mt-3" : "mt-6"}`} style={{ maxWidth: '730px' }}>
             <div className="grid gap-4 md:grid-cols-2">
@@ -1500,7 +1510,8 @@ function GlobalChartsPanel({ compact }) {
             </div>
         </section>
     );
-}
+});
+
 
 function usePaginatedFetch(type) {
     const [items, setItems] = useState([]);
@@ -1511,30 +1522,36 @@ function usePaginatedFetch(type) {
     const [pageStack, setPageStack] = useState([]);
     const [storedFilters, setStoredFilters] = useState({});
     const [arcticDown, setArcticDown] = useState(false);
+    const [pullpushDown, setPullpushDown] = useState(false);
+    const fetchIdRef = useRef(0);
 
-    const _fetch = useCallback(async (username, pagination, filters) => {
+    const _fetch = useCallback(async (username, pagination, filters, { bypassCache = false } = {}) => {
+        const fetchId = ++fetchIdRef.current;
         setLoading(true);
         setError(null);
         try {
-            const { items: data, sources: srcs, arcticDown: down } = await fetchBoth(username, type, pagination, filters);
+            const { items: data, sources: srcs, arcticDown: down, pullpushDown: ppDown } = await fetchBoth(username, type, pagination, filters, { bypassCache });
+            if (fetchId !== fetchIdRef.current) return data;
             setItems(data);
             setSources(srcs);
             setArcticDown(down);
+            setPullpushDown(ppDown);
             return data;
         } catch (err) {
+            if (fetchId !== fetchIdRef.current) return [];
             setError(err.message);
             setItems([]);
             return [];
         } finally {
-            setLoading(false);
+            if (fetchId === fetchIdRef.current) setLoading(false);
         }
     }, [type]);
 
-    const reset = useCallback(async (username, filters = {}) => {
+    const reset = useCallback(async (username, filters, { bypassCache = false } = {}) => {
         setPage(1);
         setPageStack([]);
         setStoredFilters(filters);
-        const data = await _fetch(username, {}, filters);
+        const data = await _fetch(username, {}, filters, { bypassCache });
         if (data.length > 0) {
             setPageStack([{ firstUtc: data[0].created_utc, lastUtc: data[data.length - 1].created_utc }]);
         }
@@ -1556,7 +1573,7 @@ function usePaginatedFetch(type) {
         if (pageStack.length <= 1) return;
         const newStack = pageStack.slice(0, -1);
         const prevEntry = newStack[newStack.length - 2];
-        const data = await _fetch(username, prevEntry ? { after: prevEntry.firstUtc } : {}, storedFilters);
+        const data = await _fetch(username, prevEntry ? { before: prevEntry.lastUtc } : {}, storedFilters);
         if (data.length > 0) {
             newStack[newStack.length - 1] = { firstUtc: data[0].created_utc, lastUtc: data[data.length - 1].created_utc };
         }
@@ -1565,209 +1582,204 @@ function usePaginatedFetch(type) {
         window.scrollTo({ top: 0, behavior: "smooth" });
     }, [_fetch, pageStack, storedFilters]);
 
-    return { items, sources, loading, error, page, arcticDown, reset, goNext, goPrev };
+    return { items, sources, loading, error, page, arcticDown, pullpushDown, reset, goNext, goPrev };
 }
 
-// ─── Dino Game (shown during maintenance) ──────────────────────────────────────
+// ─── Themes ───
 
-function DinoGame() {
-    const canvasRef = useRef(null);
+const THEMES = {
+  default: { bg: "#0d0d0d", accent: "#e6e4e1" },
+  matrix: { bg: "#000000", accent: "#00ff41" },
+  catppuccin: { bg: "#1e1e2e", accent: "#cba6f7" },
+  cyber: { bg: "#100a20", accent: "#fcee0a" },
+  mono: { bg: "#000000", accent: "#ffffff" },
+  gruvbox: { bg: "#282828", accent: "#ebdbb2" },
+  dracula: { bg: "#282a36", accent: "#ff79c6" },
+  nord: { bg: "#2e3440", accent: "#88c0d0" },
+  solarized: { bg: "#002b36", accent: "#859900" },
+  synthwave: { bg: "#2b213a", accent: "#f92aad" }
+};
+
+const ThemeSwitcher = () => {
+    const [theme, setTheme] = useState(() => localStorage.getItem("rosint-theme") || "default");
 
     useEffect(() => {
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-        const ctx = canvas.getContext("2d");
-        const W = canvas.width;
-        const H = canvas.height;
-        const GROUND_Y = H - 22;
-        const BG = "#1a1a1b";
-        const FG = "#ff4500";
-        const MUTED = "#818384";
-
-        let state = "ready"; // ready | running | over
-        const dino = { x: 28, w: 22, h: 26, y: GROUND_Y - 26, vy: 0, onGround: true };
-        let obstacles = [];
-        let speed = 5;
-        let score = 0;
-        let hi = Number(localStorage.getItem("dinoHi") || 0);
-        let spawnIn = 60;
-        let legFrame = 0;
-        let raf;
-        let last = performance.now(); // for frame-rate-independent motion
-
-        function resetGame() {
-            dino.y = GROUND_Y - dino.h;
-            dino.vy = 0;
-            dino.onGround = true;
-            obstacles = [];
-            speed = 5;
-            score = 0;
-            spawnIn = 60;
-            legFrame = 0;
-        }
-
-        function jump() {
-            if (state === "ready") { state = "running"; dino.vy = -13; dino.onGround = false; return; }
-            if (state === "over") { resetGame(); state = "running"; return; }
-            if (state === "running" && dino.onGround) { dino.vy = -13; dino.onGround = false; }
-        }
-
-        function spawn() {
-            const h = 18 + Math.random() * 22;
-            const w = 10 + Math.random() * 12;
-            obstacles.push({ x: W + 10, y: GROUND_Y - h, w, h });
-        }
-
-        function drawDino() {
-            const { x, y, w, h } = dino;
-            ctx.fillStyle = FG;
-            ctx.fillRect(x, y + 4, w - 8, h - 8);          // torso
-            ctx.fillRect(x + w - 9, y, 9, 10);             // head
-            ctx.fillRect(x - 3, y + 6, 4, 5);              // tail
-            // legs
-            ctx.fillRect(x + 2, y + h - 4, 3, 4);
-            ctx.fillRect(x + w - 13, y + h - 4, 3, 4);
-            if (state === "running" && dino.onGround) {
-                const step = Math.floor(legFrame / 6) % 2;
-                ctx.fillStyle = BG;
-                if (step === 0) ctx.fillRect(x + 2, y + h - 4, 3, 4);
-                else ctx.fillRect(x + w - 13, y + h - 4, 3, 4);
-                ctx.fillStyle = FG;
-            }
-            // eye
-            ctx.fillStyle = BG;
-            ctx.fillRect(x + w - 4, y + 2, 2, 2);
-            ctx.fillStyle = FG;
-        }
-
-        function drawCactus(o) {
-            ctx.fillStyle = FG;
-            ctx.fillRect(o.x + o.w / 2 - 2, o.y, 4, o.h);          // stem
-            ctx.fillRect(o.x, o.y + o.h * 0.35, 3, o.h * 0.4);     // left arm
-            ctx.fillRect(o.x + o.w - 3, o.y + o.h * 0.25, 3, o.h * 0.4); // right arm
-        }
-
-        function tick(now) {
-            // Frame-rate-independent timestep: how many 60fps-frames this frame
-            // represents. Clamped so a lag spike or 120Hz screen can't double the
-            // game speed or teleport the dino through an obstacle.
-            const f = Math.min(2.5, (now - last) / (1000 / 60));
-            last = now;
-
-            ctx.clearRect(0, 0, W, H);
-            ctx.fillStyle = BG;
-            ctx.fillRect(0, 0, W, H);
-
-            // ground
-            ctx.strokeStyle = MUTED;
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.moveTo(0, GROUND_Y + 0.5);
-            ctx.lineTo(W, GROUND_Y + 0.5);
-            ctx.stroke();
-
-            if (state === "running") {
-                dino.vy += 0.95 * f;
-                dino.y += dino.vy * f;
-                if (dino.y >= GROUND_Y - dino.h) { dino.y = GROUND_Y - dino.h; dino.vy = 0; dino.onGround = true; }
-
-                spawnIn -= f;
-                if (spawnIn <= 0) { spawn(); spawnIn = Math.max(45, 95 - speed * 3) + Math.random() * 45; }
-                obstacles.forEach((o) => { o.x -= speed * f; });
-                obstacles = obstacles.filter((o) => o.x + o.w > 0);
-
-                for (const o of obstacles) {
-                    if (dino.x < o.x + o.w && dino.x + dino.w > o.x &&
-                        dino.y < o.y + o.h && dino.y + dino.h > o.y) {
-                        state = "over";
-                        if (score > hi) { hi = Math.floor(score); localStorage.setItem("dinoHi", String(hi)); }
-                    }
-                }
-
-                score += 0.15 * f;
-                speed = Math.min(18, speed + 0.006 * f);
-                legFrame += f;
-            }
-
-            drawDino();
-            obstacles.forEach(drawCactus);
-
-            // score
-            ctx.fillStyle = MUTED;
-            ctx.font = "12px monospace";
-            ctx.textAlign = "right";
-            ctx.fillText(`HI ${String(Math.floor(hi)).padStart(5, "0")}  ${String(Math.floor(score)).padStart(5, "0")}`, W - 8, 16);
-            ctx.textAlign = "left";
-
-            if (state === "ready") {
-                ctx.fillStyle = MUTED;
-                ctx.font = "12px monospace";
-                ctx.textAlign = "center";
-                ctx.fillText("Press Space or tap to play", W / 2, H / 2);
-                ctx.textAlign = "left";
-            }
-            if (state === "over") {
-                ctx.fillStyle = FG;
-                ctx.font = "bold 14px monospace";
-                ctx.textAlign = "center";
-                ctx.fillText("G A M E   O V E R", W / 2, H / 2 - 4);
-                ctx.fillStyle = MUTED;
-                ctx.font = "11px monospace";
-                ctx.fillText("Press Space or tap to restart", W / 2, H / 2 + 14);
-                ctx.textAlign = "left";
-            }
-
-            raf = requestAnimationFrame(tick);
-        }
-
-        function onKey(e) {
-            const tag = e.target && e.target.tagName;
-            if (tag === "INPUT" || tag === "TEXTAREA") return; // don't hijack the search bar
-            if (e.code === "Space" || e.code === "ArrowUp") { e.preventDefault(); jump(); }
-        }
-        function onPointer(e) {
-            e.preventDefault();
-            if (document.activeElement && document.activeElement !== canvas) document.activeElement.blur();
-            canvas.focus();
-            jump();
-        }
-
-        window.addEventListener("keydown", onKey);
-        canvas.addEventListener("pointerdown", onPointer);
-        raf = requestAnimationFrame(tick);
-
-        return () => {
-            cancelAnimationFrame(raf);
-            window.removeEventListener("keydown", onKey);
-            canvas.removeEventListener("pointerdown", onPointer);
-        };
-    }, []);
+        const t = THEMES[theme] || THEMES.default;
+        document.documentElement.style.setProperty("--bg", t.bg);
+        // document.body.style.backgroundColor = t.bg;
+        document.documentElement.style.setProperty("--accent", t.accent);
+        localStorage.setItem("rosint-theme", theme);
+    }, [theme]);
 
     return (
-        <div className="mt-6 text-center">
-            <p className="text-[#818384] text-xs mb-2">Bored while you wait? Press Space or tap to jump.</p>
-            <canvas
-                ref={canvasRef}
-                width={600}
-                height={240}
-                tabIndex={0}
-                className="w-full max-w-md mx-auto rounded-lg border border-[#343536] cursor-pointer touch-none select-none focus:outline-none focus:border-[#ff4500]"
-            />
+        <div className="fixed top-4 right-4 z-50">
+            <select
+                value={theme}
+                onChange={(e) => setTheme(e.target.value)}
+                className="bg-[color:var(--bg)] text-[color:var(--accent)] border border-[color:var(--border)] rounded px-2 py-1 text-xs focus:outline-none focus:border-[color:var(--accent)] transition-colors cursor-pointer"
+            >
+                {Object.keys(THEMES).map(t => (
+                    <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>
+                ))}
+            </select>
         </div>
     );
-}
+};
 
-// ─── Main App ─────────────────────────────────────────────────────────────────
+
+const SearchBar = memo(function SearchBar({ defaultQuery, onSearch, initialLoading }) {
+    const [username, setUsername] = useState(defaultQuery);
+
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        const user = username.trim();
+        if (!user) return;
+        onSearch(user);
+    };
+
+    return (
+        <form onSubmit={handleSubmit} className="flex gap-2">
+            <div className="relative" style={{ flex: "1 1 0" }}>
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[color:var(--text-muted)] text-sm font-medium select-none">u/</span>
+                <input aria-label="Search user" type="text" value={username} onChange={(e) => setUsername(e.target.value)}
+                         placeholder="search for a user..."
+                         name="search_query_osint" id="search_query_osint" autoComplete="off" data-bwignore="true" data-lpignore="true" data-1p-ignore="true" spellCheck="false"
+                       className="w-full bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded pl-8 pr-3 py-2.5 text-sm text-[color:var(--text)] placeholder-[color:var(--text-muted)] focus:outline-none focus:border-[color:var(--accent)] transition-colors"
+                       autoFocus />
+            </div>
+            <button type="submit" disabled={!username.trim() || initialLoading}
+                    className="flex items-center gap-2 bg-[color:var(--accent)] text-[color:var(--bg)] border border-[color:var(--accent)] [&:not(:disabled)]:hover:bg-[color:var(--bg)] [&:not(:disabled)]:hover:!text-[color:var(--accent)] [&:not(:disabled)]:hover:stroke-[color:var(--accent)] disabled:opacity-50 disabled:cursor-not-allowed font-bold text-sm px-5 py-2.5 rounded transition-all flex-shrink-0">
+                {initialLoading ? <IconSpinner /> : <IconSearch />}
+                {initialLoading && "Searching…"}
+            </button>
+        </form>
+    );
+});
 
 const TABS = ["posts", "comments"];
 
-export default function App() {
-    const [username, setUsername] = useState("");
-    const [query, setQuery] = useState("");
-    const [activeTab, setActiveTab] = useState("posts");
-    const [searched, setSearched] = useState(
-        () => new URLSearchParams(window.location.search).has("dino")
+
+const AccountProfile = memo(function AccountProfile({ posts, comments }) {
+    const allItems = useMemo(() => [...posts, ...comments], [posts, comments]);
+
+    const topSubreddits = useMemo(() => {
+        const counts = {};
+        for (const item of allItems) {
+            const sub = item.subreddit || item.subreddit_name_prefixed?.replace(/^r\//, "") || "unknown";
+            counts[sub] = (counts[sub] || 0) + 1;
+        }
+        const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 8);
+        const max = sorted.length > 0 ? sorted[0][1] : 1;
+        return { list: sorted, max };
+    }, [allItems]);
+
+    const { heatmap, maxCount, tzHint } = useMemo(() => {
+        if (allItems.length === 0) return { heatmap: [], maxCount: 1, tzHint: null };
+        const matrix = Array.from({ length: 7 }, () => Array(24).fill(0));
+        const hourTotals = Array(24).fill(0);
+        
+        for (const item of allItems) {
+            if (!item.created_utc) continue;
+            const d = new Date(item.created_utc * 1000);
+            const day = d.getUTCDay();
+            const hr = d.getUTCHours();
+            matrix[day][hr]++;
+            hourTotals[hr]++;
+        }
+        
+        let max = 0;
+        for (let r = 0; r < 7; r++) {
+            for (let c = 0; c < 24; c++) {
+                if (matrix[r][c] > max) max = matrix[r][c];
+            }
+        }
+
+        // Find quietest 8-hour window
+        let minSum = Infinity;
+        let quietestStart = 0;
+        for (let start = 0; start < 24; start++) {
+            let sum = 0;
+            for (let i = 0; i < 8; i++) {
+                sum += hourTotals[(start + i) % 24];
+            }
+            if (sum < minSum) {
+                minSum = sum;
+                quietestStart = start;
+            }
+        }
+        
+        let offset = -0.5 - quietestStart;
+        if (offset < -12) offset += 24;
+        if (offset > 14) offset -= 24;
+        const estOffset = Math.round(offset);
+        
+        const activeStart = (quietestStart + 8) % 24;
+        const activeEnd = quietestStart;
+        
+        const tzHint = `Most active ${activeStart}:00–${activeEnd}:00 UTC · likely UTC${estOffset >= 0 ? '+' : ''}${estOffset}`;
+
+        return { heatmap: matrix, maxCount: max || 1, tzHint };
+    }, [allItems]);
+
+    if (allItems.length === 0) return null;
+
+    const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+    return (
+        <div className="flex flex-col md:flex-row gap-4 mb-4 mt-4">
+            <div className="flex-1 bg-[color:var(--bg-elevated)] border border-[color:var(--border)] rounded px-4 py-3 shadow-sm">
+                <h3 className="text-sm font-semibold text-[color:var(--text)] mb-3">Top Subreddits</h3>
+                <div className="flex flex-col gap-1.5">
+                    {topSubreddits.list.map(([sub, count]) => (
+                        <div key={sub} className="relative flex items-center justify-between text-[12px] h-6 z-0">
+                            <div className="absolute left-0 top-0 bottom-0 bg-[color:var(--accent)] opacity-20 rounded-sm -z-10" style={{ width: `${(count / topSubreddits.max) * 100}%` }}></div>
+                            <a href={`${REDDIT_BASE}/r/${sub}`} target="_blank" rel="noopener noreferrer" className="font-medium text-[color:var(--text)] hover:underline pl-1.5 truncate">
+                                r/{sub}
+                            </a>
+                            <span className="text-[color:var(--text-muted)] font-medium pr-1.5">{count}</span>
+                        </div>
+                    ))}
+                </div>
+            </div>
+            
+            <div className="flex-[2] bg-[color:var(--bg-elevated)] border border-[color:var(--border)] rounded px-4 py-3 shadow-sm overflow-x-auto">
+                <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-semibold text-[color:var(--text)]">Activity Fingerprint (UTC)</h3>
+                    {tzHint && <span className="text-[10px] text-[color:var(--text-muted)] italic">{tzHint} (est.)</span>}
+                </div>
+                <div className="min-w-[400px]">
+                    <div className="grid grid-cols-[30px_repeat(24,_1fr)] gap-0.5 mb-1 text-[9px] text-[color:var(--text-muted)] text-center">
+                        <div></div>
+                        {[...Array(24)].map((_, i) => (
+                            <div key={i}>{i % 4 === 0 ? i : ''}</div>
+                        ))}
+                    </div>
+                    {heatmap.map((row, r) => (
+                        <div key={r} className="grid grid-cols-[30px_repeat(24,_1fr)] gap-0.5 mb-0.5">
+                            <div className="text-[10px] text-[color:var(--text-muted)] pr-2 text-right leading-relaxed">{days[r]}</div>
+                            {row.map((count, c) => {
+                                const intensity = count === 0 ? 0 : Math.max(0.15, count / maxCount);
+                                return (
+                                    <div key={c} className="rounded-sm" style={{ 
+                                        backgroundColor: count === 0 ? 'var(--border)' : 'var(--accent)', 
+                                        opacity: count === 0 ? 0.2 : intensity 
+                                    }} title={`${days[r]} ${c}:00 UTC - ${count} items`}>
+                                        &nbsp;
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
     );
+});
+
+export default function App() {
+        const [query, setQuery] = useState("");
+    const [activeTab, setActiveTab] = useState("posts");
+    const [searched, setSearched] = useState(false);
     const [initialLoading, setInitialLoading] = useState(false);
     const [dateFrom, setDateFrom] = useState("");
     const [dateTo, setDateTo] = useState("");
@@ -1777,14 +1789,12 @@ export default function App() {
     const [sortOrder, setSortOrder] = useState("desc");
     const [showGraphs, setShowGraphs] = useState(false);
     const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
-    const [suggestionIdx, setSuggestionIdx] = useState(0);
-    const EXAMPLE_USERS = ["spez", "GallowBoob", "Unidan", "kn0thing"];
-
+    const [deletedOnly, setDeletedOnly] = useState(false);
+    const [showProfile, setShowProfile] = useState(false);
+        
     // ?dino in the URL forces the maintenance screen (which hosts the dino game)
     // so it can be tested without waiting for a real Arctic Shift outage.
-    const [arcticHealthDown, setArcticHealthDown] = useState(
-        () => new URLSearchParams(window.location.search).has("dino")
-    );
+    const [arcticHealthDown, setArcticHealthDown] = useState(false);
     const [bannerDismissed, setBannerDismissed] = useState(false);
     const [searchBlocked, setSearchBlocked] = useState(false);
 
@@ -1792,9 +1802,11 @@ export default function App() {
     const comments = usePaginatedFetch("comments");
 
     const arcticIsDown = arcticHealthDown || posts.arcticDown || comments.arcticDown;
+    const bothSourcesFailed = arcticHealthDown || ((posts.arcticDown && posts.pullpushDown) || (comments.arcticDown && comments.pullpushDown));
+    const isOutageTakeover = bothSourcesFailed && posts.items.length === 0 && comments.items.length === 0;
 
     useEffect(() => {
-        safeFetch(`${ARCTIC}/api/posts/search?author=spez&limit=1`)
+        safeFetch(`${ARCTIC}/api/posts/search?author=spez&limit=1`, { bypassCache: true })
             .then(({ ok }) => { if (!ok) setArcticHealthDown(true); });
     }, []);
 
@@ -1804,16 +1816,18 @@ export default function App() {
             : "Rosint – Search Deleted Reddit Posts";
     }, [searched, query]);
 
+
+
     useEffect(() => {
-        if (searched) return;
-        const id = setInterval(() => setSuggestionIdx(i => (i + 1) % 4), 2500);
-        return () => clearInterval(id);
-    }, [searched]);
+        if (searched && query && !initialLoading) {
+            searchUser(query, { push: false });
+        }
+    }, [dateFrom, dateTo, showNsfw]);
 
     const buildFilters = useCallback(() => {
         const f = {};
         if (dateFrom) f.dateFrom = Math.floor(new Date(dateFrom).getTime() / 1000);
-        if (dateTo) f.dateTo = Math.floor(new Date(dateTo).getTime() / 1000);
+        if (dateTo) f.dateTo = Math.floor(new Date(dateTo).getTime() / 1000) + 86399;
         if (subreddit.trim()) f.subreddit = subreddit.trim();
         if (!showNsfw) f.over18 = false;
         return f;
@@ -1821,23 +1835,10 @@ export default function App() {
 
     const hasFilters = dateFrom || dateTo || subreddit.trim() || !showNsfw;
 
-    useEffect(() => {
-        const params = new URLSearchParams(window.location.search);
-        const u = normalizeUsername(params.get("u"));
-        if (!u) return;
-        setUsername(u);
-        setQuery(u);
-        setSearched(true);
-        isBlockedUser(u).then((blocked) => {
-            if (blocked) { setSearchBlocked(true); return; }
-            setSearchBlocked(false);
-            setInitialLoading(true);
-            Promise.all([posts.reset(u, {}), comments.reset(u, {})]).then(() => {
-                setInitialLoading(false);
-            });
-        });
-    }, []);
+    
 
+    const { reset: resetPosts } = posts;
+    const { reset: resetComments } = comments;
     const searchUser = useCallback(async (rawUser, { push = true } = {}) => {
         const user = normalizeUsername(rawUser);
         if (!user) return;
@@ -1846,48 +1847,47 @@ export default function App() {
             url.searchParams.set("u", user);
             window.history.pushState({}, "", url);
         }
-        setUsername(user);
-        setQuery(user);
+                setQuery(user);
         setSearched(true);
         if (await isBlockedUser(user)) { setSearchBlocked(true); return; }
         setSearchBlocked(false);
         setInitialLoading(true);
         const filters = buildFilters();
-        await Promise.all([posts.reset(user, filters), comments.reset(user, filters)]);
+        await Promise.all([resetPosts(user, filters), resetComments(user, filters)]);
         setAppliedSubreddit(subreddit.trim());
         setInitialLoading(false);
-    }, [buildFilters, posts, comments, subreddit]);
+    }, [buildFilters, resetPosts, resetComments, subreddit]);
+
+    const searchUserRef2 = useRef(searchUser);
+    useEffect(() => { searchUserRef2.current = searchUser; });
+    useEffect(() => {
+        const u = normalizeUsername(new URLSearchParams(window.location.search).get("u"));
+        if (u) searchUserRef2.current(u, { push: false });
+    }, []);
 
     // Browser back/forward: re-run the search in the URL, or return to the landing page
     useEffect(() => {
         const onPop = () => {
             const u = normalizeUsername(new URLSearchParams(window.location.search).get("u"));
             if (u) {
-                searchUser(u, { push: false });
+                searchUserRef2.current(u, { push: false });
             } else {
                 setSearched(false);
-                setUsername("");
                 setQuery("");
             }
         };
         window.addEventListener("popstate", onPop);
         return () => window.removeEventListener("popstate", onPop);
-    }, [searchUser]);
+    }, []);
 
-    const handleSubmit = useCallback(async (e) => {
-        e.preventDefault();
-        const user = username.trim();
-        if (!user) return;
-        await searchUser(user);
-    }, [username, searchUser]);
-
+    
     const handleRetry = useCallback(async () => {
         if (!query) return;
         setInitialLoading(true);
         const filters = buildFilters();
-        await Promise.all([posts.reset(query, filters), comments.reset(query, filters)]);
+        await Promise.all([resetPosts(query, filters, { bypassCache: true }), resetComments(query, filters, { bypassCache: true })]);
         setInitialLoading(false);
-    }, [query, buildFilters, posts, comments]);
+    }, [query, buildFilters, resetPosts, resetComments]);
 
     const clearFilters = useCallback(async () => {
         setDateFrom("");
@@ -1897,159 +1897,38 @@ export default function App() {
         setAppliedSubreddit("");
         if (!query) return;
         setInitialLoading(true);
-        await Promise.all([posts.reset(query, {}), comments.reset(query, {})]);
+        await Promise.all([resetPosts(query, {}), resetComments(query, {})]);
         setInitialLoading(false);
-    }, [query, posts, comments]);
+    }, [query, resetPosts, resetComments]);
 
     const active = activeTab === "posts" ? posts : comments;
     const allSources = [...new Set([...posts.sources, ...comments.sources])];
 
     return (
-        <div className="min-h-screen bg-[#0d0d0d] text-[#d7dadc]" style={{ fontFamily: "'Sora', sans-serif" }}>
-            <style>{`
-                @keyframes face-in {
-                    0%   { transform: translate(-50%, -50%) scale(0.1); opacity: 0; }
-                    20%  { opacity: 1; }
-                    65%  { transform: translate(-50%, -50%) scale(1.15); }
-                    80%  { transform: translate(-50%, -50%) scale(0.94); }
-                    100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
-                }
-
-                @keyframes face-bob {
-                    0%,100% { transform: translate(-50%, -52%); }
-                    50%     { transform: translate(-50%, -48%); }
-                }
-
-                @keyframes blush-pulse {
-                    0%,100% { opacity: 0.55; }
-                    50%     { opacity: 0.85; }
-                }
-
-                @keyframes eye-blink {
-                    0%,90%,100% { transform: scaleY(1); }
-                    95%         { transform: scaleY(0.08); }
-                }
-
-                .anime-face-svg {
-                    width: 36px;
-                    height: 36px;
-                    display: block;
-                    opacity: 0;
-                    transform: translate(-50%, -50%) scale(0.1);
-                    pointer-events: none;
-                    position: absolute;
-                    left: 20px;
-                    top: 50%;
-                    z-index: 10;
-                    overflow: visible;
-                }
-
-                .logo-btn:hover .anime-face-svg {
-                    animation:
-                        face-in 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) forwards,
-                        face-bob 2.2s ease-in-out 0.55s infinite;
-                }
-
-                .logo-btn:hover .face-blush {
-                    animation: blush-pulse 2s ease-in-out 0.55s infinite;
-                }
-
-                .logo-btn:hover .face-eye-l,
-                .logo-btn:hover .face-eye-r {
-                    transform-origin: center;
-                    animation: eye-blink 3.5s ease-in-out 1s infinite;
-                }
-            `}</style>
-
-            <header className="border-b border-[#1c1c1d] bg-[#0d0d0d] sticky top-0 z-20">
-                <div className="max-w-3xl mx-auto px-4 py-3 flex items-center gap-3">
-                    <button
-                        aria-label="Go to homepage"
-                        onClick={() => { setSearched(false); setUsername(""); setQuery(""); setDateFrom(""); setDateTo(""); setSubreddit(""); setShowNsfw(true); window.history.pushState({}, "", "/"); }}
-                        className="logo-btn group flex items-center gap-2 relative"
-                    >
-                        <picture>
-                            <source srcSet="/bot.webp" type="image/webp" />
-                            <img src="/bot.png" alt="logo" width="40" height="40" className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
-                        </picture>
-                        <span className="text-[22px] font-semibold tracking-tight text-white whitespace-nowrap max-w-0 overflow-hidden opacity-0 group-hover:max-w-xs group-hover:opacity-100 transition-all duration-700 ease-out">
-                            reddit<span className="text-[#fe5301]">OSINT</span>
-                        </span>
-                        <span className="text-[11px] text-[#818384] border border-[#343536] rounded px-1.5 py-0.5 flex-shrink-0">v1.0</span>
-                        <AnimeFace />
-                    </button>
-                    <div className="flex-1 flex justify-end items-center gap-4">
-                        <a href="/changelog.html" target="_blank" rel="noopener noreferrer"
-                           title="info"
-                           className="text-[11px] text-[#818384] hover:text-[#d7dadc] border border-[#343536] hover:border-[#818384] rounded px-2.5 py-1 transition-colors">
-                            info
-                        </a>
-                        <a href="https://github.com/zuxu4n/RedditOsint" target="_blank" rel="noopener noreferrer"
-                           title="GitHub" className="text-[#818384] hover:text-white transition-colors">
-                            <svg className="w-7 h-7" viewBox="0 0 24 24" fill="currentColor">
-                                <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/>
-                            </svg>
-                        </a>
-                    </div>
-                </div>
-            </header>
+        <div className="min-h-screen bg-[color:var(--bg)] text-[color:var(--text)]">
+            <ThemeSwitcher />
+            
 
             <main>
                 {arcticIsDown && !bannerDismissed && !searched && (
-                    <div className="bg-amber-900/40 border-b border-amber-700/50 px-4 py-2 flex items-center justify-between gap-3">
-                        <p className="text-[12px] text-amber-300">
+                    <div className="bg-[color:var(--border)] border-b border-[color:var(--border-hover)] px-4 py-2 flex items-center justify-between gap-3">
+                        <p className="text-[12px] text-[color:var(--accent)]">
                             <span className="font-semibold">Search is briefly unavailable.</span>
                             {" "}This is often just a short hiccup, so retrying in a few seconds usually works. If it keeps failing it may be down for a couple of hours.
                         </p>
                         <button onClick={() => setBannerDismissed(true)}
                                 aria-label="Dismiss"
-                                className="text-amber-500 hover:text-amber-300 flex-shrink-0 transition-colors text-lg leading-none">
+                                className="text-[color:var(--text-muted)] hover:text-[color:var(--accent)] flex-shrink-0 transition-colors text-lg leading-none">
                             ×
                         </button>
                     </div>
                 )}
                 <div className={`max-w-3xl mx-auto px-4 transition-all duration-300 ${searched ? "pt-6" : "pt-20"}`}>
-                    {!searched && (
-                        <div className="text-center mb-2">
-                            <h1 className="sr-only">Rosint — Search deleted Reddit posts, removed comments, and private profiles</h1>
-                            <picture>
-                                <source srcSet="/rosintTitle.webp" type="image/webp" />
-                                <img src="/rosintTitle.png" alt="redditOSINT" width="578" height="284" fetchPriority="high" className="mx-auto mb-4" style={{ width: "578px", maxWidth: "90vw" }} />
-                            </picture>
-                            <p className="text-sm text-[#cccccc]">Search any Reddit username to view their <u>deleted posts</u>, <u>removed comments</u>, and <u>private profiles</u>.</p>
-                        </div>
-                    )}
+                    
 
                     <div className="relative mx-auto" style={{ maxWidth: searched ? '100%' : '690px' }}>
-                        {!searched && (
-                            <div className="absolute right-full top-1/2 -translate-y-1/2 mr-4 hidden sm:block" style={{ whiteSpace: 'nowrap' }}>
-                                <button
-                                    type="button"
-                                    onClick={() => searchUser(EXAMPLE_USERS[suggestionIdx])}
-                                    className="relative bg-[#1a1a1b] border border-[#343536] hover:border-[#ff4500] rounded-lg px-3 py-2 text-[12px] text-[#818384] hover:text-[#d7dadc] transition-colors group"
-                                >
-                                    Try <span className="text-[#ff4500]">u/{EXAMPLE_USERS[suggestionIdx]}</span>
-                                    {/* tail border */}
-                                    <span className="absolute left-full top-1/2 -translate-y-1/2 border-l-[#343536] group-hover:border-l-[#ff4500] transition-colors" style={{ width: 0, height: 0, borderTop: '6px solid transparent', borderBottom: '6px solid transparent', borderLeftWidth: '8px', borderLeftStyle: 'solid' }} />
-                                    {/* tail fill */}
-                                    <span className="absolute top-1/2 -translate-y-1/2" style={{ left: 'calc(100% - 1px)', width: 0, height: 0, borderTop: '5px solid transparent', borderBottom: '5px solid transparent', borderLeftWidth: '7px', borderLeftStyle: 'solid', borderLeftColor: '#1a1a1b' }} />
-                                </button>
-                            </div>
-                        )}
-                        <form onSubmit={handleSubmit} className="flex gap-2">
-                            <div className="relative" style={{ flex: "1 1 0" }}>
-                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#cccccc] text-sm font-medium select-none">u/</span>
-                                <input aria-label="Reddit username" type="text" value={username} onChange={(e) => setUsername(e.target.value)}
-                                       placeholder="username"
-                                       className="w-full bg-[#1a1a1b] border border-[#343536] rounded pl-8 pr-3 py-2.5 text-sm text-white placeholder-[#818384] focus:outline-none focus:border-[#ff4500] transition-colors"
-                                       autoFocus />
-                            </div>
-                            <button type="submit" disabled={!username.trim() || initialLoading}
-                                    className="flex items-center gap-2 bg-[#ff4500] hover:bg-[#e03d00] disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium text-sm px-5 py-2.5 rounded transition-colors flex-shrink-0">
-                                {initialLoading ? <IconSpinner /> : <IconSearch />}
-                                {initialLoading && "Searching…"}
-                            </button>
-                        </form>
+                        
+                        <SearchBar key={query} defaultQuery={query} onSearch={searchUser} initialLoading={initialLoading} />
                     </div>
 
                     {!searched && (
@@ -2057,7 +1936,7 @@ export default function App() {
                             <button
                                 type="button"
                                 onClick={() => setShowAdvancedFilters(f => !f)}
-                                className="flex items-center gap-1.5 text-[12px] text-[#818384] hover:text-[#d7dadc] transition-colors"
+                                className="flex items-center gap-1.5 text-[12px] text-[color:var(--text-muted)] hover:text-[color:var(--accent)] transition-colors"
                             >
                                 Advanced filters
                                 <svg aria-hidden="true" className={`w-3 h-3 transition-transform duration-200 ${showAdvancedFilters ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2067,7 +1946,7 @@ export default function App() {
                             <button
                                 type="button"
                                 onClick={() => setShowGraphs(g => !g)}
-                                className="flex items-center gap-1.5 ml-auto text-[12px] text-[#818384] hover:text-[#d7dadc] transition-colors"
+                                className="flex items-center gap-1.5 ml-auto text-[12px] text-[color:var(--text-muted)] hover:text-[color:var(--accent)] transition-colors"
                             >
                                 {showGraphs ? "Hide graphs" : "Show graphs"}
                                 <svg aria-hidden="true" className={`w-3 h-3 transition-transform duration-200 ${showGraphs ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2077,33 +1956,43 @@ export default function App() {
                             {showAdvancedFilters && (
                                 <div className="w-full flex flex-col gap-2 mt-1 items-start">
                                     <div className="flex flex-wrap items-center gap-2">
-                                        <span className="text-[11px] text-[#818384]">From</span>
+                                        <span className="text-[11px] text-[color:var(--text-muted)]">From</span>
                                         <input
                                             aria-label="Date from"
                                             type="date"
                                             value={dateFrom}
                                             onChange={(e) => setDateFrom(e.target.value)}
-                                            className="bg-[#1a1a1b] border border-[#343536] rounded-sm px-2 py-1 text-[12px] text-[#d7dadc] focus:outline-none focus:border-[#ff4500] transition-colors [color-scheme:dark]"
+                                            className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-2 h-7 py-0 leading-[26px] text-[12px] text-[color:var(--text)] focus:outline-none focus:border-[color:var(--accent)] transition-colors [color-scheme:dark] block"
                                         />
-                                        <span className="text-[11px] text-[#818384]">To</span>
+                                        <span className="text-[11px] text-[color:var(--text-muted)]">To</span>
                                         <input
                                             aria-label="Date to"
                                             type="date"
                                             value={dateTo}
                                             onChange={(e) => setDateTo(e.target.value)}
-                                            className="bg-[#1a1a1b] border border-[#343536] rounded-sm px-2 py-1 text-[12px] text-[#d7dadc] focus:outline-none focus:border-[#ff4500] transition-colors [color-scheme:dark]"
+                                            className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-2 h-7 py-0 leading-[26px] text-[12px] text-[color:var(--text)] focus:outline-none focus:border-[color:var(--accent)] transition-colors [color-scheme:dark] block"
                                         />
                                         <div className="flex items-center gap-2 w-full sm:w-auto">
-                                        <span className="text-[11px] text-[#818384]">in</span>
+                                        <span className="text-[11px] text-[color:var(--text-muted)]">in</span>
                                         <div className="relative">
-                                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#818384] text-sm font-medium select-none">r/</span>
+                                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[color:var(--text-muted)] text-sm font-medium select-none">r/</span>
                                             <input
                                                 aria-label="Filter by subreddit"
                                                 type="text"
                                                 value={subreddit}
                                                 onChange={(e) => setSubreddit(e.target.value.replace(/^r\//, ""))}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter' && searched && query && !initialLoading) {
+                                                        searchUser(query, { push: false });
+                                                    }
+                                                }}
+                                                onBlur={() => {
+                                                    if (searched && query && !initialLoading) {
+                                                        searchUser(query, { push: false });
+                                                    }
+                                                }}
                                                 placeholder="subreddit"
-                                                className="bg-[#1a1a1b] border border-[#343536] rounded pl-8 pr-3 py-1 text-[12px] text-white placeholder-[#818384] focus:outline-none focus:border-[#ff4500] transition-colors"
+                                                className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded pl-8 pr-3 py-1 text-[12px] text-[color:var(--text)] placeholder-[color:var(--text-muted)] focus:outline-none focus:border-[color:var(--accent)] transition-colors"
                                             />
                                         </div>
                                         </div>
@@ -2112,9 +2001,9 @@ export default function App() {
                                                 type="checkbox"
                                                 checked={showNsfw}
                                                 onChange={(e) => setShowNsfw(e.target.checked)}
-                                                className="w-3.5 h-3.5 accent-[#ff4500] cursor-pointer"
+                                                className="w-3.5 h-3.5 accent-[color:var(--accent)] cursor-pointer"
                                             />
-                                            <span className="text-[11px] text-[#818384]">Show NSFW</span>
+                                            <span className="text-[11px] text-[color:var(--text-muted)]">Show NSFW</span>
                                         </label>
                                     </div>
                                 </div>
@@ -2127,38 +2016,37 @@ export default function App() {
 
                 {searched && searchBlocked && (
                     <div className="max-w-3xl mx-auto px-4 mt-10 pb-16">
-                        <div className="border border-[#343536] bg-[#1a1a1b] rounded-md px-6 py-8 text-center">
-                            <p className="text-[#d7dadc] text-base font-medium mb-2">
+                        <div className="border border-[color:var(--border-hover)] bg-[color:var(--bg)] rounded-md px-6 py-8 text-center">
+                            <p className="text-[color:var(--text)] text-base font-medium mb-2">
                                 Results unavailable for u/{query}
                             </p>
-                            <p className="text-[#818384] text-sm leading-relaxed">
+                            <p className="text-[color:var(--text-muted)] text-sm leading-relaxed">
                                 This username has been removed from search at the account holder's request.
                             </p>
                         </div>
                     </div>
                 )}
 
-                {searched && !searchBlocked && arcticIsDown && (
+                {searched && !searchBlocked && isOutageTakeover && (
                     <div className="max-w-md mx-auto px-4 mt-12 pb-16">
-                        <div className="border border-[#3a3320] bg-[#1a1a1b] rounded-xl px-7 pt-10 pb-5 text-center shadow-lg shadow-black/30">
-                            <p className="text-[#f3f4f3] text-lg font-semibold mb-2">
+                        <div className="border border-[color:var(--border-hover)] bg-[color:var(--bg)] rounded-xl px-7 pt-10 pb-5 text-center shadow-lg shadow-black/30">
+                            <p className="text-[color:var(--text)] text-lg font-semibold mb-2">
                                 Give it another try in a moment
                             </p>
-                            <p className="text-[#a8a8a9] text-sm leading-relaxed">
+                            <p className="text-[color:var(--text)] text-sm leading-relaxed">
                                 Search is briefly unavailable. This is often just a short hiccup that clears in a few seconds, so try again shortly. If it keeps failing, it may be down for a couple of hours, so check back later.
                             </p>
-                            <DinoGame />
-                        </div>
+                                                    </div>
                     </div>
                 )}
 
-                {searched && !searchBlocked && !arcticIsDown && (
+                {searched && !searchBlocked && !isOutageTakeover && (
                     <div className="max-w-3xl mx-auto px-4 mt-6 pb-16">
                         {!initialLoading && (
                             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
-                                <div className="text-[12px] text-[#818384] pt-1">
+                                <div className="text-[12px] text-[color:var(--text-muted)] pt-1">
                                     <p>
-                                        Results for <span className="text-[#ff4500] font-medium">u/{query}</span>
+                                        Results for <span className="text-[color:var(--accent)] font-medium">u/{query}</span>
                                         {allSources.length > 0 && (
                                             <> · {allSources.map((src, i) => {
                                                 const url = src === "Arctic Shift"
@@ -2166,9 +2054,9 @@ export default function App() {
                                                     : "https://pullpush.io/";
                                                 return (
                                                     <span key={src}>
-                                                        {i > 0 && <span className="text-[#818384]"> + </span>}
+                                                        {i > 0 && <span className="text-[color:var(--text-muted)]"> + </span>}
                                                         <a href={url} target="_blank" rel="noopener noreferrer"
-                                                           className="text-white hover:underline transition-colors">
+                                                           className="text-[color:var(--text)] hover:underline transition-colors">
                                                             {src}
                                                         </a>
                                                     </span>
@@ -2177,18 +2065,18 @@ export default function App() {
                                         )}
                                     </p>
                                     {appliedSubreddit && (
-                                        <p className="text-[#818384] mt-0.5">in <span className="text-[#ff4500] font-medium">r/{appliedSubreddit}</span></p>
+                                        <p className="text-[color:var(--text-muted)] mt-0.5">in <span className="text-[color:var(--accent)] font-medium">r/{appliedSubreddit}</span></p>
                                     )}
                                 </div>
                                 <div className="flex flex-wrap items-center gap-2 ml-auto">
-                                    <span className="text-[11px] text-[#818384]">From</span>
+                                    <span className="text-[11px] text-[color:var(--text-muted)]">From</span>
                                     <input aria-label="Date from" type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
-                                           className="bg-[#1a1a1b] border border-[#343536] rounded-sm px-2 py-1 text-[12px] text-[#d7dadc] focus:outline-none focus:border-[#ff4500] transition-colors [color-scheme:dark]" />
-                                    <span className="text-[11px] text-[#818384]">To</span>
+                                           className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-2 h-7 py-0 leading-[26px] text-[12px] text-[color:var(--text)] focus:outline-none focus:border-[color:var(--accent)] transition-colors [color-scheme:dark] block" />
+                                    <span className="text-[11px] text-[color:var(--text-muted)]">To</span>
                                     <input aria-label="Date to" type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
-                                           className="bg-[#1a1a1b] border border-[#343536] rounded-sm px-2 py-1 text-[12px] text-[#d7dadc] focus:outline-none focus:border-[#ff4500] transition-colors [color-scheme:dark]" />
+                                           className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-2 h-7 py-0 leading-[26px] text-[12px] text-[color:var(--text)] focus:outline-none focus:border-[color:var(--accent)] transition-colors [color-scheme:dark] block" />
                                     <button onClick={clearFilters} disabled={initialLoading}
-                                            className="px-3 py-1 text-[12px] font-medium text-[#818384] hover:text-[#d7dadc] border border-[#343536] hover:border-[#818384] disabled:opacity-50 rounded-sm transition-colors">
+                                            className="px-3 h-7 text-[11px] font-medium text-[color:var(--text-muted)] hover:text-[color:var(--accent)] border border-[color:var(--border-hover)] hover:border-[color:var(--text-muted)] disabled:opacity-50 rounded transition-colors">
                                         Clear
                                     </button>
                                 </div>
@@ -2197,8 +2085,9 @@ export default function App() {
 
                         {/* key remounts the card per user so stale stats never flash */}
                         {!initialLoading && <UserSummary key={query} query={query} />}
+                        {!initialLoading && showProfile && <AccountProfile posts={posts.items} comments={comments.items} />}
 
-                        <div className="flex items-center border-b border-[#1c1c1d] mb-4">
+                        <div className="flex items-center border-b border-[color:var(--border)] mb-4">
                             <div className="flex flex-1">
                                 {TABS.map((tab) => (
                                     <TabBtn key={tab}
@@ -2213,14 +2102,14 @@ export default function App() {
                                 {!initialLoading && !active.loading && active.items.length > 0 && (
                                     <>
                                         <button onClick={() => active.goPrev(query)} disabled={active.page <= 1 || active.loading} aria-label="Previous page"
-                                                className="flex items-center justify-center w-7 h-7 rounded-sm border border-[#343536] hover:border-[#818384] text-[#d7dadc] transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+                                                className="flex items-center justify-center w-7 h-7 rounded-sm border border-[color:var(--border-hover)] hover:border-[color:var(--text-muted)] text-[color:var(--text)] transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
                                             <IconChevronLeft />
                                         </button>
-                                        <span className="text-[11px] text-[#818384]">
+                                        <span className="text-[11px] text-[color:var(--text-muted)]">
                                             {active.loading ? <IconSpinner /> : `Page ${active.page}`}
                                         </span>
                                         <button onClick={() => active.goNext(query)} disabled={active.items.length < LIMIT || active.loading} aria-label="Next page"
-                                                className="flex items-center justify-center w-7 h-7 rounded-sm border border-[#343536] hover:border-[#818384] text-[#d7dadc] transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+                                                className="flex items-center justify-center w-7 h-7 rounded-sm border border-[color:var(--border-hover)] hover:border-[color:var(--text-muted)] text-[color:var(--text)] transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
                                             <IconChevronRight />
                                         </button>
                                     </>
@@ -2230,31 +2119,79 @@ export default function App() {
 
                         {!initialLoading && (
                             <div className="flex items-start justify-between gap-3 mb-3">
-                                <div className="text-[11px] text-[#818384] leading-relaxed">
-                                    Archive coverage may vary.{" "}
+                                <div className="text-[11px] text-[color:var(--text-muted)] leading-relaxed">
                                     <a href={`https://www.reddit.com/search/?q=author%3A%22${query}%22&type=${activeTab}`}
-                                       target="_blank" rel="noopener noreferrer" className="text-[#ff4500] hover:underline">
+                                       target="_blank" rel="noopener noreferrer" className="text-[color:var(--accent)] hover:underline">
                                         Click here
                                     </a>{" "}
                                     to search Reddit directly for the most recent activity.
                                     <br />
-                                    <span className="text-[#5a5a5b]">Note: Doing so will not show deleted posts or comments.</span>
+                                    <span className="text-[color:var(--text-faint)]">Note: Doing so will not show deleted posts or comments.</span>
                                 </div>
-                                <select
+                                
+                                <div className="flex items-center gap-2">
+                                    <label className="flex items-center gap-1.5 cursor-pointer select-none border border-[color:var(--border-hover)] rounded px-2 h-7 bg-[color:var(--bg)] transition-colors hover:border-[color:var(--text-muted)] flex-shrink-0">
+                                        <input
+                                            type="checkbox"
+                                            checked={deletedOnly}
+                                            onChange={(e) => setDeletedOnly(e.target.checked)}
+                                            className="w-3 h-3 accent-[color:var(--accent)] cursor-pointer"
+                                        />
+                                        <span className="text-[11px] text-[color:var(--text-muted)] whitespace-nowrap">Deleted-only</span>
+                                    </label>
+                                    <div className="flex bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded overflow-hidden h-7">
+                                        <button
+                                            onClick={() => downloadFile(`rosint_${query}_${activeTab}.json`, JSON.stringify(active.items, null, 2), "application/json")}
+                                            className="px-2 h-full text-[11px] text-[color:var(--text-muted)] hover:text-[color:var(--accent)] hover:bg-[color:var(--border-hover)] transition-colors border-r border-[color:var(--border-hover)]"
+                                            title="Export the currently loaded page as JSON"
+                                        >
+                                            JSON
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                const cols = ["id", "created_utc", "subreddit", "author", "score", "permalink", "text", "removed", "deleted"];
+                                                const csv = [cols.join(",")].concat(
+                                                    active.items.map(item => {
+                                                        const status = getStatus(item, activeTab);
+                                                        const text = activeTab === "posts" ? item.title : item.body;
+                                                        const vals = [
+                                                            item.id,
+                                                            item.created_utc,
+                                                            item.subreddit,
+                                                            item.author,
+                                                            item.score || 0,
+                                                            item.permalink,
+                                                            text ? `"${text.replace(/"/g, '""').replace(/\n/g, " ")}"` : "",
+                                                            status.removed,
+                                                            status.deleted
+                                                        ];
+                                                        return vals.join(",");
+                                                    })
+                                                ).join("\n");
+                                                downloadFile(`rosint_${query}_${activeTab}.csv`, csv, "text/csv");
+                                            }}
+                                            className="px-2 h-full text-[11px] text-[color:var(--text-muted)] hover:text-[color:var(--accent)] hover:bg-[color:var(--border-hover)] transition-colors"
+                                            title="Export the currently loaded page as CSV"
+                                        >
+                                            CSV
+                                        </button>
+                                    </div>
+                                    <select
                                     aria-label="Sort order"
                                     value={sortOrder}
                                     onChange={(e) => setSortOrder(e.target.value)}
-                                    className="flex-shrink-0 text-[11px] text-[#818384] bg-[#1a1a1b] border border-[#343536] hover:border-[#818384] rounded px-2 py-1 transition-colors focus:outline-none focus:border-[#fe5301] cursor-pointer"
+                                    className="flex-shrink-0 text-[11px] text-[color:var(--text-muted)] bg-[color:var(--bg)] border border-[color:var(--border-hover)] hover:border-[color:var(--text-muted)] rounded px-2 h-7 py-0 leading-[26px] transition-colors focus:outline-none focus:border-[color:var(--accent)] cursor-pointer block"
                                 >
                                     <option value="desc">Newest</option>
                                     <option value="asc">Oldest</option>
-                                    <option value="top">Top</option>
+                                    
                                 </select>
+                                </div>
                             </div>
                         )}
 
                         {initialLoading || active.loading ? (
-                            <div className="flex items-center justify-center py-20 gap-3 text-[#818384]">
+                            <div className="flex items-center justify-center py-20 gap-3 text-[color:var(--text-muted)]">
                                 <IconSpinner />
                                 <span className="text-sm">Fetching from Arctic Shift + PullPush…</span>
                             </div>
@@ -2267,11 +2204,17 @@ export default function App() {
                                 query={query}
                                 onSwitchTab={() => setActiveTab(activeTab === "posts" ? "comments" : "posts")}
                                 onClearFilters={clearFilters}
+                                deletedOnly={deletedOnly}
                             />
                         ) : (
                             <>
                                 <div className="flex flex-col gap-2">
                                     {activeTab === "posts" && [...posts.items]
+                                        .filter(post => {
+                                            if (!deletedOnly) return true;
+                                            const s = getStatus(post, "posts");
+                                            return s.removed || s.deleted;
+                                        })
                                         .sort((a, b) =>
                                             sortOrder === "desc" ? b.created_utc - a.created_utc :
                                                 sortOrder === "asc" ? a.created_utc - b.created_utc :
@@ -2283,6 +2226,11 @@ export default function App() {
                                             </CardBoundary>
                                         ))}
                                     {activeTab === "comments" && [...comments.items]
+                                        .filter(comment => {
+                                            if (!deletedOnly) return true;
+                                            const s = getStatus(comment, "comments");
+                                            return s.removed || s.deleted;
+                                        })
                                         .sort((a, b) =>
                                             sortOrder === "desc" ? b.created_utc - a.created_utc :
                                                 sortOrder === "asc" ? a.created_utc - b.created_utc :
@@ -2309,12 +2257,12 @@ export default function App() {
             </main>
 
             {!searched && (
-                <footer className="fixed bottom-0 left-0 right-0 z-10 py-2 bg-[#0d0d0d] border-t border-[#1c1c1d]" style={{ paddingBottom: 'calc(0.5rem + env(safe-area-inset-bottom))' }}>
-                    <p className="text-[11px] text-[#3a3a3b] leading-relaxed text-center">
+                <footer className="fixed bottom-0 left-0 right-0 z-10 py-2 bg-[color:var(--bg)] border-t border-[color:var(--border)]" style={{ paddingBottom: 'calc(0.5rem + env(safe-area-inset-bottom))' }}>
+                    <p className="text-[11px] text-[color:var(--text-faint)] leading-relaxed text-center">
                         RedditOSINT is a free tool to search deleted Reddit posts, removed comments, and private Reddit accounts using open-source archives including{" "}
-                        <a href="https://github.com/ArthurHeitmann/arctic_shift" target="_blank" rel="noopener noreferrer" className="text-[#3a3a3b] hover:underline transition-colors">Arctic Shift</a>
+                        <a href="https://github.com/ArthurHeitmann/arctic_shift" target="_blank" rel="noopener noreferrer" className="text-[color:var(--text-faint)] hover:underline transition-colors">Arctic Shift</a>
                         {" "}and{" "}
-                        <a href="https://pullpush.io/" target="_blank" rel="noopener noreferrer" className="text-[#3a3a3b] hover:underline transition-colors">PullPush</a>.
+                        <a href="https://pullpush.io/" target="_blank" rel="noopener noreferrer" className="text-[color:var(--text-faint)] hover:underline transition-colors">PullPush</a>.
                     </p>
                 </footer>
             )}
