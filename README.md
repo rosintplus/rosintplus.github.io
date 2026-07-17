@@ -6,9 +6,9 @@
 
 This is a fork of **[rosint.dev](https://rosint.dev)** extended with profile analytics, saved profiles, themes, localization, and more.
 
-![Home](docs/screenshots/home.png)
-![Results](docs/screenshots/results.png)
-![Stats](docs/screenshots/stats.png)
+<img src="docs/screenshots/home.png" width="400">
+<img src="docs/screenshots/results.png" width="400">
+<img src="docs/screenshots/stats.png" width="400">
 
 ## Features
 
@@ -34,24 +34,16 @@ This is a fork of **[rosint.dev](https://rosint.dev)** extended with profile ana
 
 Nine built-in themes, each with light, dark, and auto (system) modes.
 
-| | |
-|---|---|
-| Default | Nord |
-| Catppuccin | Cyber |
-| Mono | Gruvbox |
-| Dracula | Solarized |
-| Synthwave | |
-
 | Theme | Preview |
 |---|---|
-| Nord | ![Nord](docs/screenshots/theme-nord.png) |
-| Catppuccin | ![Catppuccin](docs/screenshots/theme-catppuccin.png) |
-| Cyber | ![Cyber](docs/screenshots/theme-cyber.png) |
-| Mono | ![Mono](docs/screenshots/theme-mono.png) |
-| Gruvbox | ![Gruvbox](docs/screenshots/theme-gruvbox.png) |
-| Dracula | ![Dracula](docs/screenshots/theme-dracula.png) |
-| Solarized | ![Solarized](docs/screenshots/theme-solarized.png) |
-| Synthwave | ![Synthwave](docs/screenshots/theme-synthwave.png) |
+| Nord | <img src="docs/screenshots/theme-nord.png" width="300"> |
+| Catppuccin | <img src="docs/screenshots/theme-catppuccin.png" width="300"> |
+| Cyber | <img src="docs/screenshots/theme-cyber.png" width="300"> |
+| Mono | <img src="docs/screenshots/theme-mono.png" width="300"> |
+| Gruvbox | <img src="docs/screenshots/theme-gruvbox.png" width="300"> |
+| Dracula | <img src="docs/screenshots/theme-dracula.png" width="300"> |
+| Solarized | <img src="docs/screenshots/theme-solarized.png" width="300"> |
+| Synthwave | <img src="docs/screenshots/theme-synthwave.png" width="300"> |
 
 ## Running locally
 
