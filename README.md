@@ -6,9 +6,15 @@
 
 This is a fork of **[rosint.dev](https://rosint.dev)** extended with profile analytics, saved profiles, themes, localization, and more.
 
-<img src="docs/screenshots/home.png" width="400">
-<img src="docs/screenshots/results.png" width="400">
-<img src="docs/screenshots/stats.png" width="400">
+<table>
+  <tr>
+    <td><img src="docs/screenshots/home.png" width="600"></td>
+    <td><img src="docs/screenshots/results.png" width="600"></td>
+  </tr>
+  <tr>
+    <td colspan="2"><img src="docs/screenshots/stats.png" width="600"></td>
+  </tr>
+</table>
 
 ## Features
 
@@ -25,7 +31,7 @@ This is a fork of **[rosint.dev](https://rosint.dev)** extended with profile ana
 - **Saved profiles** - pin profiles to disk (IndexedDB), plus recent-search history
 
 - **9 color themes** - Default, Nord, Catppuccin, Cyber, Mono, Gruvbox, Dracula, Solarized, and Synthwave - each with light / dark / auto modes (see [Themes](#themes))
-- **6 languages** - English, Espanol, Francais, Deutsch, Japanese, and Chinese
+- **6 languages** - English, Spanish, French, German, Japanese, and Chinese
 - **Export** - download the current result set as CSV or JSON
 - **Copy permalink** - one click copies the permalink, timestamp, and details
 - **Keyboard accessible** - visible focus rings, escape-to-close menus, and a skip-to-content link
@@ -36,10 +42,10 @@ Nine built-in themes, each with light, dark, and auto (system) modes.
 
 | | |
 |---|---|
-| <img src="docs/screenshots/theme-nord.png" width="300"> Nord | <img src="docs/screenshots/theme-catppuccin.png" width="300"> Catppuccin |
-| <img src="docs/screenshots/theme-cyber.png" width="300"> Cyber | <img src="docs/screenshots/theme-mono.png" width="300"> Mono |
-| <img src="docs/screenshots/theme-gruvbox.png" width="300"> Gruvbox | <img src="docs/screenshots/theme-dracula.png" width="300"> Dracula |
-| <img src="docs/screenshots/theme-solarized.png" width="300"> Solarized | <img src="docs/screenshots/theme-synthwave.png" width="300"> Synthwave |
+| <img src="docs/screenshots/theme-nord.png" width="300"> | <img src="docs/screenshots/theme-catppuccin.png" width="300"> |
+| <img src="docs/screenshots/theme-cyber.png" width="300"> | <img src="docs/screenshots/theme-mono.png" width="300"> |
+| <img src="docs/screenshots/theme-gruvbox.png" width="300"> | <img src="docs/screenshots/theme-dracula.png" width="300"> |
+| <img src="docs/screenshots/theme-solarized.png" width="300"> | <img src="docs/screenshots/theme-synthwave.png" width="300"> |
 
 ## Running locally
 
