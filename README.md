@@ -34,16 +34,12 @@ This is a fork of **[rosint.dev](https://rosint.dev)** extended with profile ana
 
 Nine built-in themes, each with light, dark, and auto (system) modes.
 
-| Theme | Preview |
+| | |
 |---|---|
-| Nord | <img src="docs/screenshots/theme-nord.png" width="300"> |
-| Catppuccin | <img src="docs/screenshots/theme-catppuccin.png" width="300"> |
-| Cyber | <img src="docs/screenshots/theme-cyber.png" width="300"> |
-| Mono | <img src="docs/screenshots/theme-mono.png" width="300"> |
-| Gruvbox | <img src="docs/screenshots/theme-gruvbox.png" width="300"> |
-| Dracula | <img src="docs/screenshots/theme-dracula.png" width="300"> |
-| Solarized | <img src="docs/screenshots/theme-solarized.png" width="300"> |
-| Synthwave | <img src="docs/screenshots/theme-synthwave.png" width="300"> |
+| <img src="docs/screenshots/theme-nord.png" width="300"> Nord | <img src="docs/screenshots/theme-catppuccin.png" width="300"> Catppuccin |
+| <img src="docs/screenshots/theme-cyber.png" width="300"> Cyber | <img src="docs/screenshots/theme-mono.png" width="300"> Mono |
+| <img src="docs/screenshots/theme-gruvbox.png" width="300"> Gruvbox | <img src="docs/screenshots/theme-dracula.png" width="300"> Dracula |
+| <img src="docs/screenshots/theme-solarized.png" width="300"> Solarized | <img src="docs/screenshots/theme-synthwave.png" width="300"> Synthwave |
 
 ## Running locally
 
