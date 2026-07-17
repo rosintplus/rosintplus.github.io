@@ -1687,7 +1687,7 @@ export default function App() {
                             </div> : <>
                                 <div className="flex sm:hidden gap-1 mb-1.5">
                                     <HoverHint hint={t("searchOnRedditHint")} className="flex-1 min-w-0">
-                                        <a href={`https://www.reddit.com/search/?q=author%3A%22${query}%22`} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-1 min-w-0 text-[11px] text-[color:var(--text-muted)] hover:text-[color:var(--accent-text)] transition-colors h-8 border border-[color:var(--border-hover)] rounded">
+                                        <a href={`https://www.reddit.com/search/?q=author%3A%22${query}%22`} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-1 w-full min-w-0 text-[11px] text-[color:var(--text-muted)] hover:text-[color:var(--accent-text)] transition-colors h-8 border border-[color:var(--border-hover)] rounded">
                                             <IconExternal /> {t("searchOnReddit")}
                                         </a>
                                     </HoverHint>
