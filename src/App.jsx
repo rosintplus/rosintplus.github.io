@@ -1062,7 +1062,7 @@ const ThemeSwitcher = () => {
 
   return <div className="flex gap-1.5 sm:gap-2 flex-shrink-0">
             <details className="relative group/lang" onKeyDown={closeOnEscape}>
-                <summary aria-label="Change language" className="flex items-center gap-1.5 bg-[color:var(--bg)] border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] rounded h-7 px-2 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)] cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                <summary aria-label="Change language" className="flex items-center gap-1.5 bg-[color:var(--bg)] border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] rounded h-8 px-2.5 sm:h-7 sm:px-2 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)] cursor-pointer list-none [&::-webkit-details-marker]:hidden">
                     <IconGlobe className="w-3.5 h-3.5 text-[color:var(--text-muted)] pointer-events-none" />
                     <span className="hidden sm:inline text-xs text-[color:var(--text-muted)] font-medium pointer-events-none">{LANGS[lang]}</span>
                 </summary>
@@ -1078,7 +1078,7 @@ const ThemeSwitcher = () => {
             </details>
 
             <details className="relative group/mode" onKeyDown={closeOnEscape}>
-                <summary aria-label={t("modeAuto")} className="flex items-center gap-1.5 bg-[color:var(--bg)] border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] rounded h-7 px-2 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)] cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                <summary aria-label={t("modeAuto")} className="flex items-center gap-1.5 bg-[color:var(--bg)] border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] rounded h-8 px-2.5 sm:h-7 sm:px-2 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)] cursor-pointer list-none [&::-webkit-details-marker]:hidden">
                     {colorMode === "dark" ? <IconMoon className="w-3.5 h-3.5 text-[color:var(--text-muted)] pointer-events-none" /> : colorMode === "light" ? <IconSun className="w-3.5 h-3.5 text-[color:var(--text-muted)] pointer-events-none" /> : <IconMonitor className="w-3.5 h-3.5 text-[color:var(--text-muted)] pointer-events-none" />}
                     <span className="hidden sm:inline text-xs text-[color:var(--text-muted)] font-medium pointer-events-none">{colorMode === "auto" ? t("modeAuto") : colorMode === "dark" ? t("modeDark") : t("modeLight")}</span>
                 </summary>
@@ -1094,7 +1094,7 @@ const ThemeSwitcher = () => {
             </details>
             
             <details className="relative group/theme" onKeyDown={closeOnEscape}>
-                <summary aria-label={t("themeDefault")} className="flex items-center gap-1.5 bg-[color:var(--bg)] border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] rounded h-7 px-2 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)] cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                <summary aria-label={t("themeDefault")} className="flex items-center gap-1.5 bg-[color:var(--bg)] border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] rounded h-8 px-2.5 sm:h-7 sm:px-2 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)] cursor-pointer list-none [&::-webkit-details-marker]:hidden">
                     <IconPalette className="w-3.5 h-3.5 text-[color:var(--text-muted)] pointer-events-none" />
                     <span className="w-2.5 h-2.5 rounded-full border border-[color:var(--border-hover)] pointer-events-none" style={{ background: "var(--accent)" }} />
                     <span className="hidden sm:inline text-xs text-[color:var(--text-muted)] font-medium pointer-events-none">{theme === "default" ? t("themeDefault") : theme.charAt(0).toUpperCase() + theme.slice(1)}</span>
@@ -1502,7 +1502,7 @@ export default function App() {
                     <a href="/" className="text-[color:var(--text)] hover:text-[color:var(--accent)] transition-colors font-bold text-base sm:text-lg leading-none whitespace-nowrap"style={NO_DECORATION}>
                         <span className="text-[1.25em]">r</span>OSINT+
                     </a>
-                    <a href="/privacy.html" className="bg-[color:var(--bg)] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] px-2.5 h-7 transition-colors border border-[color:var(--border-hover)] hover:border-[color:var(--text-muted)] rounded flex items-center text-[13px] font-medium whitespace-nowrap"style={NO_DECORATION}>
+                    <a href="/privacy.html" className="bg-[color:var(--bg)] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] px-3 h-8 sm:px-2.5 sm:h-7 transition-colors border border-[color:var(--border-hover)] hover:border-[color:var(--text-muted)] rounded flex items-center text-[13px] font-medium whitespace-nowrap"style={NO_DECORATION}>
                     {t("privacy")}
                 </a>
             </div>
@@ -1536,7 +1536,7 @@ export default function App() {
                 <a href="/" className="text-[color:var(--text)] hover:text-[color:var(--accent)] transition-colors font-bold text-base sm:text-lg leading-none whitespace-nowrap"style={NO_DECORATION}>
                     <span className="text-[1.25em]">r</span>OSINT+
                 </a>
-                <a href="/privacy.html" className="bg-[color:var(--bg)] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] px-2.5 h-7 transition-colors border border-[color:var(--border-hover)] hover:border-[color:var(--text-muted)] rounded flex items-center text-[13px] font-medium whitespace-nowrap"style={NO_DECORATION}>
+                <a href="/privacy.html" className="bg-[color:var(--bg)] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] px-3 h-8 sm:px-2.5 sm:h-7 transition-colors border border-[color:var(--border-hover)] hover:border-[color:var(--text-muted)] rounded flex items-center text-[13px] font-medium whitespace-nowrap"style={NO_DECORATION}>
                     {t("privacy")}
                 </a>
             </div>
@@ -1556,7 +1556,7 @@ export default function App() {
                 <a href="/" className="text-[color:var(--text)] hover:text-[color:var(--accent)] transition-colors font-bold text-base sm:text-lg leading-none whitespace-nowrap"style={NO_DECORATION}>
                     <span className="text-[1.25em]">r</span>OSINT+
                 </a>
-                <a href="/privacy.html" className="bg-[color:var(--bg)] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] px-2.5 h-7 transition-colors border border-[color:var(--border-hover)] hover:border-[color:var(--text-muted)] rounded flex items-center text-[13px] font-medium whitespace-nowrap"style={NO_DECORATION}>
+                <a href="/privacy.html" className="bg-[color:var(--bg)] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] px-3 h-8 sm:px-2.5 sm:h-7 transition-colors border border-[color:var(--border-hover)] hover:border-[color:var(--text-muted)] rounded flex items-center text-[13px] font-medium whitespace-nowrap"style={NO_DECORATION}>
                     {t("privacy")}
                 </a>
                 </div>
@@ -1762,7 +1762,7 @@ export default function App() {
                                     </a>
                                 </HoverHint>
 
-                                <div className="flex items-center gap-2 sm:gap-4 flex-wrap justify-start sm:justify-end">
+                                <div className="w-full sm:w-auto flex items-center gap-2 sm:gap-4 flex-wrap justify-between sm:justify-end">
                                     <div className="flex items-center gap-2">
                                         <label className="flex items-center gap-1.5 cursor-pointer select-none border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] rounded px-2 h-7 bg-[color:var(--bg)] transition-colors flex-shrink-0">
                                             <input type="checkbox" checked={deletedOnly} onChange={e => setDeletedOnly(e.target.checked)} className="w-3 h-3 accent-[color:var(--accent)] cursor-pointer" />
@@ -1794,7 +1794,7 @@ export default function App() {
                                             <span className="text-[11px] whitespace-nowrap">{t("stats")}</span>
                                         </button>
                                         <details className="relative group/export" onKeyDown={closeOnEscape}>
-                                            <summary aria-label="Export" className="flex items-center gap-1.5 bg-[color:var(--bg)] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] px-2.5 h-7 transition-colors border border-[color:var(--border-hover)] rounded text-[11px] whitespace-nowrap cursor-pointer list-none [&::-webkit-details-marker]:hidden outline-none">
+                                            <summary aria-label="Export" className="flex items-center gap-1.5 bg-[color:var(--bg)] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] hover:border-[color:var(--text-muted)] px-2.5 h-7 transition-colors border border-[color:var(--border-hover)] rounded text-[11px] whitespace-nowrap cursor-pointer list-none [&::-webkit-details-marker]:hidden outline-none">
                                                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 9l7 7 7-7" /></svg>
                                                 Export
                                             </summary>
