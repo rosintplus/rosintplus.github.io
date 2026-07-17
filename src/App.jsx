@@ -1980,6 +1980,8 @@ export default function App() {
                         {tJsx(t, "footerFork", { link: <a key="l" href="https://rosint.dev" target="_blank" rel="noopener noreferrer" className="text-[color:var(--text-faint)] hover:underline transition-colors">rosint.dev</a> })}
                         <span className="mx-2 opacity-50">•</span>
                         {tJsx(t, "footerUsing", { arctic: <a key="a" href="https://arctic-shift.photon-reddit.com" target="_blank" rel="noopener noreferrer" className="text-[color:var(--text-faint)] hover:underline transition-colors">Arctic Shift</a>, pullpush: <a key="p" href="https://pullpush.io/" target="_blank" rel="noopener noreferrer" className="text-[color:var(--text-faint)] hover:underline transition-colors">PullPush</a> })}
+                        <span className="mx-2 opacity-50">•</span>
+                        <a href="https://github.com/rosintplus/rosintplus.github.io" target="_blank" rel="noopener noreferrer" className="text-[color:var(--text-faint)] hover:underline transition-colors">GitHub</a>
                     </p>
                 </footer>
         </div>;
