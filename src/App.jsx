@@ -1244,6 +1244,7 @@ export default function App() {
   const [crawlKey, setCrawlKey] = useState(0);
   const bgStatsRef = useRef(null);
   const bgCrawlRef = useRef(null);
+  const crawlItemsRef = useRef(0);
 
   const handleRefreshCrawl = useCallback(() => setCrawlKey(k => k + 1), []);
 
@@ -1252,6 +1253,7 @@ export default function App() {
     if (bgCrawlRef.current) bgCrawlRef.current.abort();
 
     setIsCrawling(true);
+    crawlItemsRef.current = 0;
 
     const controller = new AbortController();
     bgCrawlRef.current = controller;
@@ -1277,6 +1279,7 @@ export default function App() {
           for (const item of result.items) {
             if (seen.has(item.id)) continue;
             seen.add(item.id);
+            crawlItemsRef.current++;
             processItem(crawlStats, item, isComment);
           }
 
@@ -1328,10 +1331,8 @@ export default function App() {
   }, [posts.items, comments.items, bgStatsVersion]);
 
   const totalItems = useMemo(() => {
-    let sum = 0;
-    for (const c of Object.values(profileStats.subredditCounts)) sum += c;
-    return sum;
-  }, [profileStats]);
+    return posts.items.length + comments.items.length + crawlItemsRef.current;
+  }, [posts.items.length, comments.items.length, bgStatsVersion]);
 
   const [visibleCount, setVisibleCount] = useState(Infinity);
   const prevFilteredLenRef = useRef(0);
