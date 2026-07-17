@@ -12,6 +12,7 @@ const NO_DECORATION = { textDecoration: 'none' };
 const STROKE_TRANSITION = { transition: "stroke 150ms" };
 const FLEX_1 = { flex: "1 1 0" };
 const closeOnEscape = e => { if (e.key === "Escape") e.currentTarget.removeAttribute("open"); };
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 function tJsx(tFn, key, vars) {
   const raw = tFn(key);
@@ -1238,12 +1239,85 @@ export default function App() {
     }).sort((a, b) => sortOrder === "desc" ? b.created_utc - a.created_utc : a.created_utc - b.created_utc);
   }, [activeTab, posts.items, comments.items, deletedOnly, nsfwOnly, deferredKeyword, sortOrder]);
 
+  const [bgStatsVersion, setBgStatsVersion] = useState(0);
+  const bgStatsRef = useRef(null);
+  const bgCrawlRef = useRef(null);
+
+  useEffect(() => {
+    if (!showProfile || !query) return;
+    if (bgCrawlRef.current) bgCrawlRef.current.abort();
+
+    const controller = new AbortController();
+    bgCrawlRef.current = controller;
+
+    (async () => {
+      const seen = new Set();
+      for (const item of posts.items) seen.add(item.id);
+      for (const item of comments.items) seen.add(item.id);
+
+      const crawlStats = emptyStats();
+      bgStatsRef.current = crawlStats;
+
+      async function crawlType(type) {
+        const isComment = type === "comments";
+        let before = null;
+
+        while (!controller.signal.aborted) {
+          const pagination = before ? { before } : {};
+          const result = await fetchBoth(query, type, pagination, {}, { signal: controller.signal, sort: "desc" });
+
+          if (controller.signal.aborted || result.items.length === 0) break;
+
+          for (const item of result.items) {
+            if (seen.has(item.id)) continue;
+            seen.add(item.id);
+            processItem(crawlStats, item, isComment);
+          }
+
+          setBgStatsVersion(v => v + 1);
+
+          if (result.items.length < LIMIT) break;
+          before = result.items[result.items.length - 1].created_utc;
+          await sleep(500);
+        }
+      }
+
+      try {
+        await Promise.all([crawlType("posts"), crawlType("comments")]);
+      } catch (err) {
+        if (err?.name !== "AbortError") console.error("Background crawl error:", err);
+      }
+    })();
+
+    return () => controller.abort();
+  }, [showProfile, query]);
+
   const profileStats = useMemo(() => {
     const stats = emptyStats();
     for (const item of posts.items) processItem(stats, item, false);
     for (const item of comments.items) processItem(stats, item, true);
+
+    if (bgStatsVersion > 0 && bgStatsRef.current) {
+      const bg = bgStatsRef.current;
+      for (const [sub, count] of Object.entries(bg.subredditCounts)) {
+        stats.subredditCounts[sub] = (stats.subredditCounts[sub] || 0) + count;
+      }
+      for (let r = 0; r < 7; r++) {
+        for (let c = 0; c < 24; c++) {
+          stats.heatmap[r][c] += bg.heatmap[r][c];
+        }
+      }
+      for (const type of ["posts", "comments"]) {
+        for (const [word, counts] of Object.entries(bg.wordFreqs[type])) {
+          if (!stats.wordFreqs[type][word]) stats.wordFreqs[type][word] = { total: 0, items: 0 };
+          stats.wordFreqs[type][word].total += counts.total;
+          stats.wordFreqs[type][word].items += counts.items;
+        }
+      }
+    }
+
     return stats;
-  }, [posts.items, comments.items]);
+  }, [posts.items, comments.items, bgStatsVersion]);
 
   const [visibleCount, setVisibleCount] = useState(Infinity);
   const prevFilteredLenRef = useRef(0);
