@@ -82,6 +82,5 @@ PullPush:      https://api.pullpush.io/reddit/search/submission/?test&author={us
 ## Credits
 
 - **[rosint.dev](https://rosint.dev)** - the original project this fork is based on
-- [medas](https://github.com/medas4n) - developer
 - [Arctic Shift](https://github.com/ArthurHeitmann/arctic_shift) by ArthurHeitmann
 - [PullPush](https://pullpush.io)
