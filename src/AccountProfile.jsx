@@ -1,4 +1,4 @@
-import { memo, useMemo, useState, useEffect, useCallback } from 'react';
+import { memo, useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { HoverHint, IconInfo } from './App.jsx';
 import { REDDIT_BASE } from './api.js';
 import { getProfileData, toggleProfileSaved, getSavedUsernames } from './profileData.js';
@@ -28,6 +28,13 @@ const AccountProfile = memo(function AccountProfile({
   const [isUpdating, setIsUpdating] = useState(false);
   const [wordFreqMode, setWordFreqMode] = useState('occurrences');
   const [isSaved, setIsSaved] = useState(false);
+  const rootRef = useRef(null);
+
+  useEffect(() => {
+    if (profileData && rootRef.current) {
+      rootRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [profileData]);
 
   useEffect(() => {
     if (!query) return;
@@ -192,7 +199,7 @@ const AccountProfile = memo(function AccountProfile({
   );
 
   return (
-    <div className="flex flex-col gap-4 mb-4 mt-4">
+    <div ref={rootRef} className="flex flex-col gap-4 mb-4 mt-4">
       <div className="text-xs text-[color:var(--text-muted)] font-medium px-1 flex items-center gap-2 h-5">
         <span>{t("apBasedOn", { n: totalItems.toLocaleString() })}</span>
         <span>&middot;</span>
