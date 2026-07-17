@@ -1245,6 +1245,7 @@ export default function App() {
   const bgStatsRef = useRef(null);
   const bgCrawlRef = useRef(null);
   const crawlItemsRef = useRef(0);
+  const crawledTotalRef = useRef(0);
 
   const handleRefreshCrawl = useCallback(() => setCrawlKey(k => k + 1), []);
 
@@ -1254,6 +1255,7 @@ export default function App() {
 
     setIsCrawling(true);
     crawlItemsRef.current = 0;
+    crawledTotalRef.current = 0;
 
     const controller = new AbortController();
     bgCrawlRef.current = controller;
@@ -1277,6 +1279,7 @@ export default function App() {
           if (controller.signal.aborted || result.items.length === 0) break;
 
           for (const item of result.items) {
+            crawledTotalRef.current++;
             if (seen.has(item.id)) continue;
             seen.add(item.id);
             crawlItemsRef.current++;
@@ -1331,7 +1334,10 @@ export default function App() {
   }, [posts.items, comments.items, bgStatsVersion]);
 
   const totalItems = useMemo(() => {
-    return posts.items.length + comments.items.length + crawlItemsRef.current;
+    const loaded = posts.items.length + comments.items.length;
+    const extra = crawlItemsRef.current;
+    const total = Math.max(loaded + extra, crawledTotalRef.current);
+    return { loaded, total };
   }, [posts.items.length, comments.items.length, bgStatsVersion]);
 
   const [visibleCount, setVisibleCount] = useState(Infinity);
