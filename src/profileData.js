@@ -4,7 +4,15 @@ const DB_NAME = "rosint-db";
 const DB_VERSION = 2;
 const STORE_NAME = "profiles";
 
-const memoryCache = new Map();
+const MAX_CACHE_SIZE = 100;
+
+function cacheSet(key, value) {
+  if (memoryCache.size >= MAX_CACHE_SIZE) {
+    const oldest = memoryCache.keys().next().value;
+    if (oldest !== undefined) memoryCache.delete(oldest);
+  }
+  memoryCache.set(key, value);
+}
 
 // ─── Stopwords (shared with AccountProfile for consistency) ──────────────────
 
@@ -207,7 +215,7 @@ export async function getProfileData(username, onProgress, forceUpdate = false) 
         if (cached && !cached.partial) {
           const age = Date.now() - cached.fetchedAt;
           if (age < 7 * 24 * 60 * 60 * 1000) {
-            memoryCache.set(normalized, cached);
+            cacheSet(normalized, cached);
             return cached;
           }
         }
@@ -317,7 +325,7 @@ export async function getProfileData(username, onProgress, forceUpdate = false) 
           await saveCachedProfile(profile);
           memoryCache.delete(normalized);
         } else {
-          memoryCache.set(normalized, profile);
+          cacheSet(normalized, profile);
         }
       }
       return profile;
@@ -353,7 +361,7 @@ export async function toggleProfileSaved(username, saved) {
     memoryCache.delete(normalized);
   } else {
     await deleteCachedProfile(normalized);
-    memoryCache.set(normalized, profile);
+    cacheSet(normalized, profile);
   }
   window.dispatchEvent(new CustomEvent('savedUsersChanged'));
 }

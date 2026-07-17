@@ -297,7 +297,7 @@ const PostCard = memo(function PostCard({
   const [imgError, setImgError] = useState(false);
   const commentsAbortRef = useRef(null);
   const thumb = useMemo(() => getPostThumbnail(post), [post]);
-  const postUrl = post.permalink ? `${REDDIT_BASE}${post.permalink}` : `${REDDIT_BASE}/r/${post.subreddit}/comments/${post.id}`;
+  const postUrl = useMemo(() => post.permalink ? `${REDDIT_BASE}${post.permalink}` : `${REDDIT_BASE}/r/${post.subreddit}/comments/${post.id}`, [post]);
   const hasBody = useMemo(() => post.selftext && post.selftext !== "[deleted]" && post.selftext !== "[removed]", [post]);
   const status = useMemo(() => getStatus(post, "posts"), [post]);
   useEffect(() => () => { if (commentsAbortRef.current) commentsAbortRef.current.abort(); }, []);
@@ -502,8 +502,8 @@ const CommentCard = memo(function CommentCard({
   const repliesAbortRef = useRef(null);
   useEffect(() => () => { if (repliesAbortRef.current) repliesAbortRef.current.abort(); }, []);
   const threadId = comment.link_id?.replace(/^t3_/, "");
-  const url = `${REDDIT_BASE}${comment.permalink}`;
-  const threadUrl = threadId ? `${REDDIT_BASE}/comments/${threadId}` : url;
+  const url = useMemo(() => `${REDDIT_BASE}${comment.permalink}`, [comment]);
+  const threadUrl = useMemo(() => threadId ? `${REDDIT_BASE}/comments/${threadId}` : url, [threadId, url]);
   const img = useMemo(() => getCommentImage(comment), [comment]);
   const status = useMemo(() => getStatus(comment, "comments"), [comment]);
   const toggleCollapsed = useCallback(() => setCollapsed(o => !o), []);
@@ -922,26 +922,28 @@ function mix(hex1, hex2, t) {
 }
 function applyTheme(t, isDark) {
   const d = document.documentElement;
-  d.style.setProperty("--bg", t.bg);
-  d.style.setProperty("--accent", t.accent);
-  d.style.setProperty("--tint", t.tint || t.accent);
   const tint = t.tint || t.accent;
   const base = isDark ? "#ffffff" : "#000000";
   const tintBase = mix(tint, base, 0.3);
-  d.style.setProperty("--text-base", base);
-  d.style.setProperty("--color-scheme", isDark ? "dark" : "light");
-  d.style.setProperty("--accent-text", mix(tint, base, 0.7));
-  d.style.setProperty("--text", tintBase);
-  d.style.setProperty("--text-muted", mix(tint, mix(base, t.bg, 0.65), 0.3));
-  d.style.setProperty("--text-faint", mix(tint, mix(base, t.bg, 0.45), 0.2));
-  d.style.setProperty("--border", mix(tintBase, t.bg, 0.18));
-  d.style.setProperty("--border-hover", mix(tintBase, t.bg, 0.28));
-  d.style.setProperty("--bg-elevated", mix(tintBase, t.bg, 0.08));
+  d.style.cssText = [
+    `--bg:${t.bg}`,
+    `--accent:${t.accent}`,
+    `--tint:${tint}`,
+    `--text-base:${base}`,
+    `--color-scheme:${isDark ? "dark" : "light"}`,
+    `--accent-text:${mix(tint, base, 0.7)}`,
+    `--text:${tintBase}`,
+    `--text-muted:${mix(tint, mix(base, t.bg, 0.65), 0.3)}`,
+    `--text-faint:${mix(tint, mix(base, t.bg, 0.45), 0.2)}`,
+    `--border:${mix(tintBase, t.bg, 0.18)}`,
+    `--border-hover:${mix(tintBase, t.bg, 0.28)}`,
+    `--bg-elevated:${mix(tintBase, t.bg, 0.08)}`,
+  ].join(";");
   let meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.setAttribute("content", t.bg);
 }
 
-const ThemeSwitcher = () => {
+const ThemeSwitcher = memo(() => {
   const [theme, setTheme] = useState(() => localStorage.getItem("rosint-theme") || "default");
   const [colorMode, setColorMode] = useState(() => localStorage.getItem("rosint-color-mode") || "auto");
 
@@ -1029,7 +1031,7 @@ const ThemeSwitcher = () => {
                 </div>
             </details>
         </div>;
-};
+});
 
 const SearchBar = memo(function SearchBar({
   defaultQuery,
@@ -1685,8 +1687,8 @@ export default function App() {
                                     </div>
                                 </div>
                             </div> : <>
-                                <div className="flex sm:hidden gap-1 mb-1.5">
-                                    <HoverHint hint={t("searchOnRedditHint")} className="flex-1 min-w-0">
+                                <div className="grid sm:hidden grid-cols-3 gap-1 mb-1.5">
+                                    <HoverHint hint={t("searchOnRedditHint")}>
                                         <a href={`https://www.reddit.com/search/?q=author%3A%22${query}%22`} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-1 w-full min-w-0 text-[11px] text-[color:var(--text-muted)] hover:text-[color:var(--accent-text)] transition-colors h-8 border border-[color:var(--border-hover)] rounded">
                                             <IconExternal /> {t("searchOnReddit")}
                                         </a>
