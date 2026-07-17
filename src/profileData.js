@@ -323,7 +323,16 @@ export async function toggleProfileSaved(username, saved) {
     profile = await getCachedProfile(normalized);
   }
 
-  if (!profile) return;
+  if (!profile) {
+    profile = {
+      username: normalized,
+      stats: emptyStats(),
+      totals: { posts: 0, comments: 0 },
+      itemsCrawled: { posts: 0, comments: 0 },
+      maxCreatedUtc: 0,
+      fetchedAt: Date.now(),
+    };
+  }
 
   profile.saved = saved;
 

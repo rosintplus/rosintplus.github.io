@@ -1240,12 +1240,18 @@ export default function App() {
   }, [activeTab, posts.items, comments.items, deletedOnly, nsfwOnly, deferredKeyword, sortOrder]);
 
   const [bgStatsVersion, setBgStatsVersion] = useState(0);
+  const [isCrawling, setIsCrawling] = useState(false);
+  const [crawlKey, setCrawlKey] = useState(0);
   const bgStatsRef = useRef(null);
   const bgCrawlRef = useRef(null);
+
+  const handleRefreshCrawl = useCallback(() => setCrawlKey(k => k + 1), []);
 
   useEffect(() => {
     if (!showProfile || !query) return;
     if (bgCrawlRef.current) bgCrawlRef.current.abort();
+
+    setIsCrawling(true);
 
     const controller = new AbortController();
     bgCrawlRef.current = controller;
@@ -1286,11 +1292,13 @@ export default function App() {
         await Promise.all([crawlType("posts"), crawlType("comments")]);
       } catch (err) {
         if (err?.name !== "AbortError") console.error("Background crawl error:", err);
+      } finally {
+        setIsCrawling(false);
       }
     })();
 
-    return () => controller.abort();
-  }, [showProfile, query]);
+    return () => { controller.abort(); setIsCrawling(false); };
+  }, [showProfile, query, crawlKey]);
 
   const profileStats = useMemo(() => {
     const stats = emptyStats();
@@ -1318,6 +1326,12 @@ export default function App() {
 
     return stats;
   }, [posts.items, comments.items, bgStatsVersion]);
+
+  const totalItems = useMemo(() => {
+    let sum = 0;
+    for (const c of Object.values(profileStats.subredditCounts)) sum += c;
+    return sum;
+  }, [profileStats]);
 
   const [visibleCount, setVisibleCount] = useState(Infinity);
   const prevFilteredLenRef = useRef(0);
@@ -1720,7 +1734,7 @@ export default function App() {
     </div>
   </div>
 }>
-                            <AccountProfile query={query} activeTab={activeTab} onWordClick={handleWordClick} stats={profileStats} itemCount={posts.items.length + comments.items.length} />
+                            <AccountProfile query={query} activeTab={activeTab} onWordClick={handleWordClick} stats={profileStats} itemCount={totalItems} isCrawling={isCrawling} onRefresh={handleRefreshCrawl} />
                         </Suspense>}
 
                         {searched && <h2 className="sr-only">{t("resultsFor")} u/{query}</h2>}

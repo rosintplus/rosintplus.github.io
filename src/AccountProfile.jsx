@@ -1,7 +1,8 @@
-import { memo, useMemo } from 'react';
+import { memo, useMemo, useState, useEffect, useCallback } from 'react';
 import { HoverHint, IconInfo } from './App.jsx';
 import { REDDIT_BASE } from './api.js';
 import { useI18n, LOCALES } from './i18n.js';
+import { toggleProfileSaved, getSavedUsernames } from './profileData.js';
 
 function getDays(locale) {
   const fmt = new Intl.DateTimeFormat(locale, { weekday: "long" });
@@ -15,13 +16,36 @@ const AccountProfile = memo(function AccountProfile({
   onWordClick,
   stats,
   itemCount,
+  isCrawling,
+  onRefresh,
 }) {
   const { t, lang } = useI18n();
   const days = useMemo(() => getDays(LOCALES[lang] || "en"), [lang]);
+  const [isSaved, setIsSaved] = useState(false);
+
+  useEffect(() => {
+    if (!query) return;
+    const checkSaved = () => {
+      getSavedUsernames()
+        .then(keys => setIsSaved(keys.includes(query.toLowerCase())))
+        .catch(() => setIsSaved(false));
+    };
+    checkSaved();
+    window.addEventListener('savedUsersChanged', checkSaved);
+    return () => window.removeEventListener('savedUsersChanged', checkSaved);
+  }, [query]);
+
+  const handleToggleSave = useCallback(async () => {
+    const newState = !isSaved;
+    setIsSaved(newState);
+    try {
+      await toggleProfileSaved(query, newState);
+    } catch {
+      setIsSaved(!newState);
+    }
+  }, [query, isSaved]);
 
   if (!stats || itemCount === 0) return null;
-
-  // ── Pre-computed stats ──────────────────────────────────────────────────────
 
   const topSubreddits = useMemo(() => {
     if (!stats?.subredditCounts) return { list: [], max: 1 };
@@ -104,6 +128,31 @@ const AccountProfile = memo(function AccountProfile({
     <div className="flex flex-col gap-4 mb-4 mt-4">
       <div className="text-xs text-[color:var(--text-muted)] font-medium px-1 flex items-center gap-2 h-5">
         <span>{t("apBasedOn", { n: itemCount.toLocaleString() })}</span>
+        {isCrawling && <span className="text-[color:var(--accent-text)] italic">· {t("apUpdating")}</span>}
+        <span>&middot;</span>
+        <button
+          onClick={onRefresh}
+          disabled={isCrawling}
+          className={`text-[color:var(--text-muted)] hover:text-[color:var(--accent)] transition-colors p-1 -m-1 ${isCrawling ? 'animate-spin cursor-default opacity-50' : ''}`}
+          title={isCrawling ? t("apUpdating") : t("apRefreshTitle")}
+        >
+          <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M23 4v6h-6"></path>
+            <path d="M1 20v-6h6"></path>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+          </svg>
+        </button>
+        <span>&middot;</span>
+        <button
+          onClick={handleToggleSave}
+          className={`flex items-center gap-1 transition-colors px-1.5 py-0.5 -mx-1.5 rounded ${isSaved ? 'text-amber-500 hover:text-amber-600 bg-amber-500/10' : 'text-[color:var(--text-muted)] hover:text-[color:var(--accent)] hover:bg-[color:var(--accent)]/10'}`}
+          title={isSaved ? t("apSavedTitle") : t("apSaveTitle")}
+        >
+          <svg viewBox="0 0 24 24" className="w-3 h-3 flex-shrink-0" stroke="currentColor" strokeWidth="1.5" fill={isSaved ? "currentColor" : "none"} strokeLinecap="round" strokeLinejoin="round">
+            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+          </svg>
+          <span className="text-[10px] uppercase font-bold leading-none translate-y-[0.5px]">{isSaved ? t("apSaved") : t("apSave")}</span>
+        </button>
       </div>
 
       <div className="flex flex-col md:flex-row gap-4">
