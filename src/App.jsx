@@ -1491,7 +1491,7 @@ export default function App() {
   const handleWordClick = useCallback((word) => setKeyword(word), []);
   const pathname = window.location.pathname;
   const isPrivacyPage = pathname.endsWith('/privacy.html') || pathname.endsWith('/privacy');
-  const is404Page = pathname.endsWith('/404.html') || (pathname !== "/" && !pathname.endsWith('/Rosint/') && !pathname.endsWith('/Rosint') && !isPrivacyPage && !pathname.includes('index.html'));
+  const is404Page = pathname.endsWith('/404.html') || (pathname !== "/" && !isPrivacyPage && !pathname.includes('index.html'));
 
   if (isPrivacyPage) {
     return (
@@ -1499,10 +1499,10 @@ export default function App() {
         <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[100] focus:px-4 focus:py-2 focus:bg-[color:var(--accent)] focus:text-[color:var(--bg)] focus:rounded focus:text-sm focus:font-bold focus:outline-none">Skip to content</a>
         <header className="fixed top-0 inset-x-0 z-50 flex items-center justify-between gap-2 px-3 sm:px-4 py-2 bg-[color:var(--bg)] border-b border-[color:var(--border)]">
             <div className="flex items-center gap-3 sm:gap-4 min-w-0">
-                <a href="/Rosint/" className="text-[color:var(--text)] hover:text-[color:var(--accent)] transition-colors font-bold text-base sm:text-lg leading-none whitespace-nowrap"style={NO_DECORATION}>
-                    <span className="text-[1.25em]">r</span>OSINT+
-                </a>
-                <a href="/Rosint/privacy.html" className="bg-[color:var(--bg)] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] px-2.5 h-7 transition-colors border border-[color:var(--border-hover)] hover:border-[color:var(--text-muted)] rounded flex items-center text-[13px] font-medium whitespace-nowrap"style={NO_DECORATION}>
+                    <a href="/" className="text-[color:var(--text)] hover:text-[color:var(--accent)] transition-colors font-bold text-base sm:text-lg leading-none whitespace-nowrap"style={NO_DECORATION}>
+                        <span className="text-[1.25em]">r</span>OSINT+
+                    </a>
+                    <a href="/privacy.html" className="bg-[color:var(--bg)] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] px-2.5 h-7 transition-colors border border-[color:var(--border-hover)] hover:border-[color:var(--text-muted)] rounded flex items-center text-[13px] font-medium whitespace-nowrap"style={NO_DECORATION}>
                     {t("privacy")}
                 </a>
             </div>
@@ -1533,10 +1533,10 @@ export default function App() {
         <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[100] focus:px-4 focus:py-2 focus:bg-[color:var(--accent)] focus:text-[color:var(--bg)] focus:rounded focus:text-sm focus:font-bold focus:outline-none">Skip to content</a>
         <header className="fixed top-0 inset-x-0 z-50 flex items-center justify-between gap-2 px-3 sm:px-4 py-2 bg-[color:var(--bg)] border-b border-[color:var(--border)]">
             <div className="flex items-center gap-3 sm:gap-4 min-w-0">
-                <a href="/Rosint/" className="text-[color:var(--text)] hover:text-[color:var(--accent)] transition-colors font-bold text-base sm:text-lg leading-none whitespace-nowrap"style={NO_DECORATION}>
+                <a href="/" className="text-[color:var(--text)] hover:text-[color:var(--accent)] transition-colors font-bold text-base sm:text-lg leading-none whitespace-nowrap"style={NO_DECORATION}>
                     <span className="text-[1.25em]">r</span>OSINT+
                 </a>
-                <a href="/Rosint/privacy.html" className="bg-[color:var(--bg)] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] px-2.5 h-7 transition-colors border border-[color:var(--border-hover)] hover:border-[color:var(--text-muted)] rounded flex items-center text-[13px] font-medium whitespace-nowrap"style={NO_DECORATION}>
+                <a href="/privacy.html" className="bg-[color:var(--bg)] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] px-2.5 h-7 transition-colors border border-[color:var(--border-hover)] hover:border-[color:var(--text-muted)] rounded flex items-center text-[13px] font-medium whitespace-nowrap"style={NO_DECORATION}>
                     {t("privacy")}
                 </a>
             </div>
@@ -1544,7 +1544,7 @@ export default function App() {
         </header>
         <h1 className="text-6xl font-bold mb-4 text-[color:var(--text)]">404</h1>
         <p className="text-lg text-[color:var(--text-muted)] mb-8">{t("notFoundText")}</p>
-        <a href="/Rosint/" className="bg-[color:var(--bg-elevated)] border border-[color:var(--border)] text-[color:var(--accent-text)] px-4 py-2 rounded-md hover:border-[color:var(--accent)] transition-colors font-medium">{t("returnHome")}</a>
+        <a href="/" className="bg-[color:var(--bg-elevated)] border border-[color:var(--border)] text-[color:var(--accent-text)] px-4 py-2 rounded-md hover:border-[color:var(--accent)] transition-colors font-medium">{t("returnHome")}</a>
       </div>
       );
   }
@@ -1553,12 +1553,12 @@ export default function App() {
             <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[100] focus:px-4 focus:py-2 focus:bg-[color:var(--accent)] focus:text-[color:var(--bg)] focus:rounded focus:text-sm focus:font-bold focus:outline-none">Skip to content</a>
             <header className={`${scrolled ? "" : "header-top"} fixed top-0 inset-x-0 z-50 flex items-center justify-between gap-2 px-3 sm:px-4 py-2 bg-[color:var(--bg)] border-b border-[color:var(--border)]`}>
                 <div className="flex items-center gap-3 sm:gap-4 min-w-0">
-                    <a href="/Rosint/" className="text-[color:var(--text)] hover:text-[color:var(--accent)] transition-colors font-bold text-base sm:text-lg leading-none whitespace-nowrap"style={NO_DECORATION}>
-                        <span className="text-[1.25em]">r</span>OSINT+
-                    </a>
-                    <a href="/Rosint/privacy.html" className="bg-[color:var(--bg)] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] px-2.5 h-7 transition-colors border border-[color:var(--border-hover)] hover:border-[color:var(--text-muted)] rounded flex items-center text-[13px] font-medium whitespace-nowrap"style={NO_DECORATION}>
-                        {t("privacy")}
-                    </a>
+                <a href="/" className="text-[color:var(--text)] hover:text-[color:var(--accent)] transition-colors font-bold text-base sm:text-lg leading-none whitespace-nowrap"style={NO_DECORATION}>
+                    <span className="text-[1.25em]">r</span>OSINT+
+                </a>
+                <a href="/privacy.html" className="bg-[color:var(--bg)] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] px-2.5 h-7 transition-colors border border-[color:var(--border-hover)] hover:border-[color:var(--text-muted)] rounded flex items-center text-[13px] font-medium whitespace-nowrap"style={NO_DECORATION}>
+                    {t("privacy")}
+                </a>
                 </div>
                 <ThemeSwitcher />
             </header>
@@ -1875,7 +1875,7 @@ export default function App() {
                     </div>}
             </main>
 
-            {!searched && <footer className="fixed bottom-0 left-0 right-0 z-10 py-2 bg-[color:var(--bg)] border-t border-[color:var(--border)]" style={{
+            <footer className="relative bottom-0 left-0 right-0 z-10 py-2 bg-[color:var(--bg)] border-t border-[color:var(--border)]" style={{
       paddingBottom: 'calc(0.5rem + env(safe-area-inset-bottom))'
     }}>
                     <p className="text-[11px] text-[color:var(--text-faint)] leading-relaxed text-center">
@@ -1885,6 +1885,6 @@ export default function App() {
                         <span className="mx-2 opacity-50">•</span>
                         {tJsx(t, "footerUsing", { arctic: <a key="a" href="https://arctic-shift.photon-reddit.com" target="_blank" rel="noopener noreferrer" className="text-[color:var(--text-faint)] hover:underline transition-colors">Arctic Shift</a>, pullpush: <a key="p" href="https://pullpush.io/" target="_blank" rel="noopener noreferrer" className="text-[color:var(--text-faint)] hover:underline transition-colors">PullPush</a> })}
                     </p>
-                </footer>}
+                </footer>
         </div>;
 }
