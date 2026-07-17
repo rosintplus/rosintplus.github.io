@@ -1738,7 +1738,7 @@ export default function App() {
     </div>
   </div>
 }>
-                            <AccountProfile query={query} activeTab={activeTab} onWordClick={handleWordClick} stats={profileStats} itemCount={totalItems} isCrawling={isCrawling} onRefresh={handleRefreshCrawl} />
+                            <AccountProfile query={query} activeTab={activeTab} onWordClick={handleWordClick} stats={profileStats} userMeta={userMeta} isCrawling={isCrawling} onRefresh={handleRefreshCrawl} />
                         </Suspense>}
 
                         {searched && <h2 className="sr-only">{t("resultsFor")} u/{query}</h2>}
