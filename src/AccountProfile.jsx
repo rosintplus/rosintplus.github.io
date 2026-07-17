@@ -45,7 +45,7 @@ const AccountProfile = memo(function AccountProfile({
     }
   }, [query, isSaved]);
 
-  if (!stats || itemCount.loaded === 0) return null;
+  if (!stats || itemCount === 0) return null;
 
   const topSubreddits = useMemo(() => {
     if (!stats?.subredditCounts) return { list: [], max: 1 };
@@ -127,10 +127,7 @@ const AccountProfile = memo(function AccountProfile({
   return (
     <div className="flex flex-col gap-4 mb-4 mt-4">
       <div className="text-xs text-[color:var(--text-muted)] font-medium px-1 flex items-center gap-2 h-5">
-        <span>{itemCount.total > itemCount.loaded
-          ? t("apBasedOnTotal", { loaded: itemCount.loaded.toLocaleString(), total: itemCount.total.toLocaleString() })
-          : t("apBasedOn", { n: itemCount.loaded.toLocaleString() })
-        }</span>
+        <span>{t("apBasedOn", { n: itemCount.toLocaleString() })}</span>
         {isCrawling && <span className="text-[color:var(--accent-text)] italic">· {t("apUpdating")}</span>}
         <span>&middot;</span>
         <button
