@@ -1646,29 +1646,35 @@ export default function App() {
                 })}
                         </div>
 
-                        {initialLoading ? <div className="flex flex-wrap items-center justify-center gap-x-1 gap-y-1.5 mb-3" aria-hidden="true">
+                        {initialLoading ? <div className="flex flex-wrap items-center gap-x-1 gap-y-1.5 mb-3 sm:justify-between justify-center" aria-hidden="true">
+                                <div className="flex items-center gap-1.5">
                                     <div className="skeleton h-4 w-28 rounded-sm"></div>
                                     <div className="skeleton h-8 w-20 rounded"></div>
                                     <div className="skeleton h-8 w-16 rounded"></div>
-                                    <div className="w-px h-6 bg-[color:var(--border)]" />
+                                </div>
+                                <div className="flex items-center gap-1.5">
                                     <div className="skeleton h-8 w-[92px] rounded"></div>
+                                    <div className="w-px h-6 bg-[color:var(--border)]" />
                                     <div className="skeleton h-8 w-[62px] rounded"></div>
                                     <div className="skeleton h-8 w-[74px] rounded"></div>
-                            </div> : <div className="flex flex-wrap items-center justify-center gap-x-1 gap-y-1.5 mb-3">
-                                <HoverHint hint={t("searchOnRedditHint")}>
-                                    <a href={`https://www.reddit.com/search/?q=author%3A%22${query}%22`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-[11px] text-[color:var(--text-muted)] hover:text-[color:var(--accent-text)] transition-colors leading-relaxed">
-                                        <IconExternal /> {t("searchOnReddit")}
-                                    </a>
-                                </HoverHint>
-                                <label className="flex items-center gap-1.5 cursor-pointer select-none border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] rounded px-2 h-8 bg-[color:var(--bg)] transition-colors">
-                                    <input type="checkbox" checked={deletedOnly} onChange={e => setDeletedOnly(e.target.checked)} className="w-3 h-3 accent-[color:var(--accent)] cursor-pointer" />
-                                    <span className="text-[11px] whitespace-nowrap">{t("deletedOnly")}</span>
-                                </label>
-                                <label className="flex items-center gap-1.5 cursor-pointer select-none border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] rounded px-2 h-8 bg-[color:var(--bg)] transition-colors">
-                                    <input type="checkbox" checked={nsfwOnly} onChange={e => setNsfwOnly(e.target.checked)} className="w-3 h-3 accent-[color:var(--accent)] cursor-pointer" />
-                                    <span className="text-[11px] whitespace-nowrap">{t("nsfwOnly")}</span>
-                                </label>
-                                <div className="w-px h-6 bg-[color:var(--border)]" />
+                                </div>
+                            </div> : <div className="flex flex-wrap items-center gap-x-1 gap-y-1.5 mb-3 sm:justify-between justify-center">
+                                <div className="flex items-center gap-1.5">
+                                    <HoverHint hint={t("searchOnRedditHint")}>
+                                        <a href={`https://www.reddit.com/search/?q=author%3A%22${query}%22`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-[11px] text-[color:var(--text-muted)] hover:text-[color:var(--accent-text)] transition-colors leading-relaxed">
+                                            <IconExternal /> {t("searchOnReddit")}
+                                        </a>
+                                    </HoverHint>
+                                    <label className="flex items-center gap-1.5 cursor-pointer select-none border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] rounded px-2 h-8 bg-[color:var(--bg)] transition-colors">
+                                        <input type="checkbox" checked={deletedOnly} onChange={e => setDeletedOnly(e.target.checked)} className="w-3 h-3 accent-[color:var(--accent)] cursor-pointer" />
+                                        <span className="text-[11px] whitespace-nowrap">{t("deletedOnly")}</span>
+                                    </label>
+                                    <label className="flex items-center gap-1.5 cursor-pointer select-none border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] rounded px-2 h-8 bg-[color:var(--bg)] transition-colors">
+                                        <input type="checkbox" checked={nsfwOnly} onChange={e => setNsfwOnly(e.target.checked)} className="w-3 h-3 accent-[color:var(--accent)] cursor-pointer" />
+                                        <span className="text-[11px] whitespace-nowrap">{t("nsfwOnly")}</span>
+                                    </label>
+                                </div>
+                                <div className="flex items-center gap-1.5">
                                 <details className="relative group/sort" onKeyDown={closeOnEscape}>
                                     <summary aria-label={t("newest")} className="flex items-center gap-1.5 bg-[color:var(--bg)] border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] rounded h-8 px-2 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)] cursor-pointer list-none [&::-webkit-details-marker]:hidden">
                                         <span className="text-[11px] pointer-events-none">{sortOrder === "desc" ? t("newest") : t("oldest")}</span><svg className="w-3 h-3 text-[color:var(--text-muted)] pointer-events-none opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
@@ -1718,6 +1724,7 @@ export default function App() {
                                         </button>
                                     </div>
                                 </details>
+                                </div>
                             </div>}
 
                         {initialLoading ? <div className="relative mb-3">
