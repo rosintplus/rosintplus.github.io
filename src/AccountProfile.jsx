@@ -14,52 +14,6 @@ function getDays(locale) {
 }
 const levels = [0.4, 0.6, 0.8, 1.0];
 
-const Skeleton = memo(function Skeleton({ progress }) {
-  const { t } = useI18n();
-  return (
-    <div className="flex flex-col gap-2 mb-4 mt-4 select-none">
-      <div className="text-xs text-[color:var(--text-muted)] font-medium px-1 flex items-center gap-2 h-5">
-        <div className="w-3 h-3 rounded-full border-2 border-[color:var(--border)] border-t-[color:var(--accent)] animate-spin"></div>
-        {progress ? (progress.total > 0 && progress.loaded < progress.total ? t("apLoadedOf", { a: progress.loaded.toLocaleString(), b: progress.total.toLocaleString() }) : t("apLoaded", { n: progress.loaded.toLocaleString() })) : t("apLoadingProfile")}
-      </div>
-      <div className="flex flex-col gap-4">
-        <div className="flex flex-col md:flex-row gap-4">
-          <div className="flex-1 bg-[color:var(--bg-elevated)] border border-[color:var(--border)] rounded px-4 py-3 shadow-sm skeleton-card">
-            <div className="h-5 w-32 bg-[color:var(--border)] rounded mb-3 opacity-50"></div>
-            <div className="flex flex-col gap-1.5">
-              {[...Array(8)].map((_, i) => <div key={i} className="h-6 bg-[color:var(--border)] rounded opacity-20"></div>)}
-            </div>
-          </div>
-          <div className="flex-[2] bg-[color:var(--bg-elevated)] border border-[color:var(--border)] rounded px-4 py-3 shadow-sm overflow-x-auto skeleton-card">
-            <div className="flex items-center justify-between mb-3">
-              <div className="h-5 w-24 bg-[color:var(--border)] rounded opacity-50"></div>
-              <div className="h-3 w-40 bg-[color:var(--border)] rounded opacity-30"></div>
-            </div>
-            <div className="min-w-[400px]">
-              <div className="grid grid-cols-[30px_repeat(24,_1fr)] gap-0.5 mb-1">
-                <div></div>
-                {[...Array(24)].map((_, i) => <div key={i} className={`h-[9px] ${i % 4 === 0 ? 'w-2 mx-auto bg-[color:var(--border)] rounded opacity-30' : ''}`}></div>)}
-              </div>
-              {[...Array(7)].map((_, r) => (
-                <div key={r} className="grid grid-cols-[30px_repeat(24,_1fr)] gap-0.5 mb-0.5">
-                  <div className="h-[10px] w-5 ml-auto mr-2 bg-[color:var(--border)] rounded opacity-30"></div>
-                  {[...Array(24)].map((_, c) => <div key={c} className="min-h-[12px] bg-[color:var(--border)] rounded-sm opacity-20"></div>)}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-        <div className="bg-[color:var(--bg-elevated)] border border-[color:var(--border)] rounded px-4 py-3 shadow-sm skeleton-card">
-          <div className="h-5 w-36 bg-[color:var(--border)] rounded mb-3 opacity-50"></div>
-          <div className="flex flex-wrap gap-x-3 gap-y-2">
-            {[80,55,70,40,60,45,35,65,50,75,42,58,48,62,38,52,44,56,68,46].map((w, i) => <div key={i} className="bg-[color:var(--border)] rounded opacity-20" style={{width: `${w}px`, height: '14px'}}></div>)}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-});
-
 const AccountProfile = memo(function AccountProfile({
   query,
   activeTab,
@@ -212,9 +166,7 @@ const AccountProfile = memo(function AccountProfile({
     return { list: sorted.map(([word, counts]) => [word, counts[key]]), maxN };
   }, [profileData, activeTab, wordFreqMode]);
 
-  if (loading || !profileData) {
-    return <Skeleton progress={progress} />;
-  }
+  if (loading || !profileData) return null;
 
   if (totalItems === 0) return null;
 
