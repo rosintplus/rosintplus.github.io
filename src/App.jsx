@@ -1646,86 +1646,85 @@ export default function App() {
                 })}
                         </div>
 
-                        {initialLoading ? <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-3 sm:justify-between" aria-hidden="true">
-                                <div className="flex items-center gap-2 flex-shrink-0">
+                        {initialLoading ? <div className="flex flex-wrap items-center gap-1.5 mb-3 justify-between" aria-hidden="true">
+                                <div className="flex items-center gap-1.5">
                                     <div className="skeleton h-4 w-28 rounded-sm"></div>
-                                    <div className="skeleton h-7 w-20 rounded"></div>
-                                    <div className="skeleton h-7 w-16 rounded"></div>
+                                    <div className="skeleton h-8 w-20 rounded"></div>
+                                    <div className="skeleton h-8 w-16 rounded"></div>
                                 </div>
-                                <div className="w-full sm:w-auto flex flex-wrap items-center gap-2 sm:gap-4 justify-between sm:justify-end">
-                                    <div className="skeleton h-7 w-[92px] rounded"></div>
-                                    <div className="w-px h-5 bg-[color:var(--border)] hidden sm:block" />
-                                    <div className="skeleton h-7 w-[62px] rounded"></div>
-                                    <div className="skeleton h-7 w-[74px] rounded"></div>
+                                <div className="flex items-center gap-1.5">
+                                    <div className="skeleton h-8 w-[92px] rounded"></div>
+                                    <div className="w-px h-6 bg-[color:var(--border)]" />
+                                    <div className="skeleton h-8 w-[62px] rounded"></div>
+                                    <div className="skeleton h-8 w-[74px] rounded"></div>
                                 </div>
-                            </div> : <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-3 sm:justify-between">
-                                <div className="flex items-center gap-1.5 flex-shrink-0">
-                                    <HoverHint hint={t("searchOnRedditHint")} className="flex-shrink-0">
+                            </div> : <div className="flex flex-wrap items-center gap-1.5 mb-3 justify-between">
+                                <div className="flex items-center gap-1.5">
+                                    <HoverHint hint={t("searchOnRedditHint")}>
                                         <a href={`https://www.reddit.com/search/?q=author%3A%22${query}%22`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-[11px] text-[color:var(--text-muted)] hover:text-[color:var(--accent-text)] transition-colors leading-relaxed">
                                             <IconExternal /> {t("searchOnReddit")}
                                         </a>
                                     </HoverHint>
-                                    <label className="flex items-center gap-1.5 cursor-pointer select-none border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] rounded px-2 h-8 bg-[color:var(--bg)] transition-colors flex-shrink-0">
+                                    <label className="flex items-center gap-1.5 cursor-pointer select-none border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] rounded px-2 h-8 bg-[color:var(--bg)] transition-colors">
                                         <input type="checkbox" checked={deletedOnly} onChange={e => setDeletedOnly(e.target.checked)} className="w-3 h-3 accent-[color:var(--accent)] cursor-pointer" />
                                         <span className="text-[11px] whitespace-nowrap">{t("deletedOnly")}</span>
                                     </label>
-                                    <label className="flex items-center gap-1.5 cursor-pointer select-none border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] rounded px-2 h-8 bg-[color:var(--bg)] transition-colors flex-shrink-0">
+                                    <label className="flex items-center gap-1.5 cursor-pointer select-none border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] rounded px-2 h-8 bg-[color:var(--bg)] transition-colors">
                                         <input type="checkbox" checked={nsfwOnly} onChange={e => setNsfwOnly(e.target.checked)} className="w-3 h-3 accent-[color:var(--accent)] cursor-pointer" />
                                         <span className="text-[11px] whitespace-nowrap">{t("nsfwOnly")}</span>
                                     </label>
                                 </div>
-
-                                <div className="w-full sm:w-auto flex flex-wrap items-center gap-1.5 sm:gap-2 justify-between sm:justify-end">
-                                        <details className="relative group/sort flex-shrink-0" onKeyDown={closeOnEscape}>
-                                            <summary aria-label={t("newest")} className="flex items-center gap-1.5 bg-[color:var(--bg)] border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] rounded h-8 px-2 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)] cursor-pointer list-none [&::-webkit-details-marker]:hidden">
-                                                <span className="text-[11px] pointer-events-none">{sortOrder === "desc" ? t("newest") : t("oldest")}</span><svg className="w-3 h-3 text-[color:var(--text-muted)] pointer-events-none opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-                                            </summary>
-                                            <div className="fixed inset-0 z-40 hidden group-open/sort:block" onClick={e => e.currentTarget.closest('details').removeAttribute('open')} aria-hidden="true" />
-                                            <div className="absolute right-0 top-full mt-2 bg-[color:var(--bg-elevated)] border border-[color:var(--border-hover)] rounded-md shadow-xl overflow-hidden z-50 min-w-[90px] hidden group-open/sort:block">
-                                                <button onClick={e => { setSortOrder("desc"); e.currentTarget.closest('details').removeAttribute('open'); }} className="w-full text-left px-3 py-1.5 text-[11px] hover:bg-[color:var(--border-hover)] transition-colors">
-                                                    <span className={sortOrder === "desc" ? "text-[color:var(--text)] font-medium" : "text-[color:var(--text-muted)] hover:text-[color:var(--text)]"}>{t("newest")}</span>
-                                                </button>
-                                                <button onClick={e => { setSortOrder("asc"); e.currentTarget.closest('details').removeAttribute('open'); }} className="w-full text-left px-3 py-1.5 text-[11px] hover:bg-[color:var(--border-hover)] transition-colors">
-                                                    <span className={sortOrder === "asc" ? "text-[color:var(--text)] font-medium" : "text-[color:var(--text-muted)] hover:text-[color:var(--text)]"}>{t("oldest")}</span>
-                                                </button>
-                                            </div>
-                                        </details>
-                                    <div className="w-px h-6 bg-[color:var(--border)] hidden sm:block" />
-                                        <button onClick={() => setShowProfile(p => !p)} className={`flex items-center gap-1.5 px-2.5 h-8 transition-colors flex-shrink-0 border rounded outline-none cursor-pointer select-none ${showProfile ? "bg-[color:var(--bg-elevated)] text-[color:var(--text)] border-[color:var(--text-muted)]" : "bg-[color:var(--bg)] text-[color:var(--text-muted)] border-[color:var(--border-hover)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] hover:border-[color:var(--text-muted)]"}`}>
-                                            <IconActivity />
-                                            <span className="text-[11px] whitespace-nowrap">{t("stats")}</span>
-                                        </button>
-                                        <details className="relative group/export" onKeyDown={closeOnEscape}>
-                                            <summary aria-label="Export" className="flex items-center gap-1.5 bg-[color:var(--bg)] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] hover:border-[color:var(--text-muted)] px-2.5 h-8 transition-colors border border-[color:var(--border-hover)] rounded text-[11px] whitespace-nowrap cursor-pointer list-none [&::-webkit-details-marker]:hidden outline-none">
-                                                <svg className="w-3 h-3 text-[color:var(--text-muted)] pointer-events-none opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-                                                Export
-                                            </summary>
-                                            <div className="fixed inset-0 z-40 hidden group-open/export:block" onClick={e => e.currentTarget.closest('details').removeAttribute('open')} aria-hidden="true" />
-                                            <div className="absolute right-0 top-full mt-1 bg-[color:var(--bg-elevated)] border border-[color:var(--border-hover)] rounded-md shadow-xl overflow-hidden z-50 min-w-[100px] hidden group-open/export:block">
-                                                <button onClick={e => {
-                                                    const cols = ["id", "type", "created_utc", "subreddit", "author", "score", "permalink", "text", "removed", "deleted"];
-                                                    const csv = [cols.join(",")].concat(filteredItems.map(item => {
-                                                        const type = activeTab === "all" ? itemType(item) : activeTab;
-                                                        const status = getStatus(item, type);
-                                                        const text = isPost(item) ? item.title : item.body;
-                                                        const vals = [item.id, isPost(item) ? "post" : "comment", item.created_utc, item.subreddit, item.author, item.score || 0, item.permalink, text ? `"${text.replace(/"/g, '""').replace(/\n/g, " ")}"` : "", status.removed, status.deleted];
-                                                        return vals.join(",");
-                                                    })).join("\n");
-                                                    downloadFile(`rosint_${query}_${activeTab}.csv`, csv, "text/csv");
-                                                    e.currentTarget.closest('details').removeAttribute('open');
-                                                }} className="w-full text-left px-3 py-1.5 text-[11px] flex items-center gap-2 hover:bg-[color:var(--border-hover)] transition-colors">
-                                                    <IconDownload />
-                                                    CSV
-                                                </button>
-                                                <button onClick={e => {
-                                                    downloadFile(`rosint_${query}_${activeTab}.json`, JSON.stringify(filteredItems, null, 2), "application/json");
-                                                    e.currentTarget.closest('details').removeAttribute('open');
-                                                }} className="w-full text-left px-3 py-1.5 text-[11px] flex items-center gap-2 hover:bg-[color:var(--border-hover)] transition-colors">
-                                                    <IconDownload />
-                                                    JSON
-                                                </button>
-                                            </div>
-                                        </details>
+                                <div className="flex items-center gap-1.5">
+                                    <details className="relative group/sort" onKeyDown={closeOnEscape}>
+                                        <summary aria-label={t("newest")} className="flex items-center gap-1.5 bg-[color:var(--bg)] border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] rounded h-8 px-2 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)] cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                                            <span className="text-[11px] pointer-events-none">{sortOrder === "desc" ? t("newest") : t("oldest")}</span><svg className="w-3 h-3 text-[color:var(--text-muted)] pointer-events-none opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+                                        </summary>
+                                        <div className="fixed inset-0 z-40 hidden group-open/sort:block" onClick={e => e.currentTarget.closest('details').removeAttribute('open')} aria-hidden="true" />
+                                        <div className="absolute right-0 top-full mt-2 bg-[color:var(--bg-elevated)] border border-[color:var(--border-hover)] rounded-md shadow-xl overflow-hidden z-50 min-w-[90px] hidden group-open/sort:block">
+                                            <button onClick={e => { setSortOrder("desc"); e.currentTarget.closest('details').removeAttribute('open'); }} className="w-full text-left px-3 py-1.5 text-[11px] hover:bg-[color:var(--border-hover)] transition-colors">
+                                                <span className={sortOrder === "desc" ? "text-[color:var(--text)] font-medium" : "text-[color:var(--text-muted)] hover:text-[color:var(--text)]"}>{t("newest")}</span>
+                                            </button>
+                                            <button onClick={e => { setSortOrder("asc"); e.currentTarget.closest('details').removeAttribute('open'); }} className="w-full text-left px-3 py-1.5 text-[11px] hover:bg-[color:var(--border-hover)] transition-colors">
+                                                <span className={sortOrder === "asc" ? "text-[color:var(--text)] font-medium" : "text-[color:var(--text-muted)] hover:text-[color:var(--text)]"}>{t("oldest")}</span>
+                                            </button>
+                                        </div>
+                                    </details>
+                                    <div className="w-px h-6 bg-[color:var(--border)]" />
+                                    <button onClick={() => setShowProfile(p => !p)} className={`flex items-center gap-1.5 px-2.5 h-8 transition-colors border rounded outline-none cursor-pointer select-none ${showProfile ? "bg-[color:var(--bg-elevated)] text-[color:var(--text)] border-[color:var(--text-muted)]" : "bg-[color:var(--bg)] text-[color:var(--text-muted)] border-[color:var(--border-hover)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] hover:border-[color:var(--text-muted)]"}`}>
+                                        <IconActivity />
+                                        <span className="text-[11px] whitespace-nowrap">{t("stats")}</span>
+                                    </button>
+                                    <details className="relative group/export" onKeyDown={closeOnEscape}>
+                                        <summary aria-label="Export" className="flex items-center gap-1.5 bg-[color:var(--bg)] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] hover:border-[color:var(--text-muted)] px-2.5 h-8 transition-colors border border-[color:var(--border-hover)] rounded text-[11px] whitespace-nowrap cursor-pointer list-none [&::-webkit-details-marker]:hidden outline-none">
+                                            <svg className="w-3 h-3 text-[color:var(--text-muted)] pointer-events-none opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+                                            Export
+                                        </summary>
+                                        <div className="fixed inset-0 z-40 hidden group-open/export:block" onClick={e => e.currentTarget.closest('details').removeAttribute('open')} aria-hidden="true" />
+                                        <div className="absolute right-0 top-full mt-1 bg-[color:var(--bg-elevated)] border border-[color:var(--border-hover)] rounded-md shadow-xl overflow-hidden z-50 min-w-[100px] hidden group-open/export:block">
+                                            <button onClick={e => {
+                                                const cols = ["id", "type", "created_utc", "subreddit", "author", "score", "permalink", "text", "removed", "deleted"];
+                                                const csv = [cols.join(",")].concat(filteredItems.map(item => {
+                                                    const type = activeTab === "all" ? itemType(item) : activeTab;
+                                                    const status = getStatus(item, type);
+                                                    const text = isPost(item) ? item.title : item.body;
+                                                    const vals = [item.id, isPost(item) ? "post" : "comment", item.created_utc, item.subreddit, item.author, item.score || 0, item.permalink, text ? `"${text.replace(/"/g, '""').replace(/\n/g, " ")}"` : "", status.removed, status.deleted];
+                                                    return vals.join(",");
+                                                })).join("\n");
+                                                downloadFile(`rosint_${query}_${activeTab}.csv`, csv, "text/csv");
+                                                e.currentTarget.closest('details').removeAttribute('open');
+                                            }} className="w-full text-left px-3 py-1.5 text-[11px] flex items-center gap-2 hover:bg-[color:var(--border-hover)] transition-colors">
+                                                <IconDownload />
+                                                CSV
+                                            </button>
+                                            <button onClick={e => {
+                                                downloadFile(`rosint_${query}_${activeTab}.json`, JSON.stringify(filteredItems, null, 2), "application/json");
+                                                e.currentTarget.closest('details').removeAttribute('open');
+                                            }} className="w-full text-left px-3 py-1.5 text-[11px] flex items-center gap-2 hover:bg-[color:var(--border-hover)] transition-colors">
+                                                <IconDownload />
+                                                JSON
+                                            </button>
+                                        </div>
+                                    </details>
                                 </div>
                             </div>}
 
