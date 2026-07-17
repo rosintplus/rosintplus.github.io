@@ -4,6 +4,7 @@ const DB_NAME = "rosint-db";
 const DB_VERSION = 2;
 const STORE_NAME = "profiles";
 
+const memoryCache = new Map();
 const MAX_CACHE_SIZE = 100;
 
 function cacheSet(key, value) {
@@ -32,7 +33,7 @@ const STOPWORDS = new Set([
   'http','www','com','org','jpg','jpeg','gif','svg','html','css',
 ]);
 
-// ─── Stats helpers ───────────────────────────────────────────────────────────
+// ─── Stats helpers (exported for client-side use in App.jsx) ──────────────────
 
 function emptyStats() {
   return {
@@ -42,7 +43,6 @@ function emptyStats() {
   };
 }
 
-/** Accumulate one item's contribution into a mutable stats object. */
 function processItem(stats, item, isComment) {
   const sub = item.subreddit || item.subreddit_name_prefixed?.replace(/^r\//, "") || "unknown";
   stats.subredditCounts[sub] = (stats.subredditCounts[sub] || 0) + 1;
@@ -69,48 +69,7 @@ function processItem(stats, item, isComment) {
   }
 }
 
-/** Merge `addition` stats into `base` (mutates base). */
-function mergeStats(base, addition) {
-  for (const [sub, count] of Object.entries(addition.subredditCounts)) {
-    base.subredditCounts[sub] = (base.subredditCounts[sub] || 0) + count;
-  }
-  for (let r = 0; r < 7; r++) {
-    for (let c = 0; c < 24; c++) {
-      base.heatmap[r][c] += addition.heatmap[r][c];
-    }
-  }
-  for (const type of ["posts", "comments"]) {
-    for (const [word, counts] of Object.entries(addition.wordFreqs[type])) {
-      if (!base.wordFreqs[type][word]) base.wordFreqs[type][word] = { total: 0, items: 0 };
-      base.wordFreqs[type][word].total += counts.total;
-      base.wordFreqs[type][word].items += counts.items;
-    }
-  }
-  return base;
-}
-
-/** Detect old (raw-items) format and migrate to stats-only format. */
-function migrateIfNeeded(profile) {
-  if (profile.stats) return profile;
-
-  const stats = emptyStats();
-  for (const item of (profile.posts || [])) processItem(stats, item, false);
-  for (const item of (profile.comments || [])) processItem(stats, item, true);
-
-  const maxP = profile.posts?.length > 0 ? Math.max(...profile.posts.map(p => p.created_utc)) : 0;
-  const maxC = profile.comments?.length > 0 ? Math.max(...profile.comments.map(c => c.created_utc)) : 0;
-
-  return {
-    username: profile.username,
-    stats,
-    totals: profile.totals || { posts: 0, comments: 0 },
-    itemsCrawled: { posts: profile.posts?.length || 0, comments: profile.comments?.length || 0 },
-    maxCreatedUtc: Math.max(maxP, maxC),
-    fetchedAt: profile.fetchedAt || Date.now(),
-    saved: profile.saved || false,
-    partial: profile.partial || false,
-  };
-}
+export { emptyStats, processItem, STOPWORDS };
 
 // ─── IndexedDB ───────────────────────────────────────────────────────────────
 
@@ -202,8 +161,15 @@ export async function getProfileData(username, onProgress, forceUpdate = false) 
   }
 
   const controller = new AbortController();
+  // Stall timeout: abort only if a single request/page makes no progress for
+  // TIMEOUT_MS. Re-armed after every successful fetch so large multi-page
+  // crawls (which legitimately take longer than one timeout) aren't killed.
   const TIMEOUT_MS = 30000;
-  const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  let timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const armTimeout = () => {
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  };
   const listeners = onProgress ? [onProgress] : [];
 
   const promise = (async () => {
@@ -234,6 +200,7 @@ export async function getProfileData(username, onProgress, forceUpdate = false) 
       const metaUrl = `${ARCTIC}/api/users/search?author=${encodeURIComponent(normalized)}&limit=1`;
       const metaRes = await safeFetch(metaUrl, { signal });
       if (signal?.aborted || metaRes.aborted) throw new DOMException("Aborted", "AbortError");
+      armTimeout();
 
       const meta = metaRes.data?.[0]?._meta || { num_posts: 0, num_comments: 0 };
       const totals = { posts: meta.num_posts || 0, comments: meta.num_comments || 0 };
@@ -271,6 +238,7 @@ export async function getProfileData(username, onProgress, forceUpdate = false) 
 
           const res = await safeFetch(url, { signal });
           if (signal?.aborted || res.aborted) throw new DOMException("Aborted", "AbortError");
+          armTimeout();
 
           if (!res.ok) {
             profile.partial = true;

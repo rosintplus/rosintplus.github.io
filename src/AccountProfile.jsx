@@ -1,12 +1,7 @@
-import { memo, useMemo, useState, useEffect, useCallback, useRef } from 'react';
+import { memo, useMemo } from 'react';
 import { HoverHint, IconInfo } from './App.jsx';
 import { REDDIT_BASE } from './api.js';
-import { getProfileData, toggleProfileSaved, getSavedUsernames } from './profileData.js';
-import { useI18n, relTime, LOCALES } from './i18n.js';
-
-function timeAgo(ms, lang) {
-  return relTime(ms / 1000, lang);
-}
+import { useI18n, LOCALES } from './i18n.js';
 
 function getDays(locale) {
   const fmt = new Intl.DateTimeFormat(locale, { weekday: "long" });
@@ -18,104 +13,27 @@ const AccountProfile = memo(function AccountProfile({
   query,
   activeTab,
   onWordClick,
+  stats,
+  itemCount,
 }) {
   const { t, lang } = useI18n();
   const days = useMemo(() => getDays(LOCALES[lang] || "en"), [lang]);
-  const [profileData, setProfileData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [progress, setProgress] = useState(null);
-  const [, setError] = useState(false);
-  const [isUpdating, setIsUpdating] = useState(false);
-  const [wordFreqMode, setWordFreqMode] = useState('occurrences');
-  const [isSaved, setIsSaved] = useState(false);
-  const rootRef = useRef(null);
 
-  useEffect(() => {
-    if (profileData && rootRef.current) {
-      rootRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    }
-  }, [profileData]);
-
-  useEffect(() => {
-    if (!query) return;
-    const checkSaved = () => {
-      getSavedUsernames()
-        .then(keys => setIsSaved(keys.includes(query.toLowerCase())))
-        .catch(() => setIsSaved(false));
-    };
-    checkSaved();
-    window.addEventListener('savedUsersChanged', checkSaved);
-    return () => window.removeEventListener('savedUsersChanged', checkSaved);
-  }, [query]);
-
-  const handleToggleSave = useCallback(async () => {
-    const newState = !isSaved;
-    setIsSaved(newState);
-    try {
-      await toggleProfileSaved(query, newState);
-    } catch {
-      setIsSaved(!newState);
-    }
-  }, [query, isSaved]);
-
-  const fetchProfile = useCallback((forceUpdate = false) => {
-    if (!query) return;
-    let active = true;
-
-    if (!forceUpdate) {
-      setLoading(true);
-      setProgress(null);
-      setError(false);
-      setProfileData(null);
-    } else {
-      setIsUpdating(true);
-    }
-
-    getProfileData(query, (p) => {
-      if (active) setProgress(p);
-    }, forceUpdate).then(data => {
-      if (active && data) {
-        setProfileData(data);
-        setLoading(false);
-        setIsUpdating(false);
-        if (data.saved !== undefined) setIsSaved(data.saved);
-      }
-    }).catch(err => {
-      if (active) {
-        if (!err || err?.name !== "AbortError") {
-          console.error("Profile fetch error:", err);
-          setError(true);
-        }
-        setLoading(false);
-        setIsUpdating(false);
-      }
-    });
-
-    return () => { active = false; };
-  }, [query]);
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    return fetchProfile(false);
-  }, [fetchProfile]);
+  if (!stats || itemCount === 0) return null;
 
   // ── Pre-computed stats ──────────────────────────────────────────────────────
 
-  const totalItems = profileData
-    ? (profileData.itemsCrawled?.posts || 0) + (profileData.itemsCrawled?.comments || 0)
-    : 0;
-
   const topSubreddits = useMemo(() => {
-    if (!profileData?.stats?.subredditCounts) return { list: [], max: 1 };
-    const counts = profileData.stats.subredditCounts;
+    if (!stats?.subredditCounts) return { list: [], max: 1 };
+    const counts = stats.subredditCounts;
     const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 8);
     const max = sorted.length > 0 ? sorted[0][1] : 1;
     return { list: sorted, max };
-  }, [profileData]);
+  }, [stats]);
 
   const heatmapData = useMemo(() => {
-    if (!profileData?.stats?.heatmap) return { matrix: [], maxCount: 1 };
-    const matrix = profileData.stats.heatmap;
+    if (!stats?.heatmap) return { matrix: [], maxCount: 1 };
+    const matrix = stats.heatmap;
     let max = 0;
     for (let r = 0; r < 7; r++) {
       for (let c = 0; c < 24; c++) {
@@ -123,11 +41,11 @@ const AccountProfile = memo(function AccountProfile({
       }
     }
     return { matrix, maxCount: max || 1 };
-  }, [profileData]);
+  }, [stats]);
 
   const tzHint = useMemo(() => {
-    if (!profileData?.stats?.heatmap) return null;
-    const matrix = profileData.stats.heatmap;
+    if (!stats?.heatmap) return null;
+    const matrix = stats.heatmap;
     const hourTotals = Array(24).fill(0);
     for (let r = 0; r < 7; r++) {
       for (let c = 0; c < 24; c++) {
@@ -152,21 +70,20 @@ const AccountProfile = memo(function AccountProfile({
     const estOffset = Math.round(offset);
     const peakHour = (quietestStart + 16) % 24;
     return t("apTzHint", { hour: peakHour, offset: `${estOffset >= 0 ? '+' : ''}${estOffset}` });
-  }, [profileData, t]);
+  }, [stats, t]);
 
   const commonWords = useMemo(() => {
-    if (!profileData?.stats?.wordFreqs) return { list: [], maxN: 1 };
+    if (!stats?.wordFreqs) return { list: [], maxN: 1 };
 
     let freqs;
     if (activeTab === 'posts') {
-      freqs = profileData.stats.wordFreqs.posts || {};
+      freqs = stats.wordFreqs.posts || {};
     } else if (activeTab === 'comments') {
-      freqs = profileData.stats.wordFreqs.comments || {};
+      freqs = stats.wordFreqs.comments || {};
     } else {
-      // "all" tab — merge both
       freqs = {};
       for (const type of ['posts', 'comments']) {
-        const wf = profileData.stats.wordFreqs[type] || {};
+        const wf = stats.wordFreqs[type] || {};
         for (const [word, counts] of Object.entries(wf)) {
           if (!freqs[word]) freqs[word] = { total: 0, items: 0 };
           freqs[word].total += counts.total;
@@ -175,64 +92,18 @@ const AccountProfile = memo(function AccountProfile({
       }
     }
 
-    const key = wordFreqMode === 'items' ? 'items' : 'total';
+    const key = 'total';
     const sorted = Object.entries(freqs)
       .sort((a, b) => b[1][key] - a[1][key])
       .slice(0, 20);
     const maxN = sorted.length > 0 ? sorted[0][1][key] : 1;
     return { list: sorted.map(([word, counts]) => [word, counts[key]]), maxN };
-  }, [profileData, activeTab, wordFreqMode]);
-
-  if (loading) return (
-    <div className="flex items-center justify-center h-32 text-[color:var(--text-muted)] text-xs">
-      <svg className="animate-spin w-4 h-4 mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
-      </svg>
-      {t("apLoadingProfile")}
-    </div>
-  );
-
-  if (!profileData || totalItems === 0) return (
-    <div className="flex items-center justify-center h-20 text-[color:var(--text-muted)] text-xs">
-      {t("apNoData")}
-    </div>
-  );
+  }, [stats, activeTab]);
 
   return (
-    <div ref={rootRef} className="flex flex-col gap-4 mb-4 mt-4">
+    <div className="flex flex-col gap-4 mb-4 mt-4">
       <div className="text-xs text-[color:var(--text-muted)] font-medium px-1 flex items-center gap-2 h-5">
-        <span>{t("apBasedOn", { n: totalItems.toLocaleString() })}</span>
-        <span>&middot;</span>
-        <span>{t("apUpdated", { time: timeAgo(profileData.fetchedAt, lang) })}</span>
-        <button
-          onClick={() => fetchProfile(true)}
-          disabled={isUpdating}
-          className={`text-[color:var(--text-muted)] hover:text-[color:var(--accent)] transition-colors p-1 -m-1 ${isUpdating ? 'animate-spin cursor-default opacity-50' : ''}`}
-          title={isUpdating ? t("apUpdating") : t("apRefreshTitle")}
-        >
-          <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M23 4v6h-6"></path>
-            <path d="M1 20v-6h6"></path>
-            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-          </svg>
-        </button>
-        <span>&middot;</span>
-        <button
-          onClick={handleToggleSave}
-          className={`flex items-center gap-1 transition-colors px-1.5 py-0.5 -mx-1.5 rounded ${isSaved ? 'text-amber-500 hover:text-amber-600 bg-amber-500/10' : 'text-[color:var(--text-muted)] hover:text-[color:var(--accent)] hover:bg-[color:var(--accent)]/10'}`}
-          title={isSaved ? t("apSavedTitle") : t("apSaveTitle")}
-        >
-          <svg viewBox="0 0 24 24" className="w-3 h-3 flex-shrink-0" stroke="currentColor" strokeWidth="1.5" fill={isSaved ? "currentColor" : "none"} strokeLinecap="round" strokeLinejoin="round">
-            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
-          </svg>
-          <span className="text-[10px] uppercase font-bold leading-none translate-y-[0.5px]">{isSaved ? t("apSaved") : t("apSave")}</span>
-        </button>
-        {profileData.partial && (
-          <>
-            <span>&middot;</span>
-            <span className="text-orange-400">{t("apPartial")}</span>
-          </>
-        )}
+        <span>{t("apBasedOn", { n: itemCount.toLocaleString() })}</span>
       </div>
 
       <div className="flex flex-col md:flex-row gap-4">
@@ -306,20 +177,6 @@ const AccountProfile = memo(function AccountProfile({
                   <IconInfo />
                 </div>
               </HoverHint>
-            </div>
-            <div className="flex bg-[color:var(--bg)] rounded border border-[color:var(--border)] p-0.5">
-              <button
-                onClick={() => setWordFreqMode('occurrences')}
-                className={`text-[10px] px-2 py-0.5 rounded-sm transition-colors ${wordFreqMode === 'occurrences' ? 'bg-[color:var(--border)] text-[color:var(--text)] font-medium' : 'text-[color:var(--text-muted)] hover:text-[color:var(--text)]'}`}
-              >
-                {t("apByTotal")}
-              </button>
-              <button
-                onClick={() => setWordFreqMode('items')}
-                className={`text-[10px] px-2 py-0.5 rounded-sm transition-colors ${wordFreqMode === 'items' ? 'bg-[color:var(--border)] text-[color:var(--text)] font-medium' : 'text-[color:var(--text-muted)] hover:text-[color:var(--text)]'}`}
-              >
-                {t("apByItems")}
-              </button>
             </div>
           </div>
           <div className="flex flex-wrap gap-x-3 gap-y-2 leading-none">

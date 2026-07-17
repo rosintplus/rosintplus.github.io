@@ -1,6 +1,6 @@
 import { safeFetch, fetchBoth, REDDIT_BASE, ARCTIC, LIMIT } from "./api";
 import { downloadFile, normalizeUsername } from "./utils";
-import { getSavedUsernames } from "./profileData.js";
+import { getSavedUsernames, emptyStats, processItem } from "./profileData.js";
 import { useI18n, LANGS, LOCALES, setLang, relTime, tN } from "./i18n.js";
 
 import { useState, useCallback, useEffect, useMemo, Component, memo, useRef, lazy, Suspense, useDeferredValue } from "react";
@@ -1237,6 +1237,14 @@ export default function App() {
       return true;
     }).sort((a, b) => sortOrder === "desc" ? b.created_utc - a.created_utc : a.created_utc - b.created_utc);
   }, [activeTab, posts.items, comments.items, deletedOnly, nsfwOnly, deferredKeyword, sortOrder]);
+
+  const profileStats = useMemo(() => {
+    const stats = emptyStats();
+    for (const item of posts.items) processItem(stats, item, false);
+    for (const item of comments.items) processItem(stats, item, true);
+    return stats;
+  }, [posts.items, comments.items]);
+
   const [visibleCount, setVisibleCount] = useState(Infinity);
   const prevFilteredLenRef = useRef(0);
   useEffect(() => {
@@ -1638,7 +1646,7 @@ export default function App() {
     </div>
   </div>
 }>
-                            <AccountProfile query={query} activeTab={activeTab} onWordClick={handleWordClick} />
+                            <AccountProfile query={query} activeTab={activeTab} onWordClick={handleWordClick} stats={profileStats} itemCount={posts.items.length + comments.items.length} />
                         </Suspense>}
 
                         {searched && <h2 className="sr-only">{t("resultsFor")} u/{query}</h2>}
