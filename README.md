@@ -58,7 +58,7 @@ npm run dev
 
 Then open [http://localhost:5173](http://localhost:5173).
 
-## Backend
+## APIs
 
 Both APIs are queried with the same parameters:
 
