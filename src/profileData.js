@@ -202,6 +202,8 @@ export async function getProfileData(username, onProgress, forceUpdate = false) 
   }
 
   const controller = new AbortController();
+  const TIMEOUT_MS = 30000;
+  const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
   const listeners = onProgress ? [onProgress] : [];
 
   const promise = (async () => {
@@ -334,6 +336,7 @@ export async function getProfileData(username, onProgress, forceUpdate = false) 
       if (err?.name === "AbortError") throw err;
       return { partial: true, stats: emptyStats(), totals: { posts: 0, comments: 0 }, itemsCrawled: { posts: 0, comments: 0 } };
     } finally {
+      clearTimeout(timeoutId);
       if (currentCrawl?.controller === controller) {
         currentCrawl = null;
       }

@@ -22,7 +22,7 @@ const AccountProfile = memo(function AccountProfile({
   const { t, lang } = useI18n();
   const days = useMemo(() => getDays(LOCALES[lang] || "en"), [lang]);
   const [profileData, setProfileData] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [progress, setProgress] = useState(null);
   const [, setError] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
@@ -74,9 +74,11 @@ const AccountProfile = memo(function AccountProfile({
         if (data.saved !== undefined) setIsSaved(data.saved);
       }
     }).catch(err => {
-      if (active && (!err || err?.name !== "AbortError")) {
-        console.error("Profile fetch error:", err);
-        setError(true);
+      if (active) {
+        if (!err || err?.name !== "AbortError") {
+          console.error("Profile fetch error:", err);
+          setError(true);
+        }
         setLoading(false);
         setIsUpdating(false);
       }
@@ -174,7 +176,7 @@ const AccountProfile = memo(function AccountProfile({
     return { list: sorted.map(([word, counts]) => [word, counts[key]]), maxN };
   }, [profileData, activeTab, wordFreqMode]);
 
-  if (loading || !profileData) return (
+  if (loading) return (
     <div className="flex items-center justify-center h-32 text-[color:var(--text-muted)] text-xs">
       <svg className="animate-spin w-4 h-4 mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
         <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
@@ -183,7 +185,11 @@ const AccountProfile = memo(function AccountProfile({
     </div>
   );
 
-  if (totalItems === 0) return null;
+  if (!profileData || totalItems === 0) return (
+    <div className="flex items-center justify-center h-20 text-[color:var(--text-muted)] text-xs">
+      {t("apNoData")}
+    </div>
+  );
 
   return (
     <div className="flex flex-col gap-4 mb-4 mt-4">
