@@ -16,6 +16,7 @@ const AccountProfile = memo(function AccountProfile({
   onWordClick,
   stats,
   userMeta,
+  loadedCount,
   isCrawling,
   onRefresh,
 }) {
@@ -47,9 +48,9 @@ const AccountProfile = memo(function AccountProfile({
 
   const totalItems = typeof userMeta?.num_posts === 'number' && typeof userMeta?.num_comments === 'number'
     ? userMeta.num_posts + userMeta.num_comments
-    : 0;
+    : null;
 
-  if (!stats || totalItems === 0) return null;
+  if (!stats || totalItems === null) return null;
 
   const topSubreddits = useMemo(() => {
     if (!stats?.subredditCounts) return { list: [], max: 1 };
@@ -131,7 +132,7 @@ const AccountProfile = memo(function AccountProfile({
   return (
     <div className="flex flex-col gap-4 mb-4 mt-4">
       <div className="text-xs text-[color:var(--text-muted)] font-medium px-1 flex items-center gap-2 h-5">
-        <span>{t("apBasedOn", { n: totalItems.toLocaleString() })}</span>
+        <span>{t("apBasedOnTotal", { loaded: loadedCount.toLocaleString(), total: totalItems.toLocaleString() })}</span>
         {isCrawling && <span className="text-[color:var(--accent-text)] italic">· {t("apUpdating")}</span>}
         <span>&middot;</span>
         <button
