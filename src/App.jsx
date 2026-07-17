@@ -1334,10 +1334,7 @@ export default function App() {
   }, [posts.items, comments.items, bgStatsVersion]);
 
   const totalItems = useMemo(() => {
-    const loaded = posts.items.length + comments.items.length;
-    const extra = crawlItemsRef.current;
-    const total = Math.max(loaded + extra, crawledTotalRef.current);
-    return { loaded, total };
+    return { loaded: posts.items.length + comments.items.length, total: crawledTotalRef.current };
   }, [posts.items.length, comments.items.length, bgStatsVersion]);
 
   const [visibleCount, setVisibleCount] = useState(Infinity);
