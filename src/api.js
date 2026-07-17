@@ -51,6 +51,7 @@ function buildUrls(username, type, pagination = {}, dateFilters = {}, { sort = "
 // fetch — share one network request and one await. The 5-minute TTL only
 // applies to successful results; empty/error results are evicted below.
 const FETCH_CACHE = new Map();
+const MAX_CACHE = 200;
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -151,6 +152,10 @@ export function safeFetch(url, {
     ts: Date.now(),
     promise
   });
+  if (FETCH_CACHE.size > MAX_CACHE) {
+    const oldest = FETCH_CACHE.keys().next().value;
+    if (oldest) FETCH_CACHE.delete(oldest);
+  }
   return promise;
 }
 

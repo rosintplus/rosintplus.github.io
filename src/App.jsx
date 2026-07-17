@@ -6,6 +6,8 @@ import { useI18n, LANGS, LOCALES, setLang, relTime, tN } from "./i18n.js";
 import { useState, useCallback, useEffect, useMemo, Component, memo, useRef, lazy, Suspense, useDeferredValue } from "react";
 import { createPortal } from "react-dom";
 
+const LOGO_PATH = "M696.25 1330.0 618.75 873.75H732.5Q752.5 550.0 1071.25 550.0Q1260.0 550.0 1360.625 688.75Q1461.25 827.5 1461.25 1088.75H1123.75Q1123.75 971.25 1080.625 920.0Q1037.5 868.75 942.5 868.75Q818.75 868.75 757.5 988.75Q696.25 1108.75 696.25 1330.0ZM78.75 1900.0V1610.0H1006.25V1900.0ZM358.75 1900.0V575.0H646.25L696.25 955.0V1900.0ZM128.75 865.0V575.0H628.75L653.75 865.0Z M2100.0 1920.0Q1559.0 1920.0 1559.0 1200.0Q1559.0 460.0 2100.0 460.0Q2641.0 460.0 2641.0 1200.0Q2641.0 1920.0 2100.0 1920.0ZM2100.0 1668.0Q2364.0 1668.0 2364.0 1200.0Q2364.0 712.0 2100.0 712.0Q1836.0 712.0 1836.0 1200.0Q1836.0 1668.0 2100.0 1668.0Z M3251.0 1920.0Q3130.0 1920.0 3016.0 1899.5Q2902.0 1879.0 2812.0 1842.0L2848.0 1572.0Q2958.0 1618.0 3066.5 1643.0Q3175.0 1668.0 3267.0 1668.0Q3374.0 1668.0 3431.0 1630.0Q3488.0 1592.0 3488.0 1521.0Q3488.0 1428.0 3371.0 1373.0L3167.0 1274.0Q3016.0 1200.0 2933.0 1091.0Q2850.0 982.0 2850.0 850.0Q2850.0 664.0 2973.0 562.0Q3096.0 460.0 3321.0 460.0Q3452.0 460.0 3569.5 506.0Q3687.0 552.0 3778.0 639.0L3596.0 848.0Q3527.0 782.0 3457.0 746.5Q3387.0 711.0 3322.0 711.0Q3234.0 711.0 3185.0 748.5Q3136.0 786.0 3136.0 857.0Q3136.0 904.0 3170.5 946.0Q3205.0 988.0 3269.0 1022.0L3461.0 1121.0Q3611.0 1199.0 3692.5 1303.0Q3774.0 1407.0 3774.0 1526.0Q3774.0 1715.0 3638.0 1817.5Q3502.0 1920.0 3251.0 1920.0Z M4367.0 1900.0V480.0H4631.0V1900.0ZM4051.0 1900.0V1662.0H4949.0V1900.0ZM4051.0 717.0V480.0H4949.0V717.0Z M5772.0 1900.0 5522.0 790.0H5413.0V480.0H5628.0L5878.0 1590.0H5945.0V1900.0ZM5231.0 1900.0V480.0H5485.0V1900.0ZM5915.0 1900.0V480.0H6169.0V1900.0Z M6768.0 1900.0V480.0H7032.0V1900.0ZM6363.0 723.0V480.0H7437.0V723.0Z M7966.0 1710.0V672.0H8234.0V1710.0ZM7600.0 1316.0V1066.0H8600.0V1316.0Z";
+const Logo = ({ className = "inline-block align-middle h-4 sm:h-5 w-auto" }) => (<svg viewBox="78.8 460 8521.2 1460" role="img" aria-label="rOSINT+" fill="currentColor" className={className}><path d={LOGO_PATH} /></svg>);
 const NO_DECORATION = { textDecoration: 'none' };
 const STROKE_TRANSITION = { transition: "stroke 150ms" };
 const FLEX_1 = { flex: "1 1 0" };
@@ -20,6 +22,7 @@ function tJsx(tFn, key, vars) {
 }
 
 function fullTimestamp(utc, lang) {
+  if (utc == null || isNaN(utc)) return "";
   return new Date(utc * 1000).toLocaleString(LOCALES[lang] || "en", {
     dateStyle: "medium",
     timeStyle: "long"
@@ -321,9 +324,10 @@ const PostCard = memo(function PostCard({
   }
   const copyText = useCallback(() => {
     const flag = status.removed ? " [removed]" : status.deleted ? " [deleted]" : "";
+    const ts = post.created_utc != null ? new Date(post.created_utc * 1000).toISOString() : "";
     return [
       post.title,
-      `u/${post.author} · ${post.subreddit_name_prefixed || `r/${post.subreddit}`} · ${new Date(post.created_utc * 1000).toISOString()} · ${fmtNum(post.score)} pts${flag}`,
+      `u/${post.author} · ${post.subreddit_name_prefixed || `r/${post.subreddit}`} · ${ts} · ${fmtNum(post.score)} pts${flag}`,
       postUrl,
       post.selftext ? `\n${post.selftext}` : "",
     ].filter(Boolean).join("\n");
@@ -390,7 +394,7 @@ return <>
                                         e.preventDefault();
                                         e.stopPropagation();
                                         window.open(thumb, "_blank", "noopener,noreferrer");
-                                    }} className="relative flex items-center justify-center w-[70px] h-[52px] rounded overflow-hidden bg-[color:var(--bg-elevated)] border border-[color:var(--border-hover)] cursor-zoom-in">
+                                    }} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); window.open(thumb, "_blank", "noopener,noreferrer"); } }} className="relative flex items-center justify-center w-[70px] h-[52px] rounded overflow-hidden bg-[color:var(--bg-elevated)] border border-[color:var(--border-hover)] cursor-zoom-in">
                                         <img src={thumb} alt={`${post.title}`} width="70" height="52" className={`absolute inset-0 w-full h-full object-cover transition-opacity ${imgError ? 'opacity-0' : 'opacity-100'}`} loading="lazy" onError={() => setImgError(true)} />
                                         {imgError && <IconExternal className="w-4 h-4 text-[color:var(--text-muted)] opacity-50 pointer-events-none" />}
                                     </div>
@@ -539,9 +543,10 @@ const CommentCard = memo(function CommentCard({
   }
   const copyText = useCallback(() => {
     const flag = status.removed ? " [removed]" : status.deleted ? " [deleted]" : "";
+    const ts = comment.created_utc != null ? new Date(comment.created_utc * 1000).toISOString() : "";
     return [
       `Comment on: ${comment.link_title || "Post"}`,
-      `u/${comment.author} · ${comment.subreddit_name_prefixed || `r/${comment.subreddit}`} · ${new Date(comment.created_utc * 1000).toISOString()} · ${fmtNum(comment.score)} pts${flag}`,
+      `u/${comment.author} · ${comment.subreddit_name_prefixed || `r/${comment.subreddit}`} · ${ts} · ${fmtNum(comment.score)} pts${flag}`,
       url,
       comment.body ? `\n${comment.body}` : "",
     ].filter(Boolean).join("\n");
@@ -851,7 +856,7 @@ function usePaginatedFetch(type) {
     if (streamDone) { setDone(true); doneRef.current = true; }
   }, [_fetch]);
   useEffect(() => () => { if (abortRef.current) abortRef.current.abort(); }, []);
-  return {
+  return useMemo(() => ({
     items,
     sources,
     loading,
@@ -861,7 +866,7 @@ function usePaginatedFetch(type) {
     pullpushDown,
     reset,
     loadMore
-  };
+  }), [items, sources, loading, error, done, arcticDown, pullpushDown, reset, loadMore]);
 }
 
 const THEMES = {
@@ -1198,7 +1203,16 @@ export default function App() {
   useEffect(() => { setMounted(true); }, []);
   const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 0);
+    let ticking = false;
+    const onScroll = () => {
+      if (!ticking) {
+        ticking = true;
+        requestAnimationFrame(() => {
+          setScrolled(window.scrollY > 0);
+          ticking = false;
+        });
+      }
+    };
     onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
@@ -1300,11 +1314,6 @@ export default function App() {
   } = {}) => {
     const user = normalizeUsername(rawUser);
     if (!user) return;
-    if (push) {
-      const url = new URL(window.location.href);
-      url.searchParams.set("u", user);
-      window.history.pushState({}, "", url);
-    }
     const searchId = ++searchIdRef.current;
     setQuery(user);
     setSearched(true);
@@ -1312,9 +1321,14 @@ export default function App() {
     const filters = buildFilters();
     const postsPromise = resetPosts(user, filters, { sort: sortOrder });
     const commentsPromise = resetComments(user, filters, { sort: sortOrder });
-    postsPromise.then(() => { if (searchId === searchIdRef.current) setInitialLoading(false); });
     await Promise.all([postsPromise, commentsPromise]);
     if (searchId !== searchIdRef.current) return;
+    if (push) {
+      const url = new URL(window.location.href);
+      url.searchParams.set("u", user);
+      window.history.pushState({}, "", url);
+    }
+    setInitialLoading(false);
     setAppliedSubreddit(subreddit.trim());
   }, [buildFilters, resetPosts, resetComments, subreddit, sortOrder]);
   useEffect(() => {
@@ -1391,7 +1405,7 @@ export default function App() {
   const handleWordClick = useCallback((word) => setKeyword(word), []);
   const pathname = window.location.pathname;
   const isPrivacyPage = pathname.endsWith('/privacy.html') || pathname.endsWith('/privacy');
-  const is404Page = pathname.endsWith('/404.html') || (pathname !== "/" && !isPrivacyPage && !pathname.includes('index.html'));
+  const is404Page = pathname === '/404.html' || (pathname !== "/" && !isPrivacyPage && !/^\/(assets|__vite|favicon\.ico|robots\.txt)/.test(pathname));
 
   if (isPrivacyPage) {
     return (
@@ -1400,7 +1414,7 @@ export default function App() {
         <header className="fixed top-0 inset-x-0 z-50 flex items-center justify-between gap-2 px-3 sm:px-4 py-2.5 bg-[color:var(--bg)] border-b border-[color:var(--border)]">
             <div className="flex items-center gap-2 sm:gap-4 min-w-0">
                     <a href="/" className="text-[color:var(--text)] hover:text-[color:var(--accent)] transition-colors font-bold text-base sm:text-lg leading-none whitespace-nowrap"style={NO_DECORATION}>
-                        <svg viewBox="78.8 460 8521.2 1460" role="img" aria-label="rOSINT+" fill="currentColor" className="inline-block align-middle h-4 sm:h-5 w-auto"><path d="M696.25 1330.0 618.75 873.75H732.5Q752.5 550.0 1071.25 550.0Q1260.0 550.0 1360.625 688.75Q1461.25 827.5 1461.25 1088.75H1123.75Q1123.75 971.25 1080.625 920.0Q1037.5 868.75 942.5 868.75Q818.75 868.75 757.5 988.75Q696.25 1108.75 696.25 1330.0ZM78.75 1900.0V1610.0H1006.25V1900.0ZM358.75 1900.0V575.0H646.25L696.25 955.0V1900.0ZM128.75 865.0V575.0H628.75L653.75 865.0Z M2100.0 1920.0Q1559.0 1920.0 1559.0 1200.0Q1559.0 460.0 2100.0 460.0Q2641.0 460.0 2641.0 1200.0Q2641.0 1920.0 2100.0 1920.0ZM2100.0 1668.0Q2364.0 1668.0 2364.0 1200.0Q2364.0 712.0 2100.0 712.0Q1836.0 712.0 1836.0 1200.0Q1836.0 1668.0 2100.0 1668.0Z M3251.0 1920.0Q3130.0 1920.0 3016.0 1899.5Q2902.0 1879.0 2812.0 1842.0L2848.0 1572.0Q2958.0 1618.0 3066.5 1643.0Q3175.0 1668.0 3267.0 1668.0Q3374.0 1668.0 3431.0 1630.0Q3488.0 1592.0 3488.0 1521.0Q3488.0 1428.0 3371.0 1373.0L3167.0 1274.0Q3016.0 1200.0 2933.0 1091.0Q2850.0 982.0 2850.0 850.0Q2850.0 664.0 2973.0 562.0Q3096.0 460.0 3321.0 460.0Q3452.0 460.0 3569.5 506.0Q3687.0 552.0 3778.0 639.0L3596.0 848.0Q3527.0 782.0 3457.0 746.5Q3387.0 711.0 3322.0 711.0Q3234.0 711.0 3185.0 748.5Q3136.0 786.0 3136.0 857.0Q3136.0 904.0 3170.5 946.0Q3205.0 988.0 3269.0 1022.0L3461.0 1121.0Q3611.0 1199.0 3692.5 1303.0Q3774.0 1407.0 3774.0 1526.0Q3774.0 1715.0 3638.0 1817.5Q3502.0 1920.0 3251.0 1920.0Z M4367.0 1900.0V480.0H4631.0V1900.0ZM4051.0 1900.0V1662.0H4949.0V1900.0ZM4051.0 717.0V480.0H4949.0V717.0Z M5772.0 1900.0 5522.0 790.0H5413.0V480.0H5628.0L5878.0 1590.0H5945.0V1900.0ZM5231.0 1900.0V480.0H5485.0V1900.0ZM5915.0 1900.0V480.0H6169.0V1900.0Z M6768.0 1900.0V480.0H7032.0V1900.0ZM6363.0 723.0V480.0H7437.0V723.0Z M7966.0 1710.0V672.0H8234.0V1710.0ZM7600.0 1316.0V1066.0H8600.0V1316.0Z" /></svg>
+                        <Logo />
                     </a>
                     <a href="/privacy.html" className="bg-[color:var(--bg)] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] px-3.5 h-9 sm:px-3 sm:h-8 transition-colors border border-[color:var(--border-hover)] hover:border-[color:var(--text-muted)] rounded flex items-center text-[13px] font-medium whitespace-nowrap"style={NO_DECORATION}>
                     {t("privacy")}
@@ -1434,7 +1448,7 @@ export default function App() {
         <header className="fixed top-0 inset-x-0 z-50 flex items-center justify-between gap-2 px-3 sm:px-4 py-2.5 bg-[color:var(--bg)] border-b border-[color:var(--border)]">
             <div className="flex items-center gap-2 sm:gap-4 min-w-0">
                 <a href="/" className="text-[color:var(--text)] hover:text-[color:var(--accent)] transition-colors font-bold text-base sm:text-lg leading-none whitespace-nowrap"style={NO_DECORATION}>
-                    <svg viewBox="78.8 460 8521.2 1460" role="img" aria-label="rOSINT+" fill="currentColor" className="inline-block align-middle h-4 sm:h-5 w-auto"><path d="M696.25 1330.0 618.75 873.75H732.5Q752.5 550.0 1071.25 550.0Q1260.0 550.0 1360.625 688.75Q1461.25 827.5 1461.25 1088.75H1123.75Q1123.75 971.25 1080.625 920.0Q1037.5 868.75 942.5 868.75Q818.75 868.75 757.5 988.75Q696.25 1108.75 696.25 1330.0ZM78.75 1900.0V1610.0H1006.25V1900.0ZM358.75 1900.0V575.0H646.25L696.25 955.0V1900.0ZM128.75 865.0V575.0H628.75L653.75 865.0Z M2100.0 1920.0Q1559.0 1920.0 1559.0 1200.0Q1559.0 460.0 2100.0 460.0Q2641.0 460.0 2641.0 1200.0Q2641.0 1920.0 2100.0 1920.0ZM2100.0 1668.0Q2364.0 1668.0 2364.0 1200.0Q2364.0 712.0 2100.0 712.0Q1836.0 712.0 1836.0 1200.0Q1836.0 1668.0 2100.0 1668.0Z M3251.0 1920.0Q3130.0 1920.0 3016.0 1899.5Q2902.0 1879.0 2812.0 1842.0L2848.0 1572.0Q2958.0 1618.0 3066.5 1643.0Q3175.0 1668.0 3267.0 1668.0Q3374.0 1668.0 3431.0 1630.0Q3488.0 1592.0 3488.0 1521.0Q3488.0 1428.0 3371.0 1373.0L3167.0 1274.0Q3016.0 1200.0 2933.0 1091.0Q2850.0 982.0 2850.0 850.0Q2850.0 664.0 2973.0 562.0Q3096.0 460.0 3321.0 460.0Q3452.0 460.0 3569.5 506.0Q3687.0 552.0 3778.0 639.0L3596.0 848.0Q3527.0 782.0 3457.0 746.5Q3387.0 711.0 3322.0 711.0Q3234.0 711.0 3185.0 748.5Q3136.0 786.0 3136.0 857.0Q3136.0 904.0 3170.5 946.0Q3205.0 988.0 3269.0 1022.0L3461.0 1121.0Q3611.0 1199.0 3692.5 1303.0Q3774.0 1407.0 3774.0 1526.0Q3774.0 1715.0 3638.0 1817.5Q3502.0 1920.0 3251.0 1920.0Z M4367.0 1900.0V480.0H4631.0V1900.0ZM4051.0 1900.0V1662.0H4949.0V1900.0ZM4051.0 717.0V480.0H4949.0V717.0Z M5772.0 1900.0 5522.0 790.0H5413.0V480.0H5628.0L5878.0 1590.0H5945.0V1900.0ZM5231.0 1900.0V480.0H5485.0V1900.0ZM5915.0 1900.0V480.0H6169.0V1900.0Z M6768.0 1900.0V480.0H7032.0V1900.0ZM6363.0 723.0V480.0H7437.0V723.0Z M7966.0 1710.0V672.0H8234.0V1710.0ZM7600.0 1316.0V1066.0H8600.0V1316.0Z" /></svg>
+                    <Logo />
                 </a>
                 <a href="/privacy.html" className="bg-[color:var(--bg)] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] px-3.5 h-9 sm:px-3 sm:h-8 transition-colors border border-[color:var(--border-hover)] hover:border-[color:var(--text-muted)] rounded flex items-center text-[13px] font-medium whitespace-nowrap"style={NO_DECORATION}>
                     {t("privacy")}
@@ -1454,7 +1468,7 @@ export default function App() {
             <header className={`${scrolled ? "" : "header-top"} fixed top-0 inset-x-0 z-50 flex items-center justify-between gap-2 px-3 sm:px-4 py-2.5 bg-[color:var(--bg)] border-b border-[color:var(--border)]`}>
                 <div className="flex items-center gap-2 sm:gap-4 min-w-0">
                 <a href="/" className="text-[color:var(--text)] hover:text-[color:var(--accent)] transition-colors font-bold text-base sm:text-lg leading-none whitespace-nowrap"style={NO_DECORATION}>
-                    <svg viewBox="78.8 460 8521.2 1460" role="img" aria-label="rOSINT+" fill="currentColor" className="inline-block align-middle h-4 sm:h-5 w-auto"><path d="M696.25 1330.0 618.75 873.75H732.5Q752.5 550.0 1071.25 550.0Q1260.0 550.0 1360.625 688.75Q1461.25 827.5 1461.25 1088.75H1123.75Q1123.75 971.25 1080.625 920.0Q1037.5 868.75 942.5 868.75Q818.75 868.75 757.5 988.75Q696.25 1108.75 696.25 1330.0ZM78.75 1900.0V1610.0H1006.25V1900.0ZM358.75 1900.0V575.0H646.25L696.25 955.0V1900.0ZM128.75 865.0V575.0H628.75L653.75 865.0Z M2100.0 1920.0Q1559.0 1920.0 1559.0 1200.0Q1559.0 460.0 2100.0 460.0Q2641.0 460.0 2641.0 1200.0Q2641.0 1920.0 2100.0 1920.0ZM2100.0 1668.0Q2364.0 1668.0 2364.0 1200.0Q2364.0 712.0 2100.0 712.0Q1836.0 712.0 1836.0 1200.0Q1836.0 1668.0 2100.0 1668.0Z M3251.0 1920.0Q3130.0 1920.0 3016.0 1899.5Q2902.0 1879.0 2812.0 1842.0L2848.0 1572.0Q2958.0 1618.0 3066.5 1643.0Q3175.0 1668.0 3267.0 1668.0Q3374.0 1668.0 3431.0 1630.0Q3488.0 1592.0 3488.0 1521.0Q3488.0 1428.0 3371.0 1373.0L3167.0 1274.0Q3016.0 1200.0 2933.0 1091.0Q2850.0 982.0 2850.0 850.0Q2850.0 664.0 2973.0 562.0Q3096.0 460.0 3321.0 460.0Q3452.0 460.0 3569.5 506.0Q3687.0 552.0 3778.0 639.0L3596.0 848.0Q3527.0 782.0 3457.0 746.5Q3387.0 711.0 3322.0 711.0Q3234.0 711.0 3185.0 748.5Q3136.0 786.0 3136.0 857.0Q3136.0 904.0 3170.5 946.0Q3205.0 988.0 3269.0 1022.0L3461.0 1121.0Q3611.0 1199.0 3692.5 1303.0Q3774.0 1407.0 3774.0 1526.0Q3774.0 1715.0 3638.0 1817.5Q3502.0 1920.0 3251.0 1920.0Z M4367.0 1900.0V480.0H4631.0V1900.0ZM4051.0 1900.0V1662.0H4949.0V1900.0ZM4051.0 717.0V480.0H4949.0V717.0Z M5772.0 1900.0 5522.0 790.0H5413.0V480.0H5628.0L5878.0 1590.0H5945.0V1900.0ZM5231.0 1900.0V480.0H5485.0V1900.0ZM5915.0 1900.0V480.0H6169.0V1900.0Z M6768.0 1900.0V480.0H7032.0V1900.0ZM6363.0 723.0V480.0H7437.0V723.0Z M7966.0 1710.0V672.0H8234.0V1710.0ZM7600.0 1316.0V1066.0H8600.0V1316.0Z" /></svg>
+                    <Logo />
                 </a>
                 <a href="/privacy.html" className="bg-[color:var(--bg)] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] px-3.5 h-9 sm:px-3 sm:h-8 transition-colors border border-[color:var(--border-hover)] hover:border-[color:var(--text-muted)] rounded flex items-center text-[13px] font-medium whitespace-nowrap"style={NO_DECORATION}>
                     {t("privacy")}
@@ -1672,8 +1686,8 @@ export default function App() {
                                 </div>
                             </div> : <>
                                 <div className="flex sm:hidden gap-1 mb-1.5">
-                                    <HoverHint hint={t("searchOnRedditHint")}>
-                                        <a href={`https://www.reddit.com/search/?q=author%3A%22${query}%22`} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-1 flex-1 min-w-0 text-[11px] text-[color:var(--text-muted)] hover:text-[color:var(--accent-text)] transition-colors h-8 border border-[color:var(--border-hover)] rounded">
+                                    <HoverHint hint={t("searchOnRedditHint")} className="flex-1 min-w-0">
+                                        <a href={`https://www.reddit.com/search/?q=author%3A%22${query}%22`} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-1 min-w-0 text-[11px] text-[color:var(--text-muted)] hover:text-[color:var(--accent-text)] transition-colors h-8 border border-[color:var(--border-hover)] rounded">
                                             <IconExternal /> {t("searchOnReddit")}
                                         </a>
                                     </HoverHint>

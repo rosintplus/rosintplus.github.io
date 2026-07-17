@@ -290,8 +290,7 @@ export async function getProfileData(username, onProgress, forceUpdate = false) 
         return { stats: localStats, itemCount, latestUtc };
       }
 
-      const postsResult = await fetchAndProcess("posts");
-      const commentsResult = await fetchAndProcess("comments");
+      const [postsResult, commentsResult] = await Promise.all([fetchAndProcess("posts"), fetchAndProcess("comments")]);
 
       // Build final stats
       mergeStats(profile.stats, postsResult.stats);

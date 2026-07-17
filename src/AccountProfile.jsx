@@ -74,7 +74,7 @@ const AccountProfile = memo(function AccountProfile({
         if (data.saved !== undefined) setIsSaved(data.saved);
       }
     }).catch(err => {
-      if (active && err.name !== "AbortError") {
+      if (active && (!err || err?.name !== "AbortError")) {
         console.error("Profile fetch error:", err);
         setError(true);
         setLoading(false);
@@ -86,7 +86,7 @@ const AccountProfile = memo(function AccountProfile({
   }, [query]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     return fetchProfile(false);
   }, [fetchProfile]);
 
@@ -97,26 +97,34 @@ const AccountProfile = memo(function AccountProfile({
     : 0;
 
   const topSubreddits = useMemo(() => {
-    if (!profileData?.stats) return { list: [], max: 1 };
+    if (!profileData?.stats?.subredditCounts) return { list: [], max: 1 };
     const counts = profileData.stats.subredditCounts;
     const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 8);
     const max = sorted.length > 0 ? sorted[0][1] : 1;
     return { list: sorted, max };
   }, [profileData]);
 
-  const { heatmap, maxCount, tzHint } = useMemo(() => {
-    if (!profileData?.stats) return { heatmap: [], maxCount: 1, tzHint: null };
+  const heatmapData = useMemo(() => {
+    if (!profileData?.stats?.heatmap) return { matrix: [], maxCount: 1 };
     const matrix = profileData.stats.heatmap;
-
-    const hourTotals = Array(24).fill(0);
     let max = 0;
     for (let r = 0; r < 7; r++) {
       for (let c = 0; c < 24; c++) {
         if (matrix[r][c] > max) max = matrix[r][c];
+      }
+    }
+    return { matrix, maxCount: max || 1 };
+  }, [profileData]);
+
+  const tzHint = useMemo(() => {
+    if (!profileData?.stats?.heatmap) return null;
+    const matrix = profileData.stats.heatmap;
+    const hourTotals = Array(24).fill(0);
+    for (let r = 0; r < 7; r++) {
+      for (let c = 0; c < 24; c++) {
         hourTotals[c] += matrix[r][c];
       }
     }
-
     let minSum = Infinity;
     let quietestStart = 0;
     for (let start = 0; start < 24; start++) {
@@ -134,23 +142,23 @@ const AccountProfile = memo(function AccountProfile({
     if (offset > 14) offset -= 24;
     const estOffset = Math.round(offset);
     const peakHour = (quietestStart + 16) % 24;
-    const tzHint = t("apTzHint", { hour: peakHour, offset: `${estOffset >= 0 ? '+' : ''}${estOffset}` });
-    return { heatmap: matrix, maxCount: max || 1, tzHint };
+    return t("apTzHint", { hour: peakHour, offset: `${estOffset >= 0 ? '+' : ''}${estOffset}` });
   }, [profileData, t]);
 
   const commonWords = useMemo(() => {
-    if (!profileData?.stats) return { list: [], maxN: 1 };
+    if (!profileData?.stats?.wordFreqs) return { list: [], maxN: 1 };
 
     let freqs;
     if (activeTab === 'posts') {
-      freqs = profileData.stats.wordFreqs.posts;
+      freqs = profileData.stats.wordFreqs.posts || {};
     } else if (activeTab === 'comments') {
-      freqs = profileData.stats.wordFreqs.comments;
+      freqs = profileData.stats.wordFreqs.comments || {};
     } else {
       // "all" tab — merge both
       freqs = {};
       for (const type of ['posts', 'comments']) {
-        for (const [word, counts] of Object.entries(profileData.stats.wordFreqs[type])) {
+        const wf = profileData.stats.wordFreqs[type] || {};
+        for (const [word, counts] of Object.entries(wf)) {
           if (!freqs[word]) freqs[word] = { total: 0, items: 0 };
           freqs[word].total += counts.total;
           freqs[word].items += counts.items;
@@ -252,10 +260,10 @@ const AccountProfile = memo(function AccountProfile({
                     <div></div>
                     {[...Array(24)].map((_, i) => <div key={i}>{i % 4 === 0 ? i : ''}</div>)}
                 </div>
-                {heatmap.map((row, r) => <div key={r} className="grid grid-cols-[30px_repeat(24,_1fr)] gap-0.5 mb-0.5">
+                {heatmapData.matrix.map((row, r) => <div key={r} className="grid grid-cols-[30px_repeat(24,_1fr)] gap-0.5 mb-0.5">
                         <div className="text-[10px] text-[color:var(--text-muted)] pr-2 text-right leading-relaxed">{days[r]}</div>
                         {row.map((count, c) => {
-        const intensity = count === 0 ? 0 : levels[Math.min(3, Math.floor((count / maxCount) * 4))];
+        const intensity = count === 0 ? 0 : levels[Math.min(3, Math.floor((count / heatmapData.maxCount) * 4))];
         return <HoverHint key={c} hint={t("apHeatCell", { day: days[r], hour: c, n: count })} className="w-full h-full min-h-[12px] flex">
                                 <div className="rounded-sm w-full h-full" style={{
           backgroundColor: count === 0 ? 'var(--border)' : 'var(--accent)',
