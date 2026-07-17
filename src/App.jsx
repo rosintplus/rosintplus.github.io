@@ -11,8 +11,6 @@ const STROKE_TRANSITION = { transition: "stroke 150ms" };
 const FLEX_1 = { flex: "1 1 0" };
 const closeOnEscape = e => { if (e.key === "Escape") e.currentTarget.removeAttribute("open"); };
 
-// ─── Helpers ───────
-
 function tJsx(tFn, key, vars) {
   const raw = tFn(key);
   if (!vars) return raw;
@@ -22,18 +20,12 @@ function tJsx(tFn, key, vars) {
 }
 
 function fullTimestamp(utc, lang) {
-  // Reddit created_utc is UTC seconds; rendered in the viewer's local timezone
-  // and in the active UI language's date order (day/month vary per locale).
   return new Date(utc * 1000).toLocaleString(LOCALES[lang] || "en", {
     dateStyle: "medium",
     timeStyle: "long"
   });
 }
 
-// Relative date ("3d ago", locale-aware) with the exact time in a hover
-// tooltip. Uses the portal-based HoverHint so the tooltip paints above ALL
-// card content — an in-card absolute tooltip sits inside the timestamp link's
-// z-10 stacking context, and later same-z siblings (the title) paint over it.
 const HoverTime = memo(function HoverTime({
   utc
 }) {
@@ -43,9 +35,6 @@ const HoverTime = memo(function HoverTime({
         </HoverHint>;
 });
 
-// Wraps a component and shows a hint that follows the cursor. Uses a
-// fixed-position tooltip so it appears instantly at the pointer and isn't
-// clipped by the card's overflow-hidden.
 export const HoverHint = memo(function HoverHint({
   hint,
   className = "",
@@ -83,9 +72,6 @@ function fmtNum(n) {
 
 
 
-// Client-side keyword filter across the loaded page. Searches the visible text
-// fields + subreddit + author so investigators can narrow 100 cards without
-// re-hitting the archives. Case-insensitive substring match keeps it cheap.
 function matchKeyword(item, kw, type) {
   if (!kw) return true;
   const k = kw.toLowerCase();
@@ -129,8 +115,6 @@ function getCommentImage(comment) {
   return null;
 }
 
-// ─── Icons ────────────────────────────────────────────────────────────────────
-
 const IconSearch = () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
     </svg>;
@@ -172,9 +156,6 @@ export const IconInfo = ({ className = "w-3.5 h-3.5" }) => (
   </svg>
 );
 
-// One-click copy of permalink + timestamp + subreddit + body so an investigator
-// can paste a reproducible snapshot into their notes. Archived content can
-// vanish, and a bare permalink doesn't capture what was there when they saw it.
 const CopyButton = memo(function CopyButton({ getText }) {
   const [done, setDone] = useState(false);
   const { t } = useI18n();
@@ -213,10 +194,6 @@ const IconSun = ({ className = "w-3.5 h-3.5" }) => <svg className={className} fi
 const IconMonitor = ({ className = "w-3.5 h-3.5" }) => <svg className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>;
 const IconGlobe = ({ className = "w-3.5 h-3.5" }) => <svg className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>;
 
-// ─── Error Boundary ───────────────────────────────────────────────────────────
-// Wraps each result card so one malformed archive record (e.g. a comment with a
-// numeric parent_id) can't crash the whole page — it renders a fallback instead.
-
 class CardBoundary extends Component {
   state = {
     failed: false
@@ -241,11 +218,6 @@ class CardBoundary extends Component {
   }
 }
 
-// ─── Status badges ────────────────────────────────────────────────────────────
-// The reason people use an archive: seeing at a glance whether content was
-// removed by a moderator vs deleted by its author, plus NSFW / distinguished
-// (admin, mod) markers. Drives both the badge row and the card's border tint.
-
 function isPost(item) {
   return Object.hasOwn(item, 'title');
 }
@@ -263,8 +235,6 @@ function getStatus(item, type) {
   };
 }
 
-// Border color for a card, tinted red when mod-removed and amber when
-// author-deleted so scanning a long list surfaces the interesting rows.
 function statusBorderBase({
   removed,
   deleted
@@ -311,8 +281,6 @@ const StatusBadges = memo(function StatusBadges({
             {dist === "moderator" && <span className={`${BADGE} text-[color:var(--accent-text)] bg-[color:var(--accent)]/10 border border-[color:var(--accent)]/20`}>Mod</span>}
         </>;
 });
-
-// ─── Post Card ────────────────────────────────────────────────────────────────
 
 const PostCard = memo(function PostCard({
   post,
@@ -438,7 +406,6 @@ return <>
                         </p>
                     </div>}
 
-                {/* ── Loaded comments — merged inside the post card ── */}
                 {!embedded && (commentsLoading || comments !== null) && <div className="border-t border-[color:var(--border)]">
                         {commentsLoading ? <div className="flex items-center gap-2 px-3 py-3 text-[color:var(--text-muted)]">
                                 <IconSpinner />
@@ -456,11 +423,6 @@ return <>
             </div>
         </>;
 });
-
-// ─── Parent Chain ─────────────────────────────────────────────────────────────
-// Recursively loads and displays parent comments above the main comment.
-// Each level shows a "load parent comment" button; once fetched, that parent's
-// own parent chain is rendered above it (same pattern as the reference site).
 
 const ParentChain = memo(function ParentChain({
   parentId
@@ -484,10 +446,9 @@ const ParentChain = memo(function ParentChain({
     setLoading(false);
   }
   return <div className="border-b border-[color:var(--border)]">
-            {/* Recurse: if this parent also has a parent comment, show its chain above */}
             {comment && <ParentChain parentId={comment.parent_id} />}
 
-            {comment ? (/* Loaded parent — rendered as a dimmed summary row */
+            {comment ? (
     <div className="flex opacity-80">
                     <div className="w-5 bg-[color:var(--bg)] flex-shrink-0" />
                     <div className="flex flex-col items-center justify-start gap-1 px-2.5 py-2.5 bg-[color:var(--bg)] min-w-[44px]">
@@ -510,8 +471,7 @@ const ParentChain = memo(function ParentChain({
                             {comment.body || t("noContent")}
                         </p>
                     </div>
-                </div>) : (/* Not yet loaded — show button */
-    <div className="px-3 py-1.5">
+                </div>) : (<div className="px-3 py-1.5">
                     <button onClick={handleLoad} disabled={loading} className="flex items-center gap-1 text-[11px] text-[color:var(--text-muted)] hover:text-[color:var(--accent)] hover:bg-[color:var(--border)] rounded px-2 py-0.5 transition-all disabled:opacity-50">
                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
@@ -521,8 +481,6 @@ const ParentChain = memo(function ParentChain({
                 </div>)}
         </div>;
 });
-
-// ─── Comment Card ─────────────────────────────────────────────────────────────
 
 const CommentCard = memo(function CommentCard({
   comment,
@@ -565,8 +523,6 @@ const CommentCard = memo(function CommentCard({
     try {
       const res = await safeFetch(`${ARCTIC}/api/comments/tree?link_id=${comment.link_id}&parent_id=t1_${comment.id}&limit=25`, { signal: ctrl.signal });
       const data = res.data || [];
-      // The response contains the parent comment at the top level;
-      // its direct children are nested in replies.data.children
       const parentItem = data.find(item => item.kind === "t1" && item.data?.id === comment.id);
       const childObjs = parentItem?.data?.replies?.data?.children || [];
       const children = [];
@@ -592,17 +548,13 @@ const CommentCard = memo(function CommentCard({
   }, [comment, status, url]);
   return <div className={`bg-[color:var(--bg)] border ${statusBorderBase(status)} rounded overflow-hidden transition-all duration-150 ${!isNested ? `${statusBorderHover(status)} hover:shadow-lg` : ""}`}>
 
-            {/* ── Parent post shown after auto-loading ── */}
             {post && <div className="border-b border-[color:var(--border-hover)]">
                     <PostCard post={post} embedded={true} />
                 </div>}
 
-            {/* ── Parent comment chain (top-level cards only) ── */}
             {!isNested && <ParentChain parentId={comment.parent_id} />}
 
-            {/* ── Comment row ── */}
             <div className="flex">
-                {/* Collapse line */}
                 <button aria-label={collapsed ? "Expand comment" : "Collapse comment"} onClick={toggleCollapsed} onMouseEnter={onLineEnter} onMouseLeave={onLineLeave} className="relative flex-shrink-0 w-5 bg-[color:var(--bg)] transition-colors">
                     <svg className="absolute inset-x-0 top-0 w-full" style={{ height: collapsed ? 'calc(100% - 8px)' : '100%' }} fill="none">
                         <line x1="10.75" y1="8" x2="10.75" y2="100%"
@@ -612,16 +564,13 @@ const CommentCard = memo(function CommentCard({
                     </svg>
                 </button>
 
-                {/* Score */}
                 <div className="flex flex-col items-center justify-start gap-1 px-2 py-3 bg-[color:var(--bg)] min-w-[40px]">
                     <IconArrowUp />
                     <span className="text-[11px] font-bold text-[color:var(--text)] leading-none">{fmtNum(comment.score)}</span>
                 </div>
 
-                {/* Content */}
                 <div className="flex-1 p-3 min-w-0 relative">
                     <a href={url} target="_blank" rel="noopener noreferrer" className="absolute inset-0 z-0" aria-hidden="true" tabIndex={-1} />
-                    {/* Header — always visible */}
                     <div className="flex items-center gap-1.5 text-[11px] text-[color:var(--text-muted)] mb-1.5 flex-wrap">
                         <a href={`${REDDIT_BASE}/r/${comment.subreddit}`} target="_blank" rel="noopener noreferrer" className="relative z-10 font-medium text-[color:var(--text)] hover:underline">
                             {comment.subreddit_name_prefixed || `r/${comment.subreddit}`}
@@ -649,7 +598,6 @@ const CommentCard = memo(function CommentCard({
                         </div>
                     </div>
 
-                    {/* Body — hidden when collapsed */}
                     {!collapsed && <>
                             {status.removed || status.deleted ? <p className="text-sm text-[color:var(--text-muted)] italic leading-relaxed relative z-10">
                                     {status.removed ? t("removedText") : t("deletedText")}
@@ -666,13 +614,10 @@ const CommentCard = memo(function CommentCard({
                 </div>
             </div>
 
-            {/* ── Replies section ── */}
             {!collapsed && <>
-                    {/* + / - button with curved connector — shown before replies load */}
                     {!replies && <div className="flex items-center py-1.5" style={{
         paddingLeft: 9
       }}>
-                            {/* SVG curve — clickable, glows on hover, collapses comment */}
                             <button aria-label="Collapse comment" onClick={toggleCollapsed} onMouseEnter={onLineEnter} onMouseLeave={onLineLeave} className="flex-shrink-0 -mt-[14px] bg-transparent border-0 p-0 cursor-pointer">
                                 <svg width="22" height="32" viewBox="0 0 22 32" fill="none" className="overflow-visible">
                                     {/* Horizontal run extends past the viewBox (overflow-visible) so it
@@ -681,7 +626,6 @@ const CommentCard = memo(function CommentCard({
                                     <path d="M 1 0 L 1 16 Q 1 23 8 23 L 28 23" stroke={lineHovered ? "var(--text-muted)" : "var(--border-hover)"} strokeWidth={2} fill="none" style={STROKE_TRANSITION} />
                                 </svg>
                             </button>
-                            {/* ⊕ circle button */}
                             <button onClick={handleLoadReplies} disabled={repliesLoading} aria-label="Load replies" className="relative w-[18px] h-[18px] rounded-full border-2 border-[color:var(--border)] bg-[color:var(--bg)] flex items-center justify-center text-[color:var(--text-muted)] hover:border-[color:var(--accent)] hover:text-[color:var(--accent)] transition-all disabled:opacity-40 flex-shrink-0 -ml-[1px]">
                                 {repliesLoading ? <span className="text-[9px] leading-none">…</span> : <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
                                         <line x1="5" y1="1" x2="5" y2="9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
@@ -690,11 +634,9 @@ const CommentCard = memo(function CommentCard({
                             </button>
                         </div>}
 
-                    {/* Loaded replies — SVG curve connector into each reply */}
                     {replies && <div className="flex" style={{
         paddingLeft: 9
       }}>
-                            {/* Single vertical line connecting down from parent collapse line */}
                             <div className="flex-shrink-0 w-5 relative" style={{
           marginTop: -14
         }}>
@@ -706,11 +648,9 @@ const CommentCard = memo(function CommentCard({
             background: "var(--border-hover)"
           }} />
                             </div>
-                            {/* Replies column */}
                             <div className="flex-1 min-w-0">
                                 {replies.length > 0 ? <div className="flex flex-col gap-1.5 py-1.5 pr-2">
                                         {replies.map(reply => <div key={reply.id} className="flex items-start">
-                                                {/* Short horizontal branch off the vertical line */}
                                                 <svg width="14" height="44" viewBox="0 0 14 44" fill="none" className="flex-shrink-0 self-start" style={{
                 marginTop: 19,
                 marginLeft: -20,
@@ -737,8 +677,6 @@ const CommentCard = memo(function CommentCard({
                 </>}
         </div>;
 });
-
-// ─── Empty / Error ────────────────────────────────────────────────────────────
 
 const EmptyState = memo(function EmptyState({
   tab,
@@ -785,8 +723,6 @@ const ErrorState = memo(function ErrorState({
             </div>;
 });
 
-// ─── Tab Button ───────────────────────────────────────────────────────────────
-
 const TabBtn = memo(function TabBtn({
   label,
   count,
@@ -803,15 +739,6 @@ const TabBtn = memo(function TabBtn({
         </button>;
 });
 
-// ─── usePaginatedFetch ────────────────────────────────────────────────────────
-// Pages by created_utc keyset (Arctic Shift) with a stable id tiebreaker
-// (before_id/after_id) so timestamp ties don't repeat or skip rows, plus a
-// session-wide seen-Ids set that guards forward pages against duplicates.
-// Pagination direction depends on sort: "desc" (Newest) pages back in time
-// with a `before` cursor; "asc" (Oldest) pages forward with an `after` cursor.
-// An AbortController per fetch cancels superseded network requests when the
-// user types a new username mid-fetch.
-
 function cursorFromData(data) {
   if (!data || data.length === 0) return null;
   return {
@@ -822,8 +749,6 @@ function cursorFromData(data) {
   };
 }
 
-// Forward-cursor for the next page AFTER the given entry (newer for asc,
-// older for desc).
 function forwardPagination(entry, sort) {
   if (!entry) return {};
   return sort === "asc"
@@ -846,9 +771,6 @@ function usePaginatedFetch(type) {
   const storedSortRef = useRef("desc");
   const storedFiltersRef = useRef({});
 
-  // Runs one page fetch. Returns the rows, or null if this fetch was
-  // superseded/aborted (so callers never apply stale results). Does not set
-  // `items` itself — reset() replaces, loadMore() appends.
   const _fetch = useCallback(async (username, pagination, filters, {
     bypassCache = false,
     sort = "desc",
@@ -905,8 +827,6 @@ function usePaginatedFetch(type) {
     doneRef.current = streamDone;
     return data;
   }, [_fetch]);
-  // Append the next page (older for "desc", newer for "asc") to the existing
-  // list. Accumulates so the feed grows until the stream is exhausted.
   const loadMore = useCallback(async username => {
     if (!cursorRef.current || doneRef.current) return;
     const result = await _fetch(username, forwardPagination(cursorRef.current, storedSortRef.current), storedFiltersRef.current, {
@@ -943,8 +863,6 @@ function usePaginatedFetch(type) {
     loadMore
   };
 }
-
-// ─── Themes ───
 
 const THEMES = {
   default: {
@@ -985,7 +903,6 @@ const THEMES = {
   }
 };
 
-// Blend two hex colors: mix(#000, #fff, 0.3) → 30% tint, 70% base
 function hexToRgb(hex) {
   const v = parseInt(hex.replace("#", ""), 16);
   return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
@@ -998,7 +915,6 @@ function mix(hex1, hex2, t) {
   const [r2, g2, b2] = hexToRgb(hex2);
   return rgbToHex(r1 * t + r2 * (1 - t), g1 * t + g2 * (1 - t), b1 * t + b2 * (1 - t));
 }
-// Precompute all derived theme values in JS, bypassing expensive CSS color-mix() calls.
 function applyTheme(t, isDark) {
   const d = document.documentElement;
   d.style.setProperty("--bg", t.bg);
@@ -1039,8 +955,6 @@ const ThemeSwitcher = () => {
 
     localStorage.setItem("rosint-theme", theme);
     localStorage.setItem("rosint-color-mode", colorMode);
-    // Cache the resolved palette so the inline script in index.html can apply
-    // it before first paint (prevents a dark-theme flash on refresh).
     localStorage.setItem("rosint-resolved", JSON.stringify({ dark: tGroup.dark, light: tGroup.light, mode: colorMode }));
   }, [theme, colorMode]);
 
@@ -1120,8 +1034,6 @@ const SearchBar = memo(function SearchBar({
   const { t } = useI18n();
   const [username, setUsername] = useState(defaultQuery);
   const [recent, setRecent] = useState(() => {
-    // Trim any over-long list left in storage by older versions so evicted
-    // entries are truly deleted, not merely hidden.
     try {
       const stored = (JSON.parse(localStorage.getItem("rosint-recent")) || []).slice(0, 5);
       localStorage.setItem("rosint-recent", JSON.stringify(stored));
@@ -1139,9 +1051,6 @@ const SearchBar = memo(function SearchBar({
     return () => window.removeEventListener('savedUsersChanged', fetchSaved);
   }, []);
   
-  // The dropdown holds at most MAX_DROPDOWN rows. Saved profiles are pinned
-  // (never evicted, never counted as recent); recents fill whatever room is
-  // left, dropping the EARLIEST recent when full.
   const MAX_DROPDOWN = 5;
   const addRecent = (user) => {
     try {
@@ -1252,13 +1161,7 @@ const TABS = ["all", "posts", "comments"];
 const AccountProfile = lazy(() => import('./AccountProfile.jsx'));
 
 export default function App() {
-  // Hydrate shareable permalink params (?u, ?tab, ?from, ?to, ?sub, ?sort)
-  // before any fetch fires so a pasted link reproduces the exact filtered view.
   const [initialParams] = useState(() => Object.fromEntries(new URLSearchParams(window.location.search)));
-  // If the page loads with ?u=<user>, render the results layout on the very
-  // first paint. Otherwise the app would flash the centered hero, then flip to
-  // searched=true once the restore effect fires — a visible page-flash + a
-  // search-bar jump from center to top.
   const [initialUser] = useState(() => normalizeUsername(initialParams.u) || "");
   const { t, lang } = useI18n();
   const [query, setQuery] = useState(initialUser);
@@ -1280,7 +1183,6 @@ export default function App() {
   const searchIdRef = useRef(0);
   const deferredKeyword = useDeferredValue(keyword);
   const [userMeta, setUserMeta] = useState(null);
-  // Shorten the keyword placeholder on narrow screens where the full hint clips.
   const [isNarrow, setIsNarrow] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 640px)").matches);
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 640px)");
@@ -1289,8 +1191,6 @@ export default function App() {
     return () => mq.removeEventListener("change", h);
   }, []);
 
-  // ?dino in the URL forces the maintenance screen (which hosts the dino game)
-  // so it can be tested without waiting for a real Arctic Shift outage.
   const [bannerDismissed, setBannerDismissed] = useState(false);
   // Enable the hero→results collapse transition only after first paint, so the
   // search bar doesn't animate into place (slide up) on initial page load.
@@ -1500,7 +1400,7 @@ export default function App() {
         <header className="fixed top-0 inset-x-0 z-50 flex items-center justify-between gap-2 px-3 sm:px-4 py-2.5 bg-[color:var(--bg)] border-b border-[color:var(--border)]">
             <div className="flex items-center gap-2 sm:gap-4 min-w-0">
                     <a href="/" className="text-[color:var(--text)] hover:text-[color:var(--accent)] transition-colors font-bold text-base sm:text-lg leading-none whitespace-nowrap"style={NO_DECORATION}>
-                        <svg viewBox="78.8 460 8521.2 1460" role="img" aria-label="rOSINT+" fill="currentColor" className="inline-block align-middle h-6 sm:h-8 w-auto"><path d="M696.25 1330.0 618.75 873.75H732.5Q752.5 550.0 1071.25 550.0Q1260.0 550.0 1360.625 688.75Q1461.25 827.5 1461.25 1088.75H1123.75Q1123.75 971.25 1080.625 920.0Q1037.5 868.75 942.5 868.75Q818.75 868.75 757.5 988.75Q696.25 1108.75 696.25 1330.0ZM78.75 1900.0V1610.0H1006.25V1900.0ZM358.75 1900.0V575.0H646.25L696.25 955.0V1900.0ZM128.75 865.0V575.0H628.75L653.75 865.0Z M2100.0 1920.0Q1559.0 1920.0 1559.0 1200.0Q1559.0 460.0 2100.0 460.0Q2641.0 460.0 2641.0 1200.0Q2641.0 1920.0 2100.0 1920.0ZM2100.0 1668.0Q2364.0 1668.0 2364.0 1200.0Q2364.0 712.0 2100.0 712.0Q1836.0 712.0 1836.0 1200.0Q1836.0 1668.0 2100.0 1668.0Z M3251.0 1920.0Q3130.0 1920.0 3016.0 1899.5Q2902.0 1879.0 2812.0 1842.0L2848.0 1572.0Q2958.0 1618.0 3066.5 1643.0Q3175.0 1668.0 3267.0 1668.0Q3374.0 1668.0 3431.0 1630.0Q3488.0 1592.0 3488.0 1521.0Q3488.0 1428.0 3371.0 1373.0L3167.0 1274.0Q3016.0 1200.0 2933.0 1091.0Q2850.0 982.0 2850.0 850.0Q2850.0 664.0 2973.0 562.0Q3096.0 460.0 3321.0 460.0Q3452.0 460.0 3569.5 506.0Q3687.0 552.0 3778.0 639.0L3596.0 848.0Q3527.0 782.0 3457.0 746.5Q3387.0 711.0 3322.0 711.0Q3234.0 711.0 3185.0 748.5Q3136.0 786.0 3136.0 857.0Q3136.0 904.0 3170.5 946.0Q3205.0 988.0 3269.0 1022.0L3461.0 1121.0Q3611.0 1199.0 3692.5 1303.0Q3774.0 1407.0 3774.0 1526.0Q3774.0 1715.0 3638.0 1817.5Q3502.0 1920.0 3251.0 1920.0Z M4367.0 1900.0V480.0H4631.0V1900.0ZM4051.0 1900.0V1662.0H4949.0V1900.0ZM4051.0 717.0V480.0H4949.0V717.0Z M5772.0 1900.0 5522.0 790.0H5413.0V480.0H5628.0L5878.0 1590.0H5945.0V1900.0ZM5231.0 1900.0V480.0H5485.0V1900.0ZM5915.0 1900.0V480.0H6169.0V1900.0Z M6768.0 1900.0V480.0H7032.0V1900.0ZM6363.0 723.0V480.0H7437.0V723.0Z M7966.0 1710.0V672.0H8234.0V1710.0ZM7600.0 1316.0V1066.0H8600.0V1316.0Z" /></svg>
+                        <svg viewBox="78.8 460 8521.2 1460" role="img" aria-label="rOSINT+" fill="currentColor" className="inline-block align-middle h-5 sm:h-6 w-auto"><path d="M696.25 1330.0 618.75 873.75H732.5Q752.5 550.0 1071.25 550.0Q1260.0 550.0 1360.625 688.75Q1461.25 827.5 1461.25 1088.75H1123.75Q1123.75 971.25 1080.625 920.0Q1037.5 868.75 942.5 868.75Q818.75 868.75 757.5 988.75Q696.25 1108.75 696.25 1330.0ZM78.75 1900.0V1610.0H1006.25V1900.0ZM358.75 1900.0V575.0H646.25L696.25 955.0V1900.0ZM128.75 865.0V575.0H628.75L653.75 865.0Z M2100.0 1920.0Q1559.0 1920.0 1559.0 1200.0Q1559.0 460.0 2100.0 460.0Q2641.0 460.0 2641.0 1200.0Q2641.0 1920.0 2100.0 1920.0ZM2100.0 1668.0Q2364.0 1668.0 2364.0 1200.0Q2364.0 712.0 2100.0 712.0Q1836.0 712.0 1836.0 1200.0Q1836.0 1668.0 2100.0 1668.0Z M3251.0 1920.0Q3130.0 1920.0 3016.0 1899.5Q2902.0 1879.0 2812.0 1842.0L2848.0 1572.0Q2958.0 1618.0 3066.5 1643.0Q3175.0 1668.0 3267.0 1668.0Q3374.0 1668.0 3431.0 1630.0Q3488.0 1592.0 3488.0 1521.0Q3488.0 1428.0 3371.0 1373.0L3167.0 1274.0Q3016.0 1200.0 2933.0 1091.0Q2850.0 982.0 2850.0 850.0Q2850.0 664.0 2973.0 562.0Q3096.0 460.0 3321.0 460.0Q3452.0 460.0 3569.5 506.0Q3687.0 552.0 3778.0 639.0L3596.0 848.0Q3527.0 782.0 3457.0 746.5Q3387.0 711.0 3322.0 711.0Q3234.0 711.0 3185.0 748.5Q3136.0 786.0 3136.0 857.0Q3136.0 904.0 3170.5 946.0Q3205.0 988.0 3269.0 1022.0L3461.0 1121.0Q3611.0 1199.0 3692.5 1303.0Q3774.0 1407.0 3774.0 1526.0Q3774.0 1715.0 3638.0 1817.5Q3502.0 1920.0 3251.0 1920.0Z M4367.0 1900.0V480.0H4631.0V1900.0ZM4051.0 1900.0V1662.0H4949.0V1900.0ZM4051.0 717.0V480.0H4949.0V717.0Z M5772.0 1900.0 5522.0 790.0H5413.0V480.0H5628.0L5878.0 1590.0H5945.0V1900.0ZM5231.0 1900.0V480.0H5485.0V1900.0ZM5915.0 1900.0V480.0H6169.0V1900.0Z M6768.0 1900.0V480.0H7032.0V1900.0ZM6363.0 723.0V480.0H7437.0V723.0Z M7966.0 1710.0V672.0H8234.0V1710.0ZM7600.0 1316.0V1066.0H8600.0V1316.0Z" /></svg>
                     </a>
                     <a href="/privacy.html" className="bg-[color:var(--bg)] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] px-3.5 h-9 sm:px-3 sm:h-8 transition-colors border border-[color:var(--border-hover)] hover:border-[color:var(--text-muted)] rounded flex items-center text-[13px] font-medium whitespace-nowrap"style={NO_DECORATION}>
                     {t("privacy")}
@@ -1534,7 +1434,7 @@ export default function App() {
         <header className="fixed top-0 inset-x-0 z-50 flex items-center justify-between gap-2 px-3 sm:px-4 py-2.5 bg-[color:var(--bg)] border-b border-[color:var(--border)]">
             <div className="flex items-center gap-2 sm:gap-4 min-w-0">
                 <a href="/" className="text-[color:var(--text)] hover:text-[color:var(--accent)] transition-colors font-bold text-base sm:text-lg leading-none whitespace-nowrap"style={NO_DECORATION}>
-                    <svg viewBox="78.8 460 8521.2 1460" role="img" aria-label="rOSINT+" fill="currentColor" className="inline-block align-middle h-6 sm:h-8 w-auto"><path d="M696.25 1330.0 618.75 873.75H732.5Q752.5 550.0 1071.25 550.0Q1260.0 550.0 1360.625 688.75Q1461.25 827.5 1461.25 1088.75H1123.75Q1123.75 971.25 1080.625 920.0Q1037.5 868.75 942.5 868.75Q818.75 868.75 757.5 988.75Q696.25 1108.75 696.25 1330.0ZM78.75 1900.0V1610.0H1006.25V1900.0ZM358.75 1900.0V575.0H646.25L696.25 955.0V1900.0ZM128.75 865.0V575.0H628.75L653.75 865.0Z M2100.0 1920.0Q1559.0 1920.0 1559.0 1200.0Q1559.0 460.0 2100.0 460.0Q2641.0 460.0 2641.0 1200.0Q2641.0 1920.0 2100.0 1920.0ZM2100.0 1668.0Q2364.0 1668.0 2364.0 1200.0Q2364.0 712.0 2100.0 712.0Q1836.0 712.0 1836.0 1200.0Q1836.0 1668.0 2100.0 1668.0Z M3251.0 1920.0Q3130.0 1920.0 3016.0 1899.5Q2902.0 1879.0 2812.0 1842.0L2848.0 1572.0Q2958.0 1618.0 3066.5 1643.0Q3175.0 1668.0 3267.0 1668.0Q3374.0 1668.0 3431.0 1630.0Q3488.0 1592.0 3488.0 1521.0Q3488.0 1428.0 3371.0 1373.0L3167.0 1274.0Q3016.0 1200.0 2933.0 1091.0Q2850.0 982.0 2850.0 850.0Q2850.0 664.0 2973.0 562.0Q3096.0 460.0 3321.0 460.0Q3452.0 460.0 3569.5 506.0Q3687.0 552.0 3778.0 639.0L3596.0 848.0Q3527.0 782.0 3457.0 746.5Q3387.0 711.0 3322.0 711.0Q3234.0 711.0 3185.0 748.5Q3136.0 786.0 3136.0 857.0Q3136.0 904.0 3170.5 946.0Q3205.0 988.0 3269.0 1022.0L3461.0 1121.0Q3611.0 1199.0 3692.5 1303.0Q3774.0 1407.0 3774.0 1526.0Q3774.0 1715.0 3638.0 1817.5Q3502.0 1920.0 3251.0 1920.0Z M4367.0 1900.0V480.0H4631.0V1900.0ZM4051.0 1900.0V1662.0H4949.0V1900.0ZM4051.0 717.0V480.0H4949.0V717.0Z M5772.0 1900.0 5522.0 790.0H5413.0V480.0H5628.0L5878.0 1590.0H5945.0V1900.0ZM5231.0 1900.0V480.0H5485.0V1900.0ZM5915.0 1900.0V480.0H6169.0V1900.0Z M6768.0 1900.0V480.0H7032.0V1900.0ZM6363.0 723.0V480.0H7437.0V723.0Z M7966.0 1710.0V672.0H8234.0V1710.0ZM7600.0 1316.0V1066.0H8600.0V1316.0Z" /></svg>
+                    <svg viewBox="78.8 460 8521.2 1460" role="img" aria-label="rOSINT+" fill="currentColor" className="inline-block align-middle h-5 sm:h-6 w-auto"><path d="M696.25 1330.0 618.75 873.75H732.5Q752.5 550.0 1071.25 550.0Q1260.0 550.0 1360.625 688.75Q1461.25 827.5 1461.25 1088.75H1123.75Q1123.75 971.25 1080.625 920.0Q1037.5 868.75 942.5 868.75Q818.75 868.75 757.5 988.75Q696.25 1108.75 696.25 1330.0ZM78.75 1900.0V1610.0H1006.25V1900.0ZM358.75 1900.0V575.0H646.25L696.25 955.0V1900.0ZM128.75 865.0V575.0H628.75L653.75 865.0Z M2100.0 1920.0Q1559.0 1920.0 1559.0 1200.0Q1559.0 460.0 2100.0 460.0Q2641.0 460.0 2641.0 1200.0Q2641.0 1920.0 2100.0 1920.0ZM2100.0 1668.0Q2364.0 1668.0 2364.0 1200.0Q2364.0 712.0 2100.0 712.0Q1836.0 712.0 1836.0 1200.0Q1836.0 1668.0 2100.0 1668.0Z M3251.0 1920.0Q3130.0 1920.0 3016.0 1899.5Q2902.0 1879.0 2812.0 1842.0L2848.0 1572.0Q2958.0 1618.0 3066.5 1643.0Q3175.0 1668.0 3267.0 1668.0Q3374.0 1668.0 3431.0 1630.0Q3488.0 1592.0 3488.0 1521.0Q3488.0 1428.0 3371.0 1373.0L3167.0 1274.0Q3016.0 1200.0 2933.0 1091.0Q2850.0 982.0 2850.0 850.0Q2850.0 664.0 2973.0 562.0Q3096.0 460.0 3321.0 460.0Q3452.0 460.0 3569.5 506.0Q3687.0 552.0 3778.0 639.0L3596.0 848.0Q3527.0 782.0 3457.0 746.5Q3387.0 711.0 3322.0 711.0Q3234.0 711.0 3185.0 748.5Q3136.0 786.0 3136.0 857.0Q3136.0 904.0 3170.5 946.0Q3205.0 988.0 3269.0 1022.0L3461.0 1121.0Q3611.0 1199.0 3692.5 1303.0Q3774.0 1407.0 3774.0 1526.0Q3774.0 1715.0 3638.0 1817.5Q3502.0 1920.0 3251.0 1920.0Z M4367.0 1900.0V480.0H4631.0V1900.0ZM4051.0 1900.0V1662.0H4949.0V1900.0ZM4051.0 717.0V480.0H4949.0V717.0Z M5772.0 1900.0 5522.0 790.0H5413.0V480.0H5628.0L5878.0 1590.0H5945.0V1900.0ZM5231.0 1900.0V480.0H5485.0V1900.0ZM5915.0 1900.0V480.0H6169.0V1900.0Z M6768.0 1900.0V480.0H7032.0V1900.0ZM6363.0 723.0V480.0H7437.0V723.0Z M7966.0 1710.0V672.0H8234.0V1710.0ZM7600.0 1316.0V1066.0H8600.0V1316.0Z" /></svg>
                 </a>
                 <a href="/privacy.html" className="bg-[color:var(--bg)] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] px-3.5 h-9 sm:px-3 sm:h-8 transition-colors border border-[color:var(--border-hover)] hover:border-[color:var(--text-muted)] rounded flex items-center text-[13px] font-medium whitespace-nowrap"style={NO_DECORATION}>
                     {t("privacy")}
@@ -1554,7 +1454,7 @@ export default function App() {
             <header className={`${scrolled ? "" : "header-top"} fixed top-0 inset-x-0 z-50 flex items-center justify-between gap-2 px-3 sm:px-4 py-2.5 bg-[color:var(--bg)] border-b border-[color:var(--border)]`}>
                 <div className="flex items-center gap-2 sm:gap-4 min-w-0">
                 <a href="/" className="text-[color:var(--text)] hover:text-[color:var(--accent)] transition-colors font-bold text-base sm:text-lg leading-none whitespace-nowrap"style={NO_DECORATION}>
-                    <svg viewBox="78.8 460 8521.2 1460" role="img" aria-label="rOSINT+" fill="currentColor" className="inline-block align-middle h-6 sm:h-8 w-auto"><path d="M696.25 1330.0 618.75 873.75H732.5Q752.5 550.0 1071.25 550.0Q1260.0 550.0 1360.625 688.75Q1461.25 827.5 1461.25 1088.75H1123.75Q1123.75 971.25 1080.625 920.0Q1037.5 868.75 942.5 868.75Q818.75 868.75 757.5 988.75Q696.25 1108.75 696.25 1330.0ZM78.75 1900.0V1610.0H1006.25V1900.0ZM358.75 1900.0V575.0H646.25L696.25 955.0V1900.0ZM128.75 865.0V575.0H628.75L653.75 865.0Z M2100.0 1920.0Q1559.0 1920.0 1559.0 1200.0Q1559.0 460.0 2100.0 460.0Q2641.0 460.0 2641.0 1200.0Q2641.0 1920.0 2100.0 1920.0ZM2100.0 1668.0Q2364.0 1668.0 2364.0 1200.0Q2364.0 712.0 2100.0 712.0Q1836.0 712.0 1836.0 1200.0Q1836.0 1668.0 2100.0 1668.0Z M3251.0 1920.0Q3130.0 1920.0 3016.0 1899.5Q2902.0 1879.0 2812.0 1842.0L2848.0 1572.0Q2958.0 1618.0 3066.5 1643.0Q3175.0 1668.0 3267.0 1668.0Q3374.0 1668.0 3431.0 1630.0Q3488.0 1592.0 3488.0 1521.0Q3488.0 1428.0 3371.0 1373.0L3167.0 1274.0Q3016.0 1200.0 2933.0 1091.0Q2850.0 982.0 2850.0 850.0Q2850.0 664.0 2973.0 562.0Q3096.0 460.0 3321.0 460.0Q3452.0 460.0 3569.5 506.0Q3687.0 552.0 3778.0 639.0L3596.0 848.0Q3527.0 782.0 3457.0 746.5Q3387.0 711.0 3322.0 711.0Q3234.0 711.0 3185.0 748.5Q3136.0 786.0 3136.0 857.0Q3136.0 904.0 3170.5 946.0Q3205.0 988.0 3269.0 1022.0L3461.0 1121.0Q3611.0 1199.0 3692.5 1303.0Q3774.0 1407.0 3774.0 1526.0Q3774.0 1715.0 3638.0 1817.5Q3502.0 1920.0 3251.0 1920.0Z M4367.0 1900.0V480.0H4631.0V1900.0ZM4051.0 1900.0V1662.0H4949.0V1900.0ZM4051.0 717.0V480.0H4949.0V717.0Z M5772.0 1900.0 5522.0 790.0H5413.0V480.0H5628.0L5878.0 1590.0H5945.0V1900.0ZM5231.0 1900.0V480.0H5485.0V1900.0ZM5915.0 1900.0V480.0H6169.0V1900.0Z M6768.0 1900.0V480.0H7032.0V1900.0ZM6363.0 723.0V480.0H7437.0V723.0Z M7966.0 1710.0V672.0H8234.0V1710.0ZM7600.0 1316.0V1066.0H8600.0V1316.0Z" /></svg>
+                    <svg viewBox="78.8 460 8521.2 1460" role="img" aria-label="rOSINT+" fill="currentColor" className="inline-block align-middle h-5 sm:h-6 w-auto"><path d="M696.25 1330.0 618.75 873.75H732.5Q752.5 550.0 1071.25 550.0Q1260.0 550.0 1360.625 688.75Q1461.25 827.5 1461.25 1088.75H1123.75Q1123.75 971.25 1080.625 920.0Q1037.5 868.75 942.5 868.75Q818.75 868.75 757.5 988.75Q696.25 1108.75 696.25 1330.0ZM78.75 1900.0V1610.0H1006.25V1900.0ZM358.75 1900.0V575.0H646.25L696.25 955.0V1900.0ZM128.75 865.0V575.0H628.75L653.75 865.0Z M2100.0 1920.0Q1559.0 1920.0 1559.0 1200.0Q1559.0 460.0 2100.0 460.0Q2641.0 460.0 2641.0 1200.0Q2641.0 1920.0 2100.0 1920.0ZM2100.0 1668.0Q2364.0 1668.0 2364.0 1200.0Q2364.0 712.0 2100.0 712.0Q1836.0 712.0 1836.0 1200.0Q1836.0 1668.0 2100.0 1668.0Z M3251.0 1920.0Q3130.0 1920.0 3016.0 1899.5Q2902.0 1879.0 2812.0 1842.0L2848.0 1572.0Q2958.0 1618.0 3066.5 1643.0Q3175.0 1668.0 3267.0 1668.0Q3374.0 1668.0 3431.0 1630.0Q3488.0 1592.0 3488.0 1521.0Q3488.0 1428.0 3371.0 1373.0L3167.0 1274.0Q3016.0 1200.0 2933.0 1091.0Q2850.0 982.0 2850.0 850.0Q2850.0 664.0 2973.0 562.0Q3096.0 460.0 3321.0 460.0Q3452.0 460.0 3569.5 506.0Q3687.0 552.0 3778.0 639.0L3596.0 848.0Q3527.0 782.0 3457.0 746.5Q3387.0 711.0 3322.0 711.0Q3234.0 711.0 3185.0 748.5Q3136.0 786.0 3136.0 857.0Q3136.0 904.0 3170.5 946.0Q3205.0 988.0 3269.0 1022.0L3461.0 1121.0Q3611.0 1199.0 3692.5 1303.0Q3774.0 1407.0 3774.0 1526.0Q3774.0 1715.0 3638.0 1817.5Q3502.0 1920.0 3251.0 1920.0Z M4367.0 1900.0V480.0H4631.0V1900.0ZM4051.0 1900.0V1662.0H4949.0V1900.0ZM4051.0 717.0V480.0H4949.0V717.0Z M5772.0 1900.0 5522.0 790.0H5413.0V480.0H5628.0L5878.0 1590.0H5945.0V1900.0ZM5231.0 1900.0V480.0H5485.0V1900.0ZM5915.0 1900.0V480.0H6169.0V1900.0Z M6768.0 1900.0V480.0H7032.0V1900.0ZM6363.0 723.0V480.0H7437.0V723.0Z M7966.0 1710.0V672.0H8234.0V1710.0ZM7600.0 1316.0V1066.0H8600.0V1316.0Z" /></svg>
                 </a>
                 <a href="/privacy.html" className="bg-[color:var(--bg)] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] px-3.5 h-9 sm:px-3 sm:h-8 transition-colors border border-[color:var(--border-hover)] hover:border-[color:var(--text-muted)] rounded flex items-center text-[13px] font-medium whitespace-nowrap"style={NO_DECORATION}>
                     {t("privacy")}
@@ -1747,31 +1647,35 @@ export default function App() {
                         </div>
 
                         {initialLoading ? <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-3 sm:justify-between" aria-hidden="true">
-                                <div className="skeleton h-4 w-28 rounded-sm flex-shrink-0"></div>
+                                <div className="flex items-center gap-2 flex-shrink-0">
+                                    <div className="skeleton h-4 w-28 rounded-sm"></div>
+                                    <div className="skeleton h-7 w-20 rounded"></div>
+                                    <div className="skeleton h-7 w-16 rounded"></div>
+                                </div>
                                 <div className="w-full sm:w-auto flex flex-wrap items-center gap-2 sm:gap-4 justify-between sm:justify-end">
                                     <div className="skeleton h-7 w-[92px] rounded"></div>
-                                    <div className="skeleton h-7 w-[78px] rounded"></div>
-                                    <div className="skeleton h-7 w-[72px] rounded"></div>
                                     <div className="w-px h-5 bg-[color:var(--border)] hidden sm:block" />
                                     <div className="skeleton h-7 w-[62px] rounded"></div>
                                     <div className="skeleton h-7 w-[74px] rounded"></div>
                                 </div>
                             </div> : <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-3 sm:justify-between">
-                                <HoverHint hint={t("searchOnRedditHint")} className="flex-shrink-0">
-                                    <a href={`https://www.reddit.com/search/?q=author%3A%22${query}%22`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-[11px] text-[color:var(--text-muted)] hover:text-[color:var(--accent-text)] transition-colors leading-relaxed">
-                                        <IconExternal /> {t("searchOnReddit")}
-                                    </a>
-                                </HoverHint>
+                                <div className="flex items-center gap-2 flex-shrink-0">
+                                    <HoverHint hint={t("searchOnRedditHint")} className="flex-shrink-0">
+                                        <a href={`https://www.reddit.com/search/?q=author%3A%22${query}%22`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-[11px] text-[color:var(--text-muted)] hover:text-[color:var(--accent-text)] transition-colors leading-relaxed">
+                                            <IconExternal /> {t("searchOnReddit")}
+                                        </a>
+                                    </HoverHint>
+                                    <label className="flex items-center gap-1.5 cursor-pointer select-none border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] rounded px-2 h-7 bg-[color:var(--bg)] transition-colors flex-shrink-0">
+                                        <input type="checkbox" checked={deletedOnly} onChange={e => setDeletedOnly(e.target.checked)} className="w-3 h-3 accent-[color:var(--accent)] cursor-pointer" />
+                                        <span className="text-[11px] whitespace-nowrap">{t("deletedOnly")}</span>
+                                    </label>
+                                    <label className="flex items-center gap-1.5 cursor-pointer select-none border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] rounded px-2 h-7 bg-[color:var(--bg)] transition-colors flex-shrink-0">
+                                        <input type="checkbox" checked={nsfwOnly} onChange={e => setNsfwOnly(e.target.checked)} className="w-3 h-3 accent-[color:var(--accent)] cursor-pointer" />
+                                        <span className="text-[11px] whitespace-nowrap">{t("nsfwOnly")}</span>
+                                    </label>
+                                </div>
 
                                 <div className="w-full sm:w-auto flex flex-wrap items-center gap-2 sm:gap-4 justify-between sm:justify-end">
-                                        <label className="flex items-center gap-1.5 cursor-pointer select-none border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] rounded px-2 h-7 bg-[color:var(--bg)] transition-colors flex-shrink-0">
-                                            <input type="checkbox" checked={deletedOnly} onChange={e => setDeletedOnly(e.target.checked)} className="w-3 h-3 accent-[color:var(--accent)] cursor-pointer" />
-                                            <span className="text-[11px] whitespace-nowrap">{t("deletedOnly")}</span>
-                                        </label>
-                                        <label className="flex items-center gap-1.5 cursor-pointer select-none border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] rounded px-2 h-7 bg-[color:var(--bg)] transition-colors flex-shrink-0">
-                                            <input type="checkbox" checked={nsfwOnly} onChange={e => setNsfwOnly(e.target.checked)} className="w-3 h-3 accent-[color:var(--accent)] cursor-pointer" />
-                                            <span className="text-[11px] whitespace-nowrap">{t("nsfwOnly")}</span>
-                                        </label>
                                         <details className="relative group/sort flex-shrink-0" onKeyDown={closeOnEscape}>
                                             <summary aria-label={t("newest")} className="flex items-center gap-1.5 bg-[color:var(--bg)] border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] rounded h-7 px-2 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)] cursor-pointer list-none [&::-webkit-details-marker]:hidden">
                                                 <span className="text-[11px] pointer-events-none">{sortOrder === "desc" ? t("newest") : t("oldest")}</span><svg className="w-3 h-3 text-[color:var(--text-muted)] pointer-events-none opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
