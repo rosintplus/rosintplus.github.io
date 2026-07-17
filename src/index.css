@@ -36,10 +36,6 @@
   }
 }
 
-/* Single-line, swipeable filter bar on mobile — no visible scrollbar. */
-.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-.no-scrollbar::-webkit-scrollbar { display: none; }
-
 /* Keyboard focus ring. Guarantees a visible focus indicator on every
    interactive element for keyboard users — including the many controls that
    set Tailwind's `outline-none`, hence !important. Mouse clicks (which don't
