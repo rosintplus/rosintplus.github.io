@@ -1271,6 +1271,7 @@ export default function App() {
       async function crawlType(type) {
         const isComment = type === "comments";
         let before = null;
+        let lastId = null;
 
         while (!controller.signal.aborted) {
           const pagination = before ? { before } : {};
@@ -1278,6 +1279,7 @@ export default function App() {
 
           if (controller.signal.aborted || result.items.length === 0) break;
 
+          const beforeCount = crawlItemsRef.current;
           for (const item of result.items) {
             crawledTotalRef.current++;
             if (seen.has(item.id)) continue;
@@ -1286,10 +1288,13 @@ export default function App() {
             processItem(crawlStats, item, isComment);
           }
 
+          if (crawlItemsRef.current === beforeCount) break;
           setBgStatsVersion(v => v + 1);
 
-          if (result.items.length < LIMIT) break;
-          before = result.items[result.items.length - 1].created_utc;
+          const last = result.items[result.items.length - 1];
+          if (last.id === lastId) break;
+          lastId = last.id;
+          before = last.created_utc;
           await sleep(500);
         }
       }

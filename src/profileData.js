@@ -69,7 +69,25 @@ function processItem(stats, item, isComment) {
   }
 }
 
-export { emptyStats, processItem, STOPWORDS };
+function mergeStats(target, source) {
+  for (const [sub, count] of Object.entries(source.subredditCounts)) {
+    target.subredditCounts[sub] = (target.subredditCounts[sub] || 0) + count;
+  }
+  for (let r = 0; r < 7; r++) {
+    for (let c = 0; c < 24; c++) {
+      target.heatmap[r][c] += source.heatmap[r][c];
+    }
+  }
+  for (const type of ["posts", "comments"]) {
+    for (const [word, counts] of Object.entries(source.wordFreqs[type])) {
+      if (!target.wordFreqs[type][word]) target.wordFreqs[type][word] = { total: 0, items: 0 };
+      target.wordFreqs[type][word].total += counts.total;
+      target.wordFreqs[type][word].items += counts.items;
+    }
+  }
+}
+
+export { emptyStats, processItem, mergeStats, STOPWORDS };
 
 // ─── IndexedDB ───────────────────────────────────────────────────────────────
 
