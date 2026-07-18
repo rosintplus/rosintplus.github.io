@@ -37,11 +37,12 @@
   <link rel="dns-prefetch" href="https://arctic-shift.photon-reddit.com" />
   <link rel="dns-prefetch" href="https://api.pullpush.io" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title>Rosint+</title>
+  <title>rOSINT+ — View Deleted Reddit Posts &amp; Removed Comments</title>
+  <meta name="robots" content="index, follow" />
 
   <!-- Primary SEO -->
-  <meta name="description" content="Search deleted posts, removed comments, and private Reddit accounts using distributed open-source archives. Powered by Arctic Shift and PullPush." />
-  <meta name="keywords" content="reddit osint, deleted reddit posts, removed reddit comments, reddit archive, reddit search" />
+  <meta name="description" content="Search any Reddit username to find deleted posts, removed comments, and private profiles. Free, open-source, no login required. Powered by Arctic Shift and PullPush archives." />
+  <meta name="keywords" content="reddit osint, deleted reddit posts, removed reddit comments, reddit archive, reddit search, view deleted reddit content, reddit history viewer, reddit profile search, find deleted reddit comments, osint tool" />
   <link rel="canonical" href="https://rosintplus.github.io/" />
   <link rel="alternate" href="https://rosintplus.github.io/" hreflang="x-default" />
   <link rel="alternate" href="https://rosintplus.github.io/" hreflang="en" />
@@ -81,10 +82,90 @@
       "@type": "WebApplication",
       "name": "rOSINT+",
       "url": "https://rosintplus.github.io/",
-      "description": "Search deleted posts, removed comments, and private Reddit accounts using distributed open-source archives.",
+      "description": "Search any Reddit username to find deleted posts, removed comments, and private profiles. Free, open-source, no login required.",
       "applicationCategory": "SearchApplication",
       "operatingSystem": "Any",
-      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+      "browserRequirements": "Requires JavaScript",
+      "author": {
+        "@type": "Organization",
+        "name": "rOSINT+",
+        "url": "https://github.com/rosintplus/rosintplus.github.io"
+      },
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "featureList": [
+        "Search deleted Reddit posts",
+        "View removed Reddit comments",
+        "Browse private Reddit profiles",
+        "Dual-source archive search (Arctic Shift + PullPush)",
+        "Profile analytics with activity heatmap",
+        "9 color themes",
+        "6 languages",
+        "Export results as CSV or JSON"
+      ]
+    }
+  </script>
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "How can I view deleted Reddit posts?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Enter a Reddit username in the search bar. rOSINT+ queries Arctic Shift and PullPush archives in parallel to find deleted and removed content. No login required."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Can I see deleted Reddit comments?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes. rOSINT+ searches both Arctic Shift and PullPush archives for deleted and removed comments by any Reddit username. Results include the full comment body, subreddit, score, and link to the original thread."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Is rOSINT+ free to use?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes, rOSINT+ is completely free and open-source. It has no backend, no accounts, no analytics, and no cookies. Everything runs in your browser."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What data sources does rOSINT+ use?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "rOSINT+ queries two independent open-source Reddit archives: Arctic Shift and PullPush. Results are merged and deduplicated by post or comment ID for maximum coverage."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Does rOSINT+ store my searches?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "No. rOSINT+ has no backend server and no tracking. Your searches go directly from your browser to the archive APIs. Profile data you choose to save is stored locally in your browser's IndexedDB."
+          }
+        }
+      ]
+    }
+  </script>
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "name": "rOSINT+",
+      "url": "https://rosintplus.github.io/",
+      "description": "Open-source Reddit intelligence tool for viewing deleted posts, removed comments, and private profiles.",
+      "sameAs": [
+        "https://github.com/rosintplus/rosintplus.github.io"
+      ]
     }
   </script>
   
