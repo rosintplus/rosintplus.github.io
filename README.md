@@ -31,7 +31,7 @@ This is a fork of **[rosint.dev](https://rosint.dev)** extended with profile ana
 - **Saved profiles** - pin profiles to disk (IndexedDB), plus recent-search history
 
 - **9 color themes** - Default, Nord, Catppuccin, Cyber, Mono, Gruvbox, Dracula, Solarized, and Synthwave - each with light / dark / auto modes (see [Themes](#themes))
-- **6 languages** - English, Spanish, French, German, Japanese, and Chinese
+- **7 languages** - English, Spanish, French, German, Greek, Japanese, and Chinese
 - **Export** - download the current result set as CSV or JSON
 - **Copy permalink** - one click copies the permalink, timestamp, and details
 - **Keyboard accessible** - visible focus rings, escape-to-close menus, and a skip-to-content link

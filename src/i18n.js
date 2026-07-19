@@ -1,7 +1,7 @@
 import { useSyncExternalStore, useCallback } from "react";
 
 // ─── Languages ────────────────────────────────────────────────────────────────
-// UI translations for the 5 most-spoken languages the app's audience uses.
+// UI translations for the 7 languages the app's audience uses.
 // Keys mirror the English catalog below; en is the source of truth and the
 // fallback for any missing key. Translations were machine-generated and then
 // QA-checked (placeholder preservation, gender agreement, UI length).
@@ -520,7 +520,7 @@ const translations = {
     pvPullpushRemovals: "PullPush-Löschanträge",
     pvArcticRemovals: "Arctic-Shift-Löschanträge",
     apBasedOn: "Basierend auf {n} Elementen",
-    apBasedOnTotal: "{loaded} / {total} Elementen",
+    apBasedOnTotal: "{loaded} / {total} Elemente",
     apUpdated: "aktualisiert {time}",
     apSave: "Speichern",
     apSaved: "Gespeichert",
@@ -799,7 +799,7 @@ const translations = {
     advancedFilters: "高级筛选",
     from: "从",
     to: "至",
-    in: "位于",
+    in: "在",
     subredditPlaceholder: "版块",
     deletedOnly: "仅已删除",
     showNsfw: "显示 NSFW",
@@ -881,7 +881,7 @@ const translations = {
     pvArcticRemovals: "Arctic Shift 删除申请",
     apBasedOn: "基于 {n} 个项目",
     apBasedOnTotal: "{loaded} / {total} 个项目",
-    apUpdated: "{time}更新",
+    apUpdated: "更新于{time}",
     apSave: "保存",
     apSaved: "已保存",
     apSaveTitle: "将个人资料保存到磁盘（否则关闭时删除）",
