@@ -378,9 +378,9 @@ return <>
                   }} disabled={commentsLoading} className="relative z-10 flex items-center gap-1 hover:text-[color:var(--accent)] transition-colors disabled:opacity-50 cursor-pointer">
                                         <IconComment />{embedded ? t("commentsCount", { n: fmtNum(post.num_comments) }) : t("showCommentsCount", { n: fmtNum(post.num_comments) })}
                                     </button>
-                                    {post.domain && !post.is_self && <a href={postUrl} target="_blank" rel="noopener noreferrer" className="relative z-10 flex items-center gap-1 text-[color:var(--accent-text)] hover:underline truncate max-w-[200px]">
-                                        <IconExternal /><span className="truncate">{post.domain}</span>
-                                    </a>}
+                                    <a href={postUrl} target="_blank" rel="noopener noreferrer" className="relative z-10 flex items-center gap-1 text-[color:var(--accent-text)] hover:underline truncate max-w-[200px]">
+                                        <IconExternal /><span className="truncate">{post.domain || post.subreddit_name_prefixed || `r/${post.subreddit}`}</span>
+                                    </a>
                                     {hasBody && <button aria-label={bodyOpen ? "Hide post body" : "Show post body"} onClick={e => {
                     e.preventDefault();
                     setBodyOpen(o => !o);
