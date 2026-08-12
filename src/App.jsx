@@ -366,11 +366,11 @@ return <>
                                         </span>
                                         </>}
                                 </div>
-                                <a href={postUrl} target="_blank" rel="noopener noreferrer" className="block relative z-10">
+                                <div className="relative z-10">
                                     <p className="text-sm font-medium text-[color:var(--text)] leading-snug mb-1.5 transition-colors break-words">
                                         {post.title}
                                     </p>
-                                </a>
+                                </div>
                                 <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-[11px] text-[color:var(--text-muted)] mt-1">
                                     <button onClick={e => {
                     e.preventDefault();
@@ -378,7 +378,7 @@ return <>
                   }} disabled={commentsLoading} className="relative z-10 flex items-center gap-1 hover:text-[color:var(--accent)] transition-colors disabled:opacity-50 cursor-pointer">
                                         <IconComment />{embedded ? t("commentsCount", { n: fmtNum(post.num_comments) }) : t("showCommentsCount", { n: fmtNum(post.num_comments) })}
                                     </button>
-                                    {post.domain && !post.is_self && <a href={post.url || postUrl} target="_blank" rel="noopener noreferrer" className="relative z-10 flex items-center gap-1 text-[color:var(--accent-text)] hover:underline truncate max-w-[200px]">
+                                    {post.domain && !post.is_self && <a href={postUrl} target="_blank" rel="noopener noreferrer" className="relative z-10 flex items-center gap-1 text-[color:var(--accent-text)] hover:underline truncate max-w-[200px]">
                                         <IconExternal /><span className="truncate">{post.domain}</span>
                                     </a>}
                                     {hasBody && <button aria-label={bodyOpen ? "Hide post body" : "Show post body"} onClick={e => {
@@ -396,10 +396,14 @@ return <>
                                 </div>
                             </div>
                             <div className="flex flex-col items-end justify-between gap-1 flex-shrink-0 self-stretch relative z-10">
-                                {thumb && !imgError && <HoverHint hint={t("openPost")} className="self-end">
-                                    <a href={postUrl} target="_blank" rel="noopener noreferrer" className="relative flex items-center justify-center w-[70px] h-[52px] rounded overflow-hidden bg-[color:var(--bg-elevated)] border border-[color:var(--border-hover)] cursor-pointer">
+                                {thumb && !imgError && <HoverHint hint={t("openImage")} className="self-end">
+                                    <div role="button" tabIndex={0} onClick={e => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        window.open(thumb, "_blank", "noopener,noreferrer");
+                                    }} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); window.open(thumb, "_blank", "noopener,noreferrer"); } }} className="relative flex items-center justify-center w-[70px] h-[52px] rounded overflow-hidden bg-[color:var(--bg-elevated)] border border-[color:var(--border-hover)] cursor-zoom-in">
                                         <img src={thumb} alt={`${post.title}`} width="70" height="52" className="absolute inset-0 w-full h-full object-cover" loading="lazy" onError={() => setImgError(true)} />
-                                    </a>
+                                    </div>
                                 </HoverHint>}
                             </div>
                         </div>
