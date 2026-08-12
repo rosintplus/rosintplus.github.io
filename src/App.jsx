@@ -306,9 +306,9 @@ const PostCard = memo(function PostCard({
   const handleCardClick = useCallback(e => {
     if (e.target.closest("a, button, [role='button']")) return;
     if (hasBody) setBodyOpen(o => !o);
-    else window.open(postUrl, "_blank", "noopener,noreferrer");
-  }, [hasBody, postUrl]);
+  }, [hasBody]);
   useEffect(() => () => { if (commentsAbortRef.current) commentsAbortRef.current.abort(); }, []);
+  useEffect(() => { setImgError(false); }, [post]);
   async function handleLoadComments() {
     if (commentsLoading) return;
     if (commentsAbortRef.current) commentsAbortRef.current.abort();
@@ -396,15 +396,10 @@ return <>
                                 </div>
                             </div>
                             <div className="flex flex-col items-end justify-between gap-1 flex-shrink-0 self-stretch relative z-10">
-                                {thumb && <HoverHint hint={t("openImage")} className="self-end">
-                                    <div role="button" tabIndex={0} onClick={e => {
-                                        e.preventDefault();
-                                        e.stopPropagation();
-                                        window.open(thumb, "_blank", "noopener,noreferrer");
-                                    }} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); window.open(thumb, "_blank", "noopener,noreferrer"); } }} className="relative flex items-center justify-center w-[70px] h-[52px] rounded overflow-hidden bg-[color:var(--bg-elevated)] border border-[color:var(--border-hover)] cursor-zoom-in">
-                                        <img src={thumb} alt={`${post.title}`} width="70" height="52" className={`absolute inset-0 w-full h-full object-cover transition-opacity ${imgError ? 'opacity-0' : 'opacity-100'}`} loading="lazy" onError={() => setImgError(true)} />
-                                        {imgError && <IconExternal className="w-4 h-4 text-[color:var(--text-muted)] opacity-50 pointer-events-none" />}
-                                    </div>
+                                {thumb && !imgError && <HoverHint hint={t("openPost")} className="self-end">
+                                    <a href={postUrl} target="_blank" rel="noopener noreferrer" className="relative flex items-center justify-center w-[70px] h-[52px] rounded overflow-hidden bg-[color:var(--bg-elevated)] border border-[color:var(--border-hover)] cursor-pointer">
+                                        <img src={thumb} alt={`${post.title}`} width="70" height="52" className="absolute inset-0 w-full h-full object-cover" loading="lazy" onError={() => setImgError(true)} />
+                                    </a>
                                 </HoverHint>}
                             </div>
                         </div>
