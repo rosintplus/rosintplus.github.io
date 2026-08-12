@@ -1587,11 +1587,6 @@ export default function App() {
                   <strong className="text-[color:var(--text)]">{t("pvRemovalLabel")}</strong> {tJsx(t, "pvRemovalBody", { pullpushLink: <a key="pp" href="https://removals.pullpush.io/" target="_blank" rel="noopener noreferrer" className="text-[color:var(--accent)] hover:underline">{t("pvPullpushRemovals")}</a>, arcticLink: <a key="as" href="https://docs.google.com/forms/d/e/1FAIpQLSfzkmE8Bg6K_xii7aRm66ljzvo2tR59lTsdJ99acW4WX786Vw/viewform?usp=sf_link" target="_blank" rel="noopener noreferrer" className="text-[color:var(--accent)] hover:underline">{t("pvArcticRemovals")}</a> })}
               </div>
           </div>
-          <div className="flex justify-center mt-10">
-            <a href="https://nicklaunches.com/products/rosint/?utm_source=rosintplus.github.io&utm_medium=badge&utm_campaign=featured" target="_blank" rel="noopener">
-              <img src="https://nicklaunches.com/badges/featured-dark.png" alt="Rosint+ on Nick Launches" width="244" height="56" />
-            </a>
-          </div>
         </main>
       </div>
     );
