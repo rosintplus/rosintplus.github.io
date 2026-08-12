@@ -50,8 +50,6 @@ const AccountProfile = memo(function AccountProfile({
     ? userMeta.num_posts + userMeta.num_comments
     : null;
 
-  if (!stats || totalItems === null) return null;
-
   const topSubreddits = useMemo(() => {
     if (!stats?.subredditCounts) return { list: [], max: 1 };
     const counts = stats.subredditCounts;
@@ -128,6 +126,8 @@ const AccountProfile = memo(function AccountProfile({
     const maxN = sorted.length > 0 ? sorted[0][1][key] : 1;
     return { list: sorted.map(([word, counts]) => [word, counts[key]]), maxN };
   }, [stats, activeTab]);
+
+  if (!stats || totalItems === null) return null;
 
   return (
     <div className="flex flex-col gap-4 mb-4 mt-4">

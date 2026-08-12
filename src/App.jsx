@@ -430,7 +430,8 @@ return <>
 });
 
 const ParentChain = memo(function ParentChain({
-  parentId
+  parentId,
+  depth = 0
 }) {
   const { t } = useI18n();
   const [comment, setComment] = useState(null);
@@ -438,6 +439,9 @@ const ParentChain = memo(function ParentChain({
   const parentAbortRef = useRef(null);
   useEffect(() => () => { if (parentAbortRef.current) parentAbortRef.current.abort(); }, []);
   if (typeof parentId !== "string" || !parentId.startsWith("t1_")) return null;
+  if (depth >= 8) return <div className="border-b border-[color:var(--border)] px-3 py-1.5">
+            <span className="text-[11px] text-[color:var(--text-faint)]">…</span>
+        </div>;
   async function handleLoad() {
     if (loading || comment) return;
     if (parentAbortRef.current) parentAbortRef.current.abort();
@@ -451,7 +455,7 @@ const ParentChain = memo(function ParentChain({
     setLoading(false);
   }
   return <div className="border-b border-[color:var(--border)]">
-            {comment && <ParentChain parentId={comment.parent_id} />}
+            {comment && <ParentChain parentId={comment.parent_id} depth={depth + 1} />}
 
             {comment ? (
     <div className="flex opacity-80">
@@ -1246,6 +1250,7 @@ export default function App() {
   const bgCrawlRef = useRef(null);
   const crawlItemsRef = useRef(0);
   const crawledTotalRef = useRef(0);
+  const crawlProcessedRef = useRef(new Set());
 
   const handleRefreshCrawl = useCallback(() => setCrawlKey(k => k + 1), []);
 
@@ -1256,6 +1261,7 @@ export default function App() {
     setIsCrawling(true);
     crawlItemsRef.current = 0;
     crawledTotalRef.current = 0;
+    crawlProcessedRef.current = new Set();
 
     const controller = new AbortController();
     bgCrawlRef.current = controller;
@@ -1279,17 +1285,21 @@ export default function App() {
 
           if (controller.signal.aborted || result.items.length === 0) break;
 
-          const beforeCount = crawlItemsRef.current;
+          let anyNew = false;
           for (const item of result.items) {
             crawledTotalRef.current++;
             if (seen.has(item.id)) continue;
             seen.add(item.id);
+            crawlProcessedRef.current.add(item.id);
             crawlItemsRef.current++;
+            anyNew = true;
             processItem(crawlStats, item, isComment);
           }
 
-          if (crawlItemsRef.current === beforeCount) break;
-          setBgStatsVersion(v => v + 1);
+          // Keep paging even when this page was fully seen — older pages may
+          // hold items the user hasn't loaded yet. The lastId guard below and
+          // the empty-page break bound the walk.
+          if (anyNew) setBgStatsVersion(v => v + 1);
 
           const last = result.items[result.items.length - 1];
           if (last.id === lastId) break;
@@ -1309,12 +1319,24 @@ export default function App() {
     })();
 
     return () => { controller.abort(); setIsCrawling(false); };
+    // posts.items/comments.items are intentionally excluded: the crawl seeds
+    // `seen` once at start and must not restart when the user loads more.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showProfile, query, crawlKey]);
 
   const profileStats = useMemo(() => {
     const stats = emptyStats();
-    for (const item of posts.items) processItem(stats, item, false);
-    for (const item of comments.items) processItem(stats, item, true);
+    // Items the background crawl already counted are skipped here so they're
+    // never double-counted when they later appear in the loaded tab items.
+    const processed = bgStatsVersion > 0 ? crawlProcessedRef.current : null;
+    for (const item of posts.items) {
+      if (processed?.has(item.id)) continue;
+      processItem(stats, item, false);
+    }
+    for (const item of comments.items) {
+      if (processed?.has(item.id)) continue;
+      processItem(stats, item, true);
+    }
 
     if (bgStatsVersion > 0 && bgStatsRef.current) {
       const bg = bgStatsRef.current;
@@ -1338,9 +1360,19 @@ export default function App() {
     return stats;
   }, [posts.items, comments.items, bgStatsVersion]);
 
-  const totalItems = useMemo(() => {
-    return posts.items.length + comments.items.length + crawlItemsRef.current;
-  }, [posts.items.length, comments.items.length, bgStatsVersion]);
+  const loadedCount = useMemo(() => {
+    const loaded = posts.items.length + comments.items.length;
+    if (bgStatsVersion === 0) return loaded;
+    const processed = crawlProcessedRef.current;
+    let overlap = 0;
+    for (const item of posts.items) {
+      if (processed.has(item.id)) overlap++;
+    }
+    for (const item of comments.items) {
+      if (processed.has(item.id)) overlap++;
+    }
+    return loaded + crawlItemsRef.current - overlap;
+  }, [posts.items, comments.items, bgStatsVersion]);
 
   const [visibleCount, setVisibleCount] = useState(Infinity);
   const prevFilteredLenRef = useRef(0);
@@ -1438,14 +1470,18 @@ export default function App() {
     setInitialLoading(false);
     setAppliedSubreddit(subreddit.trim());
   }, [buildFilters, resetPosts, resetComments, subreddit, sortOrder]);
+  const searchUserRef = useRef(searchUser);
+  searchUserRef.current = searchUser;
+  // Re-search when a discrete filter control changes (dates, NSFW toggle,
+  // sort). The subreddit text field is deliberately NOT here: it changes on
+  // every keystroke, so it commits only on blur/Enter in its own handler.
   useEffect(() => {
     if (searched && query && !initialLoading) {
-      searchUser(query, {
+      searchUserRef.current(query, {
         push: false
       });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dateFrom, dateTo, showNsfw, sortOrder, searchUser]);
+  }, [dateFrom, dateTo, showNsfw, sortOrder, searched, query, initialLoading]);
   useEffect(() => {
     const u = normalizeUsername(new URLSearchParams(window.location.search).get("u"));
     if (u) searchUser(u, {
@@ -1512,7 +1548,7 @@ export default function App() {
   const handleWordClick = useCallback((word) => setKeyword(word), []);
   const pathname = window.location.pathname;
   const isPrivacyPage = pathname.endsWith('/privacy.html') || pathname.endsWith('/privacy');
-  const is404Page = pathname === '/404.html' || (pathname !== "/" && !isPrivacyPage && !/^\/(assets|__vite|favicon\.ico|robots\.txt)/.test(pathname));
+  const is404Page = pathname === '/404.html' || (pathname !== "/" && pathname !== "/index.html" && !isPrivacyPage && !/^\/(assets|__vite|favicon\.ico|robots\.txt)/.test(pathname));
 
   if (isPrivacyPage) {
     return (
@@ -1743,7 +1779,7 @@ export default function App() {
     </div>
   </div>
 }>
-                            <AccountProfile query={query} activeTab={activeTab} onWordClick={handleWordClick} stats={profileStats} userMeta={userMeta} loadedCount={posts.items.length + comments.items.length + crawlItemsRef.current} isCrawling={isCrawling} onRefresh={handleRefreshCrawl} />
+                            <AccountProfile query={query} activeTab={activeTab} onWordClick={handleWordClick} stats={profileStats} userMeta={userMeta} loadedCount={loadedCount} isCrawling={isCrawling} onRefresh={handleRefreshCrawl} />
                         </Suspense>}
 
                         {searched && <h2 className="sr-only">{t("resultsFor")} u/{query}</h2>}

@@ -93,6 +93,27 @@ export { emptyStats, processItem, mergeStats, STOPWORDS };
 
 let dbPromise = null;
 
+// Older stored profiles may predate the current shape (added totals,
+// itemsCrawled, maxCreatedUtc, saved). Fill any missing fields with defaults
+// so downstream code never trips over undefined.
+function migrateIfNeeded(profile) {
+  if (!profile || typeof profile !== "object") return null;
+  profile.stats = profile.stats || emptyStats();
+  profile.stats.subredditCounts = profile.stats.subredditCounts || {};
+  if (!Array.isArray(profile.stats.heatmap) || profile.stats.heatmap.length !== 7) {
+    profile.stats.heatmap = Array.from({ length: 7 }, () => Array(24).fill(0));
+  }
+  profile.stats.wordFreqs = profile.stats.wordFreqs || { posts: {}, comments: {} };
+  profile.stats.wordFreqs.posts = profile.stats.wordFreqs.posts || {};
+  profile.stats.wordFreqs.comments = profile.stats.wordFreqs.comments || {};
+  profile.totals = profile.totals || { posts: 0, comments: 0 };
+  profile.itemsCrawled = profile.itemsCrawled || { posts: 0, comments: 0 };
+  profile.maxCreatedUtc = profile.maxCreatedUtc || 0;
+  profile.fetchedAt = profile.fetchedAt || 0;
+  profile.saved = !!profile.saved;
+  return profile;
+}
+
 function openDB() {
   if (dbPromise) return dbPromise;
   dbPromise = new Promise((resolve, reject) => {
