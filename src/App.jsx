@@ -1481,7 +1481,10 @@ export default function App() {
         push: false
       });
     }
-  }, [dateFrom, dateTo, showNsfw, sortOrder, searched, query, initialLoading]);
+    // searched/query/initialLoading are deliberately NOT deps: including them
+    // refires the search on every completion, re-showing skeletons forever.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateFrom, dateTo, showNsfw, sortOrder]);
   useEffect(() => {
     const u = normalizeUsername(new URLSearchParams(window.location.search).get("u"));
     if (u) searchUser(u, {
