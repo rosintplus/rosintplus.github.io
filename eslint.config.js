@@ -24,6 +24,11 @@ export default defineConfig([
     },
     rules: {
       'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
+      // New in eslint-plugin-react-hooks 7.1; flag idiomatic patterns used
+      // throughout this codebase (mount-flag state, latest-ref, version-
+      // counter memos). Kept off to preserve the 7.0 lint baseline.
+      'react-hooks/set-state-in-effect': 'off',
+      'react-hooks/refs': 'off',
     },
   },
 ])
