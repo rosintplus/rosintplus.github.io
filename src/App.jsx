@@ -301,6 +301,13 @@ const PostCard = memo(function PostCard({
   const postUrl = useMemo(() => post.permalink ? `${REDDIT_BASE}${post.permalink}` : `${REDDIT_BASE}/r/${post.subreddit}/comments/${post.id}`, [post]);
   const hasBody = useMemo(() => post.selftext && post.selftext !== "[deleted]" && post.selftext !== "[removed]", [post]);
   const status = useMemo(() => getStatus(post, "posts"), [post]);
+  // Tap on the card toggles the body instead of opening the permalink.
+  // Clicks that land on real links/buttons keep their own behavior.
+  const handleCardClick = useCallback(e => {
+    if (e.target.closest("a, button, [role='button']")) return;
+    if (hasBody) setBodyOpen(o => !o);
+    else window.open(postUrl, "_blank", "noopener,noreferrer");
+  }, [hasBody, postUrl]);
   useEffect(() => () => { if (commentsAbortRef.current) commentsAbortRef.current.abort(); }, []);
   async function handleLoadComments() {
     if (commentsLoading) return;
@@ -334,14 +341,13 @@ const PostCard = memo(function PostCard({
     ].filter(Boolean).join("\n");
   }, [post, status, postUrl]);
 return <>
-            <div className={`bg-[color:var(--bg-elevated)] border ${statusBorder(status)} rounded overflow-hidden transition-all duration-150 hover:shadow-lg group`}>
+            <div onClick={handleCardClick} className={`bg-[color:var(--bg-elevated)] border ${statusBorder(status)} rounded overflow-hidden transition-all duration-150 hover:shadow-lg group ${hasBody ? "cursor-pointer" : ""}`}>
                 <div className="flex">
                     <div className="flex flex-col items-center justify-start gap-1 px-2 py-3 bg-[color:var(--bg)] min-w-[40px]">
                         <IconArrowUp />
                         <span className="text-[11px] font-bold text-[color:var(--text)] leading-none">{fmtNum(post.score)}</span>
                     </div>
                     <div className="flex-1 p-3 min-w-0 relative">
-                        <a href={postUrl} target="_blank" rel="noopener noreferrer" className="absolute inset-0 z-0" aria-hidden="true" tabIndex={-1} />
                         <div className="flex gap-3">
                             <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-1.5 text-[11px] text-[color:var(--text-muted)] mb-1.5 flex-wrap">
