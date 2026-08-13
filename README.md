@@ -6,6 +6,8 @@
 
 This is a fork of **[rosint.dev](https://rosint.dev)** extended with profile analytics, saved profiles, themes, localization, and more.
 
+Questions or feedback? Find me on Discord: **leskos144**
+
 <table>
   <tr>
     <td><img src="docs/screenshots/home.png" width="600"></td>
