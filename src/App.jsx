@@ -1,5 +1,5 @@
 import { safeFetch, fetchBoth, REDDIT_BASE, ARCTIC, LIMIT } from "./api";
-import { downloadFile, normalizeUsername } from "./utils";
+import { downloadFile, normalizeUsername, normalizeSubreddit } from "./utils";
 import { getSavedUsernames, emptyStats, processItem } from "./profileData.js";
 import { useI18n, LANGS, LOCALES, setLang, relTime, tN } from "./i18n.js";
 
@@ -697,6 +697,7 @@ const EmptyState = memo(function EmptyState({
   tab,
   hasFilters,
   query,
+  mode = "username",
   onSwitchTab,
   onClearFilters,
   deletedOnly,
@@ -708,7 +709,7 @@ const EmptyState = memo(function EmptyState({
   const tabWord = tab === "posts" ? t("postsWord") : t("commentsWord");
   const otherTabWord = otherTab === "posts" ? t("postsWord") : t("commentsWord");
   return <div className="text-center py-16 text-[color:var(--text-muted)]">
-            <p className="text-sm mb-2">{keyword ? t("emptyKeyword", { tab: tabWord, keyword }) : deletedOnly ? t("emptyDeleted", { tab: tabWord }) : nsfwOnly ? t("emptyNsfw", { tab: tabWord }) : t("emptyNone", { tab: tabWord })}</p>
+            <p className="text-sm mb-2">{keyword ? t("emptyKeyword", { tab: tabWord, keyword }) : deletedOnly ? t("emptyDeleted", { tab: tabWord }) : nsfwOnly ? t("emptyNsfw", { tab: tabWord }) : mode === "subreddit" ? t("emptyNoneSub", { tab: tabWord }) : t("emptyNone", { tab: tabWord })}</p>
             <p className="text-[12px] text-[color:var(--text-muted)] mb-4">{t("emptyHint")}</p>
             <div className="flex flex-col items-center gap-2 text-[12px]">
                 <button type="button" onClick={onSwitchTab} className="text-[color:var(--accent-text)] hover:underline">
@@ -717,7 +718,7 @@ const EmptyState = memo(function EmptyState({
                 {hasFilters && <button type="button" onClick={onClearFilters} className="text-[color:var(--accent-text)] hover:underline">
                         {t("clearRetry")}
                     </button>}
-                <a href={`https://www.reddit.com/search/?q=author%3A%22${query}%22&type=${tab}`} target="_blank" rel="noopener noreferrer" className="text-[color:var(--accent-text)] hover:underline">
+                <a href={mode === "subreddit" ? `https://www.reddit.com/r/${query}` : `https://www.reddit.com/search/?q=author%3A%22${query}%22&type=${tab}`} target="_blank" rel="noopener noreferrer" className="text-[color:var(--accent-text)] hover:underline">
                     {t("searchDirectly")}
                 </a>
             </div>
@@ -785,10 +786,12 @@ function usePaginatedFetch(type) {
   const cursorRef = useRef(null);
   const storedSortRef = useRef("desc");
   const storedFiltersRef = useRef({});
+  const storedModeRef = useRef("username");
 
   const _fetch = useCallback(async (username, pagination, filters, {
     bypassCache = false,
     sort = "desc",
+    mode = "username",
     suppressError = false
   } = {}) => {
     const fetchId = ++fetchIdRef.current;
@@ -808,6 +811,7 @@ function usePaginatedFetch(type) {
         bypassCache,
         signal: ctrl.signal,
         sort,
+        mode,
       });
       if (fetchId !== fetchIdRef.current) return null;
       setSources(srcs);
@@ -824,16 +828,18 @@ function usePaginatedFetch(type) {
   }, [type]);
   const reset = useCallback(async (username, filters, {
     bypassCache = false,
-    sort = "desc"
+    sort = "desc",
+    mode = "username"
   } = {}) => {
     storedFiltersRef.current = filters;
     storedSortRef.current = sort;
+    storedModeRef.current = mode;
     setDone(false);
     doneRef.current = false;
     const pag = {};
     if (filters.dateFrom != null) pag.after = filters.dateFrom;
     if (filters.dateTo != null) pag.before = filters.dateTo;
-    const result = await _fetch(username, pag, filters, { bypassCache, sort });
+    const result = await _fetch(username, pag, filters, { bypassCache, sort, mode });
     if (result === null) return [];
     const { data, done: streamDone } = result;
     setItems(data);
@@ -846,6 +852,7 @@ function usePaginatedFetch(type) {
     if (!cursorRef.current || doneRef.current) return;
     const result = await _fetch(username, forwardPagination(cursorRef.current, storedSortRef.current), storedFiltersRef.current, {
       sort: storedSortRef.current,
+      mode: storedModeRef.current,
       suppressError: true
     });
     if (result === null) return;
@@ -1043,21 +1050,56 @@ const ThemeSwitcher = memo(() => {
         </div>;
 });
 
+const ModeSelector = memo(function ModeSelector({
+  mode,
+  onModeChange
+}) {
+  const { t, lang } = useI18n();
+  const btnRefs = useRef({});
+  const [w, setW] = useState(null);
+  useEffect(() => {
+    const measure = () => {
+      const widths = Object.values(btnRefs.current).map(el => el?.offsetWidth || 0);
+      const max = Math.max(...widths, 0);
+      if (max > 0) setW(max);
+    };
+    const t1 = setTimeout(measure, 50);
+    const t2 = setTimeout(measure, 300);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, [lang]);
+  return <div className="relative ml-auto flex w-fit items-stretch rounded border border-[color:var(--border-hover)] bg-[color:var(--bg)] p-0.5 select-none" role="tablist" aria-label={t("searchMode")}>
+            <span aria-hidden="true" className="absolute top-0.5 bottom-0.5 left-0.5 rounded border border-[color:var(--border-hover)] bg-[color:var(--bg-elevated)] transition-transform duration-200 ease-out" style={{ width: w ?? 0, transform: mode === "subreddit" && w ? `translateX(${w}px)` : undefined }} />
+            {["username", "subreddit"].map(m => (
+                <button key={m} ref={el => { btnRefs.current[m] = el; }} type="button" role="tab" aria-selected={mode === m} onClick={() => onModeChange(m)} className={`relative z-10 flex items-center justify-center px-3 h-6 whitespace-nowrap text-[11px] font-medium rounded transition-colors ${mode === m ? "text-[color:var(--text)]" : "text-[color:var(--text-muted)] hover:text-[color:var(--accent)]"}`} style={w ? { width: w } : undefined}>
+                    {m === "subreddit" ? t("modeSubreddit") : t("modeUsername")}
+                </button>
+            ))}
+        </div>;
+});
+
 const SearchBar = memo(function SearchBar({
   defaultQuery,
   onSearch,
-  initialLoading
+  initialLoading,
+  mode = "username"
 }) {
   const { t } = useI18n();
-  const [username, setUsername] = useState(defaultQuery);
-  const [recent, setRecent] = useState(() => {
+  const RECENT_KEYS = { username: "rosint-recent", subreddit: "rosint-recent-subs" };
+  const loadRecent = (key) => {
     try {
-      const stored = (JSON.parse(localStorage.getItem("rosint-recent")) || []).slice(0, 5);
-      localStorage.setItem("rosint-recent", JSON.stringify(stored));
+      const stored = (JSON.parse(localStorage.getItem(key)) || []).slice(0, 5);
+      localStorage.setItem(key, JSON.stringify(stored));
       return stored;
     }
     catch { return []; }
-  });
+  };
+  const [recentMap, setRecentMap] = useState(() => ({
+    username: loadRecent("rosint-recent"),
+    subreddit: loadRecent("rosint-recent-subs")
+  }));
+  const recent = recentMap[mode];
+  const setRecent = list => setRecentMap(m => ({ ...m, [mode]: list }));
+  const [username, setUsername] = useState(defaultQuery);
   const [focused, setFocused] = useState(false);
   const [savedUsers, setSavedUsers] = useState([]);
   const inputRef = useRef(null);
@@ -1074,9 +1116,9 @@ const SearchBar = memo(function SearchBar({
       const savedSet = new Set(savedUsers.map(u => u.toLowerCase()));
       if (savedSet.has(user.toLowerCase())) return;
       const room = Math.max(0, MAX_DROPDOWN - savedUsers.length);
-      const current = JSON.parse(localStorage.getItem("rosint-recent")) || [];
+      const current = JSON.parse(localStorage.getItem(RECENT_KEYS[mode])) || [];
       const next = [user, ...current.filter(u => u !== user && !savedSet.has(u.toLowerCase()))].slice(0, room);
-      localStorage.setItem("rosint-recent", JSON.stringify(next));
+      localStorage.setItem(RECENT_KEYS[mode], JSON.stringify(next));
       setRecent(next);
     } catch (e) {
       console.error(e);
@@ -1086,9 +1128,9 @@ const SearchBar = memo(function SearchBar({
   const removeRecent = (e, user) => {
     e.stopPropagation();
     try {
-      const current = JSON.parse(localStorage.getItem("rosint-recent")) || [];
+      const current = JSON.parse(localStorage.getItem(RECENT_KEYS[mode])) || [];
       const next = current.filter(u => u !== user);
-      localStorage.setItem("rosint-recent", JSON.stringify(next));
+      localStorage.setItem(RECENT_KEYS[mode], JSON.stringify(next));
       setRecent(next);
     } catch (e) {
       console.error(e);
@@ -1099,7 +1141,7 @@ const SearchBar = memo(function SearchBar({
     if (e) e.preventDefault();
     const user = username.trim();
     if (!user) return;
-    const normalized = normalizeUsername(user);
+    const normalized = mode === "subreddit" ? normalizeSubreddit(user) : normalizeUsername(user);
     if (!normalized) return;
     addRecent(normalized);
     inputRef.current?.blur();
@@ -1107,7 +1149,7 @@ const SearchBar = memo(function SearchBar({
   };
 
   const handleRecentClick = (user) => {
-    const normalized = normalizeUsername(user);
+    const normalized = mode === "subreddit" ? normalizeSubreddit(user) : normalizeUsername(user);
     if (!normalized) return;
     setUsername(normalized);
     addRecent(normalized);
@@ -1125,8 +1167,8 @@ const SearchBar = memo(function SearchBar({
 
   return <form onSubmit={handleSubmit} className="flex gap-2">
             <div className="relative" style={FLEX_1} onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) setFocused(false); }}>
-                <span className="absolute left-[14px] top-1/2 -translate-y-1/2 text-[color:var(--text-muted)] text-sm font-medium">u/</span>
-                <input ref={inputRef} aria-label="Search user" type="text" value={username} onChange={e => setUsername(e.target.value)} onFocus={() => setFocused(true)} placeholder={t("searchPlaceholder")} name="search_query_osint" id="search_query_osint" autoComplete="off" data-bwignore="true" data-lpignore="true" data-1p-ignore="true" spellCheck="false" className="w-full bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded pl-[32px] pr-10 py-2.5 text-sm text-[color:var(--text)] placeholder-[color:var(--text-muted)] focus:outline-none focus:border-[color:var(--accent)] transition-colors" onClick={() => setFocused(true)} onKeyDown={e => { if (e.key === "Escape") { setFocused(false); inputRef.current?.blur(); } }} />
+                <span className="absolute left-[14px] top-1/2 -translate-y-1/2 text-[color:var(--text-muted)] text-sm font-medium">{mode === "subreddit" ? "r/" : "u/"}</span>
+                <input ref={inputRef} aria-label="Search user" type="text" value={username} onChange={e => setUsername(e.target.value)} onFocus={() => setFocused(true)} placeholder={mode === "subreddit" ? t("subredditPlaceholder") : t("searchPlaceholder")} name="search_query_osint" id="search_query_osint" autoComplete="off" data-bwignore="true" data-lpignore="true" data-1p-ignore="true" spellCheck="false" className="w-full bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded pl-[32px] pr-10 py-2.5 text-sm text-[color:var(--text)] placeholder-[color:var(--text-muted)] focus:outline-none focus:border-[color:var(--accent)] transition-colors" onClick={() => setFocused(true)} onKeyDown={e => { if (e.key === "Escape") { setFocused(false); inputRef.current?.blur(); } }} />
                 {username && (
                     <button type="button" onMouseDown={e => e.preventDefault()} onClick={() => { setUsername(""); inputRef.current?.focus(); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-[color:var(--text-muted)] hover:text-[color:var(--accent-text)] transition-colors p-1" aria-label="Clear search">
                         <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
@@ -1135,7 +1177,7 @@ const SearchBar = memo(function SearchBar({
                 
                 {focused && (filteredRecent.length > 0 || filteredSaved.length > 0) && (
                   <div onMouseDown={e => e.preventDefault()} className="absolute top-full left-0 right-0 mt-1 bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded-md shadow-lg overflow-hidden z-50">
-                    {filteredSaved.length > 0 && (
+                    {mode === "username" && filteredSaved.length > 0 && (
                       <>
                         <div className="px-4 py-3 text-[12px] font-medium text-[color:var(--text-muted)]">{t("savedProfiles")}</div>
                         {filteredSaved.map(r => (
@@ -1179,8 +1221,13 @@ const AccountProfile = lazy(() => import('./AccountProfile.jsx'));
 
 export default function App() {
   const [initialParams] = useState(() => Object.fromEntries(new URLSearchParams(window.location.search)));
-  const [initialUser] = useState(() => normalizeUsername(initialParams.u) || "");
+  const [initialMode] = useState(() =>
+    initialParams.mode === "subreddit" || (!initialParams.u && initialParams.sub) ? "subreddit" : "username");
+  const [initialUser] = useState(() =>
+    initialMode === "subreddit" ? normalizeSubreddit(initialParams.sub) : normalizeUsername(initialParams.u) || "");
   const { t, lang } = useI18n();
+  const [mode, setMode] = useState(initialMode);
+  const modeRef = useRef(initialMode);
   const [query, setQuery] = useState(initialUser);
   const [activeTab, setActiveTab] = useState(initialParams.tab === "comments" ? "comments" : initialParams.tab === "posts" ? "posts" : "all");
   const [searched, setSearched] = useState(!!initialUser);
@@ -1188,7 +1235,7 @@ export default function App() {
   const [dateFrom, setDateFrom] = useState(initialParams.from ?? "");
   const [dateTo, setDateTo] = useState(initialParams.to ?? "");
   const [showDates, setShowDates] = useState(false);
-  const [subreddit, setSubreddit] = useState(initialParams.sub ? String(initialParams.sub).replace(/^r\//, "") : "");
+  const [subreddit, setSubreddit] = useState(initialMode === "username" && initialParams.sub ? String(initialParams.sub).replace(/^r\//, "") : "");
   const [showNsfw, setShowNsfw] = useState(true); // checked = show NSFW (no filter); unchecked = exclude NSFW
   const [appliedSubreddit, setAppliedSubreddit] = useState("");
   const [sortOrder, setSortOrder] = useState(initialParams.sort === "asc" ? "asc" : "desc");
@@ -1260,7 +1307,7 @@ export default function App() {
   const handleRefreshCrawl = useCallback(() => setCrawlKey(k => k + 1), []);
 
   useEffect(() => {
-    if (!showProfile || !query) return;
+    if (!showProfile || !query || mode !== "username") return;
     if (bgCrawlRef.current) bgCrawlRef.current.abort();
 
     setIsCrawling(true);
@@ -1286,7 +1333,7 @@ export default function App() {
 
         while (!controller.signal.aborted) {
           const pagination = before ? { before } : {};
-          const result = await fetchBoth(query, type, pagination, {}, { signal: controller.signal, sort: "desc" });
+          const result = await fetchBoth(query, type, pagination, {}, { signal: controller.signal, sort: "desc", mode });
 
           if (controller.signal.aborted || result.items.length === 0) break;
 
@@ -1327,7 +1374,7 @@ export default function App() {
     // posts.items/comments.items are intentionally excluded: the crawl seeds
     // `seen` once at start and must not restart when the user loads more.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showProfile, query, crawlKey]);
+  }, [showProfile, query, crawlKey, mode]);
 
   const profileStats = useMemo(() => {
     const stats = emptyStats();
@@ -1400,7 +1447,7 @@ export default function App() {
   // Archive-wide totals for tab badges + summary. Shares the same URL as
   // UserSummary so safeFetch's in-flight cache dedupes both into one request.
   useEffect(() => {
-    if (!query) {
+    if (!query || mode === "subreddit") {
       setUserMeta(null);
       return;
     }
@@ -1410,31 +1457,38 @@ export default function App() {
       setUserMeta(res.data?.[0]?._meta ?? null);
     });
     return () => { cancelled = true; };
-  }, [query]);
+  }, [query, mode]);
   const buildFilters = useCallback(() => {
     const f = {};
     if (dateFrom) f.dateFrom = Math.floor(new Date(dateFrom).getTime() / 1000);
     if (dateTo) f.dateTo = Math.floor(new Date(dateTo).getTime() / 1000) + 86399;
-    if (subreddit.trim()) f.subreddit = subreddit.trim();
+    if (subreddit.trim() && mode !== "subreddit") f.subreddit = subreddit.trim();
     if (!showNsfw) f.over18 = false;
     return f;
-  }, [dateFrom, dateTo, subreddit, showNsfw]);
-  const hasFilters = dateFrom || dateTo || subreddit.trim() || !showNsfw;
+  }, [dateFrom, dateTo, subreddit, showNsfw, mode]);
+  const hasFilters = dateFrom || dateTo || (mode === "username" && subreddit.trim()) || !showNsfw;
   // Keep the URL in sync with the shareable view state so findings are
   // reproducible/tab-restoreable: ?u ?tab ?from ?to ?sub ?sort. replaceState
   // (not push) so swapping tabs/filters doesn't pollute browser history.
   useEffect(() => {
     if (!searched || !query) return;
     const url = new URL(window.location.href);
-    url.searchParams.set("u", query);
+    if (mode === "subreddit") {
+      url.searchParams.set("sub", query);
+      url.searchParams.set("mode", "subreddit");
+      url.searchParams.delete("u");
+    } else {
+      url.searchParams.set("u", query);
+      url.searchParams.delete("mode");
+      if (subreddit.trim()) url.searchParams.set("sub", subreddit.trim());
+      else url.searchParams.delete("sub");
+    }
     // Only write non-default state so the shared URL stays minimal
     // (?u=name); defaults are implied when the params are absent.
     if (activeTab !== "all") url.searchParams.set("tab", activeTab);
     else url.searchParams.delete("tab");
     if (sortOrder !== "desc") url.searchParams.set("sort", sortOrder);
     else url.searchParams.delete("sort");
-    if (subreddit.trim()) url.searchParams.set("sub", subreddit.trim());
-    else url.searchParams.delete("sub");
     if (dateFrom) url.searchParams.set("from", dateFrom);
     else url.searchParams.delete("from");
     if (dateTo) url.searchParams.set("to", dateTo);
@@ -1446,7 +1500,7 @@ export default function App() {
     if (showProfile) url.searchParams.set("stats", "1");
     else url.searchParams.delete("stats");
     window.history.replaceState({}, "", url);
-  }, [searched, query, activeTab, subreddit, dateFrom, dateTo, sortOrder, deletedOnly, nsfwOnly, showProfile]);
+  }, [searched, query, mode, activeTab, subreddit, dateFrom, dateTo, sortOrder, deletedOnly, nsfwOnly, showProfile]);
   const {
     reset: resetPosts
   } = posts;
@@ -1456,27 +1510,41 @@ export default function App() {
   const searchUser = useCallback(async (rawUser, {
     push = true
   } = {}) => {
-    const user = normalizeUsername(rawUser);
+    const m = modeRef.current;
+    const user = m === "subreddit" ? normalizeSubreddit(rawUser) : normalizeUsername(rawUser);
     if (!user) return;
     const searchId = ++searchIdRef.current;
     setQuery(user);
     setSearched(true);
     setInitialLoading(true);
     const filters = buildFilters();
-    const postsPromise = resetPosts(user, filters, { sort: sortOrder });
-    const commentsPromise = resetComments(user, filters, { sort: sortOrder });
+    const postsPromise = resetPosts(user, filters, { sort: sortOrder, mode: m });
+    const commentsPromise = resetComments(user, filters, { sort: sortOrder, mode: m });
     await Promise.all([postsPromise, commentsPromise]);
     if (searchId !== searchIdRef.current) return;
     if (push) {
       const url = new URL(window.location.href);
-      url.searchParams.set("u", user);
+      if (m === "subreddit") {
+        url.searchParams.set("sub", user);
+        url.searchParams.set("mode", "subreddit");
+        url.searchParams.delete("u");
+      } else {
+        url.searchParams.set("u", user);
+        url.searchParams.delete("mode");
+      }
       window.history.pushState({}, "", url);
     }
     setInitialLoading(false);
-    setAppliedSubreddit(subreddit.trim());
+    setAppliedSubreddit(m === "username" ? subreddit.trim() : "");
   }, [buildFilters, resetPosts, resetComments, subreddit, sortOrder]);
   const searchUserRef = useRef(searchUser);
   searchUserRef.current = searchUser;
+  const handleModeChange = useCallback(nextMode => {
+    if (nextMode === modeRef.current) return;
+    modeRef.current = nextMode;
+    setMode(nextMode);
+    if (searched && query) searchUserRef.current(query, { push: true });
+  }, [searched, query]);
   // Re-search when a discrete filter control changes (dates, NSFW toggle,
   // sort). The subreddit text field is deliberately NOT here: it changes on
   // every keystroke, so it commits only on blur/Enter in its own handler.
@@ -1491,8 +1559,13 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dateFrom, dateTo, showNsfw, sortOrder]);
   useEffect(() => {
-    const u = normalizeUsername(new URLSearchParams(window.location.search).get("u"));
+    const p = new URLSearchParams(window.location.search);
+    const u = normalizeUsername(p.get("u"));
+    const s = normalizeSubreddit(p.get("sub"));
     if (u) searchUser(u, {
+      push: false
+    });
+    else if (s) searchUser(s, {
       push: false
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1500,9 +1573,18 @@ export default function App() {
 
   useEffect(() => {
     const onPop = () => {
-      const u = normalizeUsername(new URLSearchParams(window.location.search).get("u"));
+      const p = new URLSearchParams(window.location.search);
+      const nextMode = p.get("mode") === "subreddit" || (!p.get("u") && p.get("sub")) ? "subreddit" : "username";
+      modeRef.current = nextMode;
+      setMode(nextMode);
+      const u = normalizeUsername(p.get("u"));
+      const s = normalizeSubreddit(p.get("sub"));
       if (u) {
         searchUser(u, {
+          push: false
+        });
+      } else if (s) {
+        searchUser(s, {
           push: false
         });
       } else {
@@ -1516,11 +1598,12 @@ export default function App() {
   const handleRetry = useCallback(async () => {
     if (!query) return;
     setInitialLoading(true);
+    const m = modeRef.current;
     const filters = buildFilters();
     await Promise.all([resetPosts(query, filters, {
-      bypassCache: true, sort: sortOrder
+      bypassCache: true, sort: sortOrder, mode: m
     }), resetComments(query, filters, {
-      bypassCache: true, sort: sortOrder
+      bypassCache: true, sort: sortOrder, mode: m
     })]);
     setInitialLoading(false);
   }, [query, buildFilters, resetPosts, resetComments, sortOrder]);
@@ -1533,7 +1616,8 @@ export default function App() {
     setAppliedSubreddit("");
     if (!query) return;
     setInitialLoading(true);
-    await Promise.all([resetPosts(query, {}, { sort: sortOrder }), resetComments(query, {}, { sort: sortOrder })]);
+    const m = modeRef.current;
+    await Promise.all([resetPosts(query, {}, { sort: sortOrder, mode: m }), resetComments(query, {}, { sort: sortOrder, mode: m })]);
     setInitialLoading(false);
   }, [query, resetPosts, resetComments, sortOrder]);
 
@@ -1656,7 +1740,7 @@ export default function App() {
           maxWidth: searched ? '100%' : '690px'
         }}>
                         
-                        <SearchBar defaultQuery={query} onSearch={searchUser} initialLoading={initialLoading} />
+                        <SearchBar defaultQuery={query} onSearch={searchUser} initialLoading={initialLoading} mode={mode} />
                     </div>
 
                     {!searched && <div className="flex flex-wrap items-center gap-2 mt-3 mx-auto w-full flex-shrink-0" style={{
@@ -1675,7 +1759,7 @@ export default function App() {
                                         <span className="text-[11px] text-[color:var(--text-muted)]">{t("to")}</span>
                                         <input aria-label="Date to" type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-2 h-7  text-[12px] text-[color:var(--text)] focus:outline-none focus:border-[color:var(--accent)] transition-colors block" />
                                         <div className="flex items-center gap-2 w-full sm:w-auto">
-                                        <span className="text-[11px] text-[color:var(--text-muted)]">{t("in")}</span>
+                                        {mode === "username" && <><span className="text-[11px] text-[color:var(--text-muted)]">{t("in")}</span>
                                         <div className="relative">
                                             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[color:var(--text-muted)] text-sm font-medium select-none">r/</span>
                                             <input aria-label="Filter by subreddit" type="text" value={subreddit} onChange={e => setSubreddit(e.target.value.replace(/^r\//, ""))} onKeyDown={e => {
@@ -1691,7 +1775,7 @@ export default function App() {
                       });
                     }
                   }} placeholder={t("subredditPlaceholder")} className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded pl-8 pr-3 py-1 text-[12px] text-[color:var(--text)] placeholder-[color:var(--text-muted)] focus:outline-none focus:border-[color:var(--accent)] transition-colors" />
-                                        </div>
+                                        </div></>}
                                         </div>
                                         <label className="flex items-center gap-1.5 cursor-pointer select-none">
                                             <input type="checkbox" checked={deletedOnly} onChange={e => setDeletedOnly(e.target.checked)} className="w-3.5 h-3.5 accent-[color:var(--accent)] cursor-pointer" />
@@ -1703,6 +1787,7 @@ export default function App() {
                                         </label>
                                     </div>
                                 </div>}
+                            <ModeSelector mode={mode} onModeChange={handleModeChange} />
                         </div>}
                 </div>
 
@@ -1722,7 +1807,7 @@ export default function App() {
                                 <div className="flex flex-row items-start justify-between gap-3">
                                     <div role="status" className="text-[12px] text-[color:var(--text-muted)] min-w-0 sm:mr-4">
                                         <p className="leading-relaxed">
-                                            {t("resultsFor")} <span className="text-[color:var(--accent-text)] font-medium">u/{query}</span>
+                                            {t("resultsFor")} <span className="text-[color:var(--accent-text)] font-medium">{mode === "subreddit" ? "r/" : "u/"}{query}</span>
                                             {allSources.length > 0 && <> · {allSources.map((src, i) => {
                       const url = src === "Arctic Shift" ? "https://github.com/ArthurHeitmann/arctic_shift" : "https://pullpush.io/";
                       return <span key={src}>
@@ -1769,7 +1854,7 @@ export default function App() {
                             </div>}
 
                         {/* key remounts the card per user so stale stats never flash */}
-                        {!initialLoading && showProfile && <Suspense fallback={
+                        {!initialLoading && showProfile && mode === "username" && <Suspense fallback={
   <div className="flex flex-col gap-4 mb-4 mt-4 select-none">
     <div className="flex flex-col md:flex-row gap-4">
       <div className="flex-1 bg-[color:var(--bg-elevated)] border border-[color:var(--border)] rounded px-4 py-3 shadow-sm skeleton-card">
@@ -1790,7 +1875,7 @@ export default function App() {
                             <AccountProfile query={query} activeTab={activeTab} onWordClick={handleWordClick} stats={profileStats} userMeta={userMeta} loadedCount={loadedCount} isCrawling={isCrawling} onRefresh={handleRefreshCrawl} />
                         </Suspense>}
 
-                        {searched && <h2 className="sr-only">{t("resultsFor")} u/{query}</h2>}
+                        {searched && <h2 className="sr-only">{t("resultsFor")} {mode === "subreddit" ? "r/" : "u/"}{query}</h2>}
                         <div className="flex items-stretch border-b border-[color:var(--border)] mb-4" role="tablist" aria-label={t("tabAll")}>
                                 {TABS.map(tab => {
                   let liveCount, metaCount, countToDisplay, isPlus;
@@ -1838,7 +1923,7 @@ export default function App() {
                             </div> : <>
                                 <div className="grid sm:hidden grid-cols-3 gap-1 mb-1.5">
                                     <HoverHint hint={t("searchOnRedditHint")}>
-                                        <a href={`https://www.reddit.com/search/?q=author%3A%22${query}%22`} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-1 w-full min-w-0 text-[11px] text-[color:var(--text-muted)] hover:text-[color:var(--accent-text)] transition-colors h-8 border border-[color:var(--border-hover)] rounded">
+                                        <a href={mode === "subreddit" ? `https://www.reddit.com/r/${query}` : `https://www.reddit.com/search/?q=author%3A%22${query}%22`} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-1 w-full min-w-0 text-[11px] text-[color:var(--text-muted)] hover:text-[color:var(--accent-text)] transition-colors h-8 border border-[color:var(--border-hover)] rounded">
                                             <IconExternal /> {t("searchOnReddit")}
                                         </a>
                                     </HoverHint>
@@ -1866,10 +1951,10 @@ export default function App() {
                                             </button>
                                         </div>
                                     </details>
-                                    <button onClick={() => setShowProfile(p => !p)} className={`flex items-center justify-center gap-1.5 flex-1 px-2.5 h-8 transition-colors border rounded outline-none cursor-pointer select-none ${showProfile ? "bg-[color:var(--bg-elevated)] text-[color:var(--text)] border-[color:var(--text-muted)]" : "bg-[color:var(--bg)] text-[color:var(--text-muted)] border-[color:var(--border-hover)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] hover:border-[color:var(--text-muted)]"}`}>
+                                    {mode === "username" && <button onClick={() => setShowProfile(p => !p)} className={`flex items-center justify-center gap-1.5 flex-1 px-2.5 h-8 transition-colors border rounded outline-none cursor-pointer select-none ${showProfile ? "bg-[color:var(--bg-elevated)] text-[color:var(--text)] border-[color:var(--text-muted)]" : "bg-[color:var(--bg)] text-[color:var(--text-muted)] border-[color:var(--border-hover)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] hover:border-[color:var(--text-muted)]"}`}>
                                         <IconActivity />
                                         <span className="text-[11px] whitespace-nowrap">{t("stats")}</span>
-                                    </button>
+                                    </button>}
                                     <details className="relative group/export flex-1" onKeyDown={closeOnEscape}>
                                         <summary aria-label="Export" className="flex items-center justify-center gap-1.5 bg-[color:var(--bg)] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] hover:border-[color:var(--text-muted)] h-8 transition-colors border border-[color:var(--border-hover)] rounded text-[11px] whitespace-nowrap cursor-pointer list-none [&::-webkit-details-marker]:hidden outline-none">
                                             <svg className="w-3 h-3 text-[color:var(--text-muted)] pointer-events-none opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
@@ -1905,7 +1990,7 @@ export default function App() {
                                 <div className="hidden sm:flex flex-wrap items-center gap-x-1 gap-y-1.5 mb-3 justify-between">
                                     <div className="flex items-center gap-1.5">
                                         <HoverHint hint={t("searchOnRedditHint")}>
-                                            <a href={`https://www.reddit.com/search/?q=author%3A%22${query}%22`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-[11px] text-[color:var(--text-muted)] hover:text-[color:var(--accent-text)] transition-colors leading-relaxed">
+                                            <a href={mode === "subreddit" ? `https://www.reddit.com/r/${query}` : `https://www.reddit.com/search/?q=author%3A%22${query}%22`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-[11px] text-[color:var(--text-muted)] hover:text-[color:var(--accent-text)] transition-colors leading-relaxed">
                                                 <IconExternal /> {t("searchOnReddit")}
                                             </a>
                                         </HoverHint>
@@ -1934,10 +2019,10 @@ export default function App() {
                                             </div>
                                         </details>
                                         <div className="w-px h-6 bg-[color:var(--border)]" />
-                                        <button onClick={() => setShowProfile(p => !p)} className={`flex items-center gap-1.5 px-2.5 h-8 transition-colors border rounded outline-none cursor-pointer select-none ${showProfile ? "bg-[color:var(--bg-elevated)] text-[color:var(--text)] border-[color:var(--text-muted)]" : "bg-[color:var(--bg)] text-[color:var(--text-muted)] border-[color:var(--border-hover)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] hover:border-[color:var(--text-muted)]"}`}>
+                                        {mode === "username" && <button onClick={() => setShowProfile(p => !p)} className={`flex items-center gap-1.5 px-2.5 h-8 transition-colors border rounded outline-none cursor-pointer select-none ${showProfile ? "bg-[color:var(--bg-elevated)] text-[color:var(--text)] border-[color:var(--text-muted)]" : "bg-[color:var(--bg)] text-[color:var(--text-muted)] border-[color:var(--border-hover)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] hover:border-[color:var(--text-muted)]"}`}>
                                             <IconActivity />
                                             <span className="text-[11px] whitespace-nowrap">{t("stats")}</span>
-                                        </button>
+                                        </button>}
                                         <details className="relative group/export" onKeyDown={closeOnEscape}>
                                             <summary aria-label="Export" className="flex items-center gap-1.5 bg-[color:var(--bg)] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] hover:border-[color:var(--text-muted)] px-2.5 h-8 transition-colors border border-[color:var(--border-hover)] rounded text-[11px] whitespace-nowrap cursor-pointer list-none [&::-webkit-details-marker]:hidden outline-none">
                                                 <svg className="w-3 h-3 text-[color:var(--text-muted)] pointer-events-none opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
@@ -2004,7 +2089,7 @@ export default function App() {
                                     <IconSpinner />
                                     <span className="text-[11px]">{t("fetching")}</span>
                                 </div>
-                            </div> : filteredItems.length === 0 ? active.error ? <ErrorState message={active.error} onRetry={handleRetry} /> : <EmptyState tab={activeTab} hasFilters={!!hasFilters} query={query} onSwitchTab={() => setActiveTab(activeTab === "posts" ? "comments" : "posts")} onClearFilters={clearFilters} deletedOnly={deletedOnly} nsfwOnly={nsfwOnly} keyword={keyword} /> : <>
+                            </div> : filteredItems.length === 0 ? active.error ? <ErrorState message={active.error} onRetry={handleRetry} /> : <EmptyState tab={activeTab} hasFilters={!!hasFilters} query={query} mode={mode} onSwitchTab={() => setActiveTab(activeTab === "posts" ? "comments" : "posts")} onClearFilters={clearFilters} deletedOnly={deletedOnly} nsfwOnly={nsfwOnly} keyword={keyword} /> : <>
                                 <div aria-live="polite" aria-atomic="true" className="flex flex-col gap-2">
                                     {filteredItems.slice(0, visibleCount).map(item => isPost(item)
                                       ? <CardBoundary key={`p-${item.id}`}><div className="cv-auto"><PostCard post={item} /></div></CardBoundary>

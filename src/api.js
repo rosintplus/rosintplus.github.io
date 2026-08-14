@@ -12,9 +12,10 @@ export const LIMIT = 100;
 // sort: "desc" (Newest) or "asc" (Oldest). Arctic Shift orders the page
 // server-side, so "Oldest" must be sent as sort=asc and paged *forward*
 // (after-cursor) — reversing a desc page only flips the current 100 rows.
-function buildUrls(username, type, pagination = {}, dateFilters = {}, { sort = "desc" } = {}) {
-  const base = [`limit=${LIMIT}`, `sort=${sort}`, `author=${encodeURIComponent(username)}`];
-  if (dateFilters.subreddit) {
+function buildUrls(username, type, pagination = {}, dateFilters = {}, { sort = "desc", mode = "username" } = {}) {
+  const target = mode === "subreddit" ? `subreddit=${encodeURIComponent(username)}` : `author=${encodeURIComponent(username)}`;
+  const base = [`limit=${LIMIT}`, `sort=${sort}`, target];
+  if (dateFilters.subreddit && mode !== "subreddit") {
     base.push(`subreddit=${encodeURIComponent(dateFilters.subreddit)}`);
   }
 
@@ -164,11 +165,12 @@ export async function fetchBoth(username, type, pagination = {}, dateFilters = {
   bypassCache = false,
   signal,
   sort = "desc",
+  mode = "username"
 } = {}) {
   const {
     arctic,
     pullpush
-  } = buildUrls(username, type, pagination, dateFilters, { sort });
+  } = buildUrls(username, type, pagination, dateFilters, { sort, mode });
   const [arcticRes, pullpushRes] = await Promise.all([safeFetch(arctic, {
     bypassCache,
     signal

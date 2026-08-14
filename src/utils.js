@@ -26,3 +26,14 @@ function normalizeUsername(input) {
   s = s.replace(/[/?#].*$/, "").trim();
   return s;
 }
+
+// Strip anything users paste around a subreddit name: r/ /r/ prefixes, full
+// reddit URLs, and trailing paths. Returns the bare subreddit name.
+export function normalizeSubreddit(input) {
+  let s = String(input || "").trim();
+  s = s.replace(/^https?:\/\/(www\.|old\.|new\.)?reddit\.com/i, "");
+  s = s.replace(/^\/+/, "");
+  s = s.replace(/^r\//i, "");
+  s = s.replace(/[/?#].*$/, "").trim();
+  return s;
+}
