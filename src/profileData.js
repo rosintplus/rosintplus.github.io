@@ -210,6 +210,7 @@ export async function getProfileData(username, onProgress, forceUpdate = false) 
     timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
   };
   const listeners = onProgress ? [onProgress] : [];
+  let cachedProfile = null;
 
   const promise = (async () => {
     try {
@@ -219,6 +220,7 @@ export async function getProfileData(username, onProgress, forceUpdate = false) 
 
       if (!forceUpdate) {
         cached = await getCachedProfile(normalized);
+        cachedProfile = cached;
         if (cached && !cached.partial) {
           const age = Date.now() - cached.fetchedAt;
           if (age < 7 * 24 * 60 * 60 * 1000) {
@@ -228,6 +230,7 @@ export async function getProfileData(username, onProgress, forceUpdate = false) 
         }
       } else {
         cached = await getCachedProfile(normalized);
+        cachedProfile = cached;
         if (cached && !cached.partial) {
           maxCreatedUtc = cached.maxCreatedUtc || 0;
         } else {
@@ -265,6 +268,7 @@ export async function getProfileData(username, onProgress, forceUpdate = false) 
         const localStats = emptyStats();
         let itemCount = 0;
         let before = null;
+        let beforeId = null;
         let hitMaxUtc = false;
         let latestUtc = 0;
 
@@ -273,7 +277,8 @@ export async function getProfileData(username, onProgress, forceUpdate = false) 
 
           const endpoint = type === "posts" ? "posts" : "comments";
           let url = `${ARCTIC}/api/${endpoint}/search?author=${encodeURIComponent(normalized)}&limit=100`;
-          if (before) url += `&before=${before}`;
+          if (before != null) url += `&before=${before}`;
+          if (beforeId) url += `&before_id=${encodeURIComponent(beforeId)}`;
 
           const res = await safeFetch(url, { signal });
           if (signal?.aborted || res.aborted) throw new DOMException("Aborted", "AbortError");
@@ -300,7 +305,9 @@ export async function getProfileData(username, onProgress, forceUpdate = false) 
           }
 
           if (res.data.length < 100) break;
-          before = res.data[res.data.length - 1].created_utc;
+          const last = res.data[res.data.length - 1];
+          before = last.created_utc;
+          beforeId = last.id;
           await new Promise(r => setTimeout(r, 500));
         }
 
@@ -341,6 +348,7 @@ export async function getProfileData(username, onProgress, forceUpdate = false) 
 
     } catch (err) {
       if (err?.name === "AbortError") throw err;
+      if (cachedProfile) return { ...cachedProfile, partial: true };
       return { partial: true, stats: emptyStats(), totals: { posts: 0, comments: 0 }, itemsCrawled: { posts: 0, comments: 0 } };
     } finally {
       clearTimeout(timeoutId);

@@ -14,6 +14,17 @@ const FLEX_1 = { flex: "1 1 0" };
 const closeOnEscape = e => { if (e.key === "Escape") e.currentTarget.removeAttribute("open"); };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+function readStoredList(key) {
+  try {
+    const value = JSON.parse(localStorage.getItem(key));
+    if (!Array.isArray(value)) throw new Error("stored value is not a list");
+    return value.filter(value => typeof value === "string").slice(0, 5);
+  } catch {
+    try { localStorage.removeItem(key); } catch { /* storage may be unavailable */ }
+    return [];
+  }
+}
+
 function tJsx(tFn, key, vars) {
   const raw = tFn(key);
   if (!vars) return raw;
@@ -162,7 +173,9 @@ export const IconInfo = ({ className = "w-3.5 h-3.5" }) => (
 
 const CopyButton = memo(function CopyButton({ getText }) {
   const [done, setDone] = useState(false);
+  const timerRef = useRef(null);
   const { t } = useI18n();
+  useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
   const copy = useCallback(async function copy(e) {
     e.preventDefault();
     e.stopPropagation();
@@ -185,7 +198,8 @@ const CopyButton = memo(function CopyButton({ getText }) {
       }
     }
     setDone(true);
-    setTimeout(() => setDone(false), 1200);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => { timerRef.current = null; setDone(false); }, 1200);
   }, [getText]);
   return <button onClick={copy} aria-label={done ? t("copied") : t("copyAria")} title={t("copyTitle")} className={`flex items-center gap-1 transition-colors ${done ? "text-[color:var(--accent)]" : "text-[color:var(--text-muted)] hover:text-[color:var(--accent)]"}`}>
             <IconCopy />{done && <span className="text-[10px]">{t("copied")}</span>}
@@ -1068,7 +1082,7 @@ const ModeSelector = memo(function ModeSelector({
     return () => { clearTimeout(t1); clearTimeout(t2); };
   }, [lang]);
   return <div className="relative ml-auto flex w-fit items-stretch rounded border border-[color:var(--border-hover)] bg-[color:var(--bg)] p-0.5 select-none" role="tablist" aria-label={t("searchMode")}>
-            <span aria-hidden="true" className="absolute top-0.5 bottom-0.5 left-0.5 rounded border border-[color:var(--border-hover)] bg-[color:var(--bg-elevated)] transition-transform duration-200 ease-out" style={{ width: w ?? 0, transform: mode === "subreddit" && w ? `translateX(${w}px)` : undefined }} />
+            <span aria-hidden="true" className="absolute top-0.5 bottom-0.5 left-0.5 rounded border border-[color:var(--border-hover)] bg-[color:var(--bg-elevated)] transition-transform duration-200 ease-out will-change-transform" style={{ width: w ?? 0, transform: `translate3d(${mode === "subreddit" && w ? w : 0}px,0,0)` }} />
             {["username", "subreddit"].map(m => (
                 <button key={m} ref={el => { btnRefs.current[m] = el; }} type="button" role="tab" aria-selected={mode === m} onClick={() => onModeChange(m)} className={`relative z-10 flex items-center justify-center px-3 h-6 whitespace-nowrap text-[11px] font-medium rounded transition-colors ${mode === m ? "text-[color:var(--text)]" : "text-[color:var(--text-muted)] hover:text-[color:var(--accent)]"}`} style={w ? { width: w } : undefined}>
                     {m === "subreddit" ? t("modeSubreddit") : t("modeUsername")}
@@ -1085,14 +1099,7 @@ const SearchBar = memo(function SearchBar({
 }) {
   const { t } = useI18n();
   const RECENT_KEYS = { username: "rosint-recent", subreddit: "rosint-recent-subs" };
-  const loadRecent = (key) => {
-    try {
-      const stored = (JSON.parse(localStorage.getItem(key)) || []).slice(0, 5);
-      localStorage.setItem(key, JSON.stringify(stored));
-      return stored;
-    }
-    catch { return []; }
-  };
+  const loadRecent = readStoredList;
   const [recentMap, setRecentMap] = useState(() => ({
     username: loadRecent("rosint-recent"),
     subreddit: loadRecent("rosint-recent-subs")
@@ -1116,7 +1123,7 @@ const SearchBar = memo(function SearchBar({
       const savedSet = new Set(savedUsers.map(u => u.toLowerCase()));
       if (savedSet.has(user.toLowerCase())) return;
       const room = Math.max(0, MAX_DROPDOWN - savedUsers.length);
-      const current = JSON.parse(localStorage.getItem(RECENT_KEYS[mode])) || [];
+      const current = readStoredList(RECENT_KEYS[mode]);
       const next = [user, ...current.filter(u => u !== user && !savedSet.has(u.toLowerCase()))].slice(0, room);
       localStorage.setItem(RECENT_KEYS[mode], JSON.stringify(next));
       setRecent(next);
@@ -1128,7 +1135,7 @@ const SearchBar = memo(function SearchBar({
   const removeRecent = (e, user) => {
     e.stopPropagation();
     try {
-      const current = JSON.parse(localStorage.getItem(RECENT_KEYS[mode])) || [];
+      const current = readStoredList(RECENT_KEYS[mode]);
       const next = current.filter(u => u !== user);
       localStorage.setItem(RECENT_KEYS[mode], JSON.stringify(next));
       setRecent(next);
@@ -1225,7 +1232,7 @@ export default function App() {
     initialParams.mode === "subreddit" || (!initialParams.u && initialParams.sub) ? "subreddit" : "username");
   const [initialUser] = useState(() =>
     initialMode === "subreddit" ? normalizeSubreddit(initialParams.sub) : normalizeUsername(initialParams.u) || "");
-  const { t, lang } = useI18n();
+  const { t } = useI18n();
   const [mode, setMode] = useState(initialMode);
   const modeRef = useRef(initialMode);
   const [query, setQuery] = useState(initialUser);
@@ -1237,7 +1244,6 @@ export default function App() {
   const [showDates, setShowDates] = useState(false);
   const [subreddit, setSubreddit] = useState(initialMode === "username" && initialParams.sub ? String(initialParams.sub).replace(/^r\//, "") : "");
   const [showNsfw, setShowNsfw] = useState(true); // checked = show NSFW (no filter); unchecked = exclude NSFW
-  const [appliedSubreddit, setAppliedSubreddit] = useState("");
   const [sortOrder, setSortOrder] = useState(initialParams.sort === "asc" ? "asc" : "desc");
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [deletedOnly, setDeletedOnly] = useState(initialParams.deleted === "1");
@@ -1283,7 +1289,11 @@ export default function App() {
 
   const filteredItems = useMemo(() => {
     const items = activeTab === "all" ? [...posts.items, ...comments.items] : activeTab === "posts" ? posts.items : comments.items;
+    const fromTs = dateFrom ? Math.floor(new Date(`${dateFrom}T00:00:00`).getTime() / 1000) : null;
+    const toTs = dateTo ? Math.floor(new Date(`${dateTo}T23:59:59`).getTime() / 1000) : null;
     return items.filter(item => {
+      if (fromTs != null && item.created_utc < fromTs) return false;
+      if (toTs != null && item.created_utc > toTs) return false;
       const type = activeTab === "all" ? itemType(item) : activeTab;
       if (deletedOnly) {
         const s = getStatus(item, type);
@@ -1293,7 +1303,7 @@ export default function App() {
       if (!matchKeyword(item, deferredKeyword, type)) return false;
       return true;
     }).sort((a, b) => sortOrder === "desc" ? b.created_utc - a.created_utc : a.created_utc - b.created_utc);
-  }, [activeTab, posts.items, comments.items, deletedOnly, nsfwOnly, deferredKeyword, sortOrder]);
+  }, [activeTab, posts.items, comments.items, deletedOnly, nsfwOnly, deferredKeyword, sortOrder, dateFrom, dateTo]);
 
   const [bgStatsVersion, setBgStatsVersion] = useState(0);
   const [isCrawling, setIsCrawling] = useState(false);
@@ -1458,11 +1468,11 @@ export default function App() {
     });
     return () => { cancelled = true; };
   }, [query, mode]);
-  const buildFilters = useCallback(() => {
+  const buildFilters = useCallback((searchMode = mode) => {
     const f = {};
     if (dateFrom) f.dateFrom = Math.floor(new Date(dateFrom).getTime() / 1000);
     if (dateTo) f.dateTo = Math.floor(new Date(dateTo).getTime() / 1000) + 86399;
-    if (subreddit.trim() && mode !== "subreddit") f.subreddit = subreddit.trim();
+    if (subreddit.trim() && searchMode !== "subreddit") f.subreddit = subreddit.trim();
     if (!showNsfw) f.over18 = false;
     return f;
   }, [dateFrom, dateTo, subreddit, showNsfw, mode]);
@@ -1508,7 +1518,8 @@ export default function App() {
     reset: resetComments
   } = comments;
   const searchUser = useCallback(async (rawUser, {
-    push = true
+    push = true,
+    silent = false
   } = {}) => {
     const m = modeRef.current;
     const user = m === "subreddit" ? normalizeSubreddit(rawUser) : normalizeUsername(rawUser);
@@ -1516,8 +1527,8 @@ export default function App() {
     const searchId = ++searchIdRef.current;
     setQuery(user);
     setSearched(true);
-    setInitialLoading(true);
-    const filters = buildFilters();
+    if (!silent) setInitialLoading(true);
+    const filters = buildFilters(m);
     const postsPromise = resetPosts(user, filters, { sort: sortOrder, mode: m });
     const commentsPromise = resetComments(user, filters, { sort: sortOrder, mode: m });
     await Promise.all([postsPromise, commentsPromise]);
@@ -1534,8 +1545,7 @@ export default function App() {
       }
       window.history.pushState({}, "", url);
     }
-    setInitialLoading(false);
-    setAppliedSubreddit(m === "username" ? subreddit.trim() : "");
+    if (!silent) setInitialLoading(false);
   }, [buildFilters, resetPosts, resetComments, subreddit, sortOrder]);
   const searchUserRef = useRef(searchUser);
   searchUserRef.current = searchUser;
@@ -1551,7 +1561,8 @@ export default function App() {
   useEffect(() => {
     if (searched && query && !initialLoading) {
       searchUserRef.current(query, {
-        push: false
+        push: false,
+        silent: true
       });
     }
     // searched/query/initialLoading are deliberately NOT deps: including them
@@ -1613,7 +1624,6 @@ export default function App() {
     setSubreddit("");
     setShowNsfw(true);
     setNsfwOnly(false);
-    setAppliedSubreddit("");
     if (!query) return;
     setInitialLoading(true);
     const m = modeRef.current;
@@ -1621,15 +1631,12 @@ export default function App() {
     setInitialLoading(false);
   }, [query, resetPosts, resetComments, sortOrder]);
 
-  const firstSeenTs = useMemo(() => userMeta ? Math.min(...[userMeta.earliest_post_at, userMeta.earliest_comment_at].filter(Boolean)) : null, [userMeta]);
-  const firstSeen = useMemo(() => Number.isFinite(firstSeenTs) ? new Date(firstSeenTs * 1000).toLocaleDateString(LOCALES[lang] || "en", { month: "short", year: "numeric" }) : null, [firstSeenTs, lang]);
-
   const active = useMemo(() => activeTab === "posts" ? posts : activeTab === "comments" ? comments : { loading: posts.loading || comments.loading, error: posts.error || comments.error, done: posts.done && comments.done }, [activeTab, posts, comments]);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- active.items is undefined for "all" tab
   const activeItemCount = useMemo(() => activeTab === "all" ? posts.items.length + comments.items.length : active.items.length, [activeTab, posts.items.length, comments.items.length]);
-  const allSources = useMemo(() => [...new Set([...posts.sources, ...comments.sources])], [posts.sources, comments.sources]);
   const activeHasMore = useMemo(() => activeTab === "all" ? (!posts.done || !comments.done) : !active.done, [activeTab, posts.done, comments.done, active.done]);
   const loadMoreActive = () => {
+    if (posts.loading || comments.loading) return;
     if (activeTab === "all") {
       if (!posts.done) posts.loadMore(query);
       if (!comments.done) comments.loadMore(query);
@@ -1743,21 +1750,24 @@ export default function App() {
                         <SearchBar defaultQuery={query} onSearch={searchUser} initialLoading={initialLoading} mode={mode} />
                     </div>
 
-                    {!searched && <div className="flex flex-wrap items-center gap-2 mt-3 mx-auto w-full flex-shrink-0" style={{
+                    {!searched && <div className="flex flex-col gap-2 mt-3 mx-auto w-full flex-shrink-0" style={{
           maxWidth: '690px'
         }}>
+                            <div className="flex items-center justify-between gap-2 w-full min-w-0">
                             <button type="button" onClick={() => setShowAdvancedFilters(f => !f)} className="flex items-center gap-1.5 text-[12px] text-[color:var(--text-muted)] hover:text-[color:var(--accent)] transition-colors">
                                 {t("advancedFilters")}
                                 <svg aria-hidden="true" className={`w-3 h-3 transition-transform duration-200 ${showAdvancedFilters ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                                 </svg>
                             </button>
-                            {showAdvancedFilters && <div className="w-full flex flex-col gap-2 mt-1 items-start">
-                                    <div className="flex flex-wrap items-center gap-2">
+                            <div className="ml-auto flex-shrink-0"><ModeSelector mode={mode} onModeChange={handleModeChange} /></div>
+                            </div>
+                            {showAdvancedFilters && <div className="w-full flex flex-col gap-2 items-start">
+                                    <div className="flex flex-nowrap items-center gap-2 w-full overflow-x-auto">
                                         <span className="text-[11px] text-[color:var(--text-muted)]">{t("from")}</span>
-                                        <input aria-label="Date from" type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-2 h-7  text-[12px] text-[color:var(--text)] focus:outline-none focus:border-[color:var(--accent)] transition-colors block" />
+                                        <input aria-label="Date from" type="date" max={dateTo || undefined} value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-2 h-7  text-[12px] text-[color:var(--text)] focus:outline-none focus:border-[color:var(--accent)] transition-colors block" />
                                         <span className="text-[11px] text-[color:var(--text-muted)]">{t("to")}</span>
-                                        <input aria-label="Date to" type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-2 h-7  text-[12px] text-[color:var(--text)] focus:outline-none focus:border-[color:var(--accent)] transition-colors block" />
+                                        <input aria-label="Date to" type="date" min={dateFrom || undefined} value={dateTo} onChange={e => setDateTo(e.target.value)} className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-2 h-7  text-[12px] text-[color:var(--text)] focus:outline-none focus:border-[color:var(--accent)] transition-colors block" />
                                         <div className="flex items-center gap-2 w-full sm:w-auto">
                                         {mode === "username" && <><span className="text-[11px] text-[color:var(--text-muted)]">{t("in")}</span>
                                         <div className="relative">
@@ -1787,7 +1797,6 @@ export default function App() {
                                         </label>
                                     </div>
                                 </div>}
-                            <ModeSelector mode={mode} onModeChange={handleModeChange} />
                         </div>}
                 </div>
 
@@ -1803,55 +1812,6 @@ export default function App() {
                     </div>}
 
                 {searched && !isOutageTakeover && <div className="w-full max-w-3xl mx-auto px-3 sm:px-4 mt-6 pb-16">
-                        {!initialLoading && <div className="mb-4">
-                                <div className="flex flex-row items-start justify-between gap-3">
-                                    <div role="status" className="text-[12px] text-[color:var(--text-muted)] min-w-0 sm:mr-4">
-                                        <p className="leading-relaxed">
-                                            {t("resultsFor")} <span className="text-[color:var(--accent-text)] font-medium">{mode === "subreddit" ? "r/" : "u/"}{query}</span>
-                                            {allSources.length > 0 && <> · {allSources.map((src, i) => {
-                      const url = src === "Arctic Shift" ? "https://github.com/ArthurHeitmann/arctic_shift" : "https://pullpush.io/";
-                      return <span key={src}>
-                                                            {i > 0 && <span className="text-[color:var(--text-muted)]"> + </span>}
-                                                            <a href={url} target="_blank" rel="noopener noreferrer" className="text-[color:var(--accent-text)] hover:underline transition-colors">
-                                                                {src}
-                                                            </a>
-                                                        </span>;
-                    })}</>}
-                                            {userMeta?.total_karma != null && <> · <span className="text-[color:var(--text)] font-medium">{fmtNum(userMeta.total_karma)}</span> {t("karma")}</>}
-                                            {firstSeen && <> · {t("since")} <span className="text-[color:var(--text)] font-medium">{firstSeen}</span></>}
-                                            {appliedSubreddit && <> · {t("in")} <span className="text-[color:var(--accent-text)] font-medium">r/{appliedSubreddit}</span></>}
-                                        </p>
-                                    </div>
-                                    <div className="relative flex items-center gap-2 sm:ml-auto flex-shrink-0">
-                                        <button onClick={() => setShowDates(d => !d)} disabled={initialLoading} className={`flex items-center justify-center w-7 h-7 rounded transition-colors ${dateFrom || dateTo ? "bg-[color:var(--accent)]/10 hover:bg-[color:var(--accent)]/20 text-[color:var(--accent)] border border-[color:var(--accent)]" : "bg-[color:var(--bg)] border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)]"}`} aria-label={t("filterByDate")} title={t("filterByDate")}>
-                                            <IconCalendar />
-                                        </button>
-                                        {showDates && <>
-                                            <div className="fixed inset-0 z-20" onClick={() => setShowDates(false)} aria-hidden="true" />
-                                            <div className="absolute right-0 top-full mt-2 z-30 flex items-center gap-2 p-2 bg-[color:var(--bg-elevated)] border border-[color:var(--border-hover)] rounded-md shadow-xl">
-                                                <div className="flex items-center gap-1.5">
-                                                    <span className="text-[11px] font-medium text-[color:var(--text-muted)]">{t("from")}</span>
-                                                    <input aria-label="Date from" type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-2 h-7 text-[12px] text-[color:var(--text)] focus:outline-none focus:border-[color:var(--accent)] transition-colors block" />
-                                                </div>
-                                                <div className="flex items-center gap-1.5">
-                                                    <span className="text-[11px] font-medium text-[color:var(--text-muted)]">{t("to")}</span>
-                                                    <input aria-label="Date to" type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-2 h-7 text-[12px] text-[color:var(--text)] focus:outline-none focus:border-[color:var(--accent)] transition-colors block" />
-                                                </div>
-                                                <button onClick={clearFilters} disabled={initialLoading || (!dateFrom && !dateTo)} className="px-3 h-7 text-[11px] font-medium text-[color:var(--text-muted)] enabled:hover:text-[color:var(--accent)] border border-[color:var(--border-hover)] enabled:hover:border-[color:var(--text-muted)] disabled:opacity-50 disabled:cursor-not-allowed rounded transition-colors">
-                                                    {t("clear")}
-                                                </button>
-                                            </div>
-                                        </>}
-                                    </div>
-                                </div>
-                            </div>}
-
-                        {initialLoading && <div className="mb-4" aria-hidden="true">
-                                <div className="flex flex-row items-center justify-between gap-3">
-                                    <div className="skeleton h-3.5 w-80 max-w-[75%] rounded-sm"></div>
-                                    <div className="skeleton w-7 h-7 rounded flex-shrink-0"></div>
-                                </div>
-                            </div>}
 
                         {/* key remounts the card per user so stale stats never flash */}
                         {!initialLoading && showProfile && mode === "username" && <Suspense fallback={
@@ -1896,32 +1856,63 @@ export default function App() {
                 })}
                         </div>
 
-                        {initialLoading ? <div className="mb-3" aria-hidden="true">
-                                <div className="flex sm:hidden gap-1 mb-1.5">
-                                    <div className="skeleton h-8 flex-1 rounded"></div>
-                                    <div className="skeleton h-8 flex-1 rounded"></div>
-                                    <div className="skeleton h-8 flex-1 rounded"></div>
+                        {!initialLoading && <div className="flex flex-nowrap items-center gap-1.5 mb-3 overflow-x-auto">
+                            <div className="relative flex-shrink-0">
+                                <div className="flex items-center gap-1.5">
+                                    <input aria-label="Date from" type="date" max={dateTo || undefined} value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-2 h-8 text-[11px] text-[color:var(--text)] cursor-pointer" />
+                                    <input aria-label="Date to" type="date" min={dateFrom || undefined} value={dateTo} onChange={e => setDateTo(e.target.value)} className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-2 h-8 text-[11px] text-[color:var(--text)] cursor-pointer" />
                                 </div>
-                                <div className="flex sm:hidden gap-1 mb-3">
-                                    <div className="skeleton h-8 flex-1 rounded"></div>
-                                    <div className="skeleton h-8 flex-1 rounded"></div>
-                                    <div className="skeleton h-8 flex-1 rounded"></div>
-                                </div>
-                                <div className="hidden sm:flex items-center gap-1.5 justify-between">
-                                    <div className="flex items-center gap-1.5">
-                                        <div className="skeleton h-4 w-28 rounded-sm"></div>
-                                        <div className="skeleton h-8 w-20 rounded"></div>
-                                        <div className="skeleton h-8 w-16 rounded"></div>
+                                <button type="button" aria-hidden="true" tabIndex={-1} className="hidden">
+                                    <IconCalendar />
+                                </button>
+                                {showDates && <>
+                                    <div className="fixed inset-0 z-20" onClick={() => setShowDates(false)} aria-hidden="true" />
+                                    <div className="absolute right-0 top-full mt-2 z-30 flex items-center gap-2 p-2 whitespace-nowrap bg-[color:var(--bg-elevated)] border border-[color:var(--border-hover)] rounded-md shadow-xl">
+                                        <label className="flex items-center gap-1.5 text-[11px] text-[color:var(--text-muted)]">{t("from")}
+                                            <input aria-label="Date from" type="date" max={dateTo || undefined} value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-2 h-7 text-[12px] text-[color:var(--text)]" />
+                                        </label>
+                                        <label className="flex items-center gap-1.5 text-[11px] text-[color:var(--text-muted)]">{t("to")}
+                                            <input aria-label="Date to" type="date" min={dateFrom || undefined} value={dateTo} onChange={e => setDateTo(e.target.value)} className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-2 h-7 text-[12px] text-[color:var(--text)]" />
+                                        </label>
+                                        <button onClick={clearFilters} disabled={!dateFrom && !dateTo} className="px-2 h-7 text-[11px] border border-[color:var(--border-hover)] rounded disabled:opacity-50">{t("clear")}</button>
                                     </div>
-                                    <div className="flex items-center gap-1.5">
-                                        <div className="skeleton h-8 w-[92px] rounded"></div>
-                                        <div className="w-px h-6 bg-[color:var(--border)]" />
-                                        <div className="skeleton h-8 w-[62px] rounded"></div>
-                                        <div className="skeleton h-8 w-[74px] rounded"></div>
-                                    </div>
-                                </div>
+                                </>}
+                            </div>
+                            <label className="flex items-center gap-1.5 flex-shrink-0 px-2 h-8 border border-[color:var(--border-hover)] rounded text-[11px] text-[color:var(--text-muted)] whitespace-nowrap cursor-pointer hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--accent)] transition-colors">
+                                <input type="checkbox" checked={deletedOnly} onChange={e => setDeletedOnly(e.target.checked)} className="w-3 h-3 accent-[color:var(--accent)]" /> {t("deletedOnly").replace(/\s+only$/i, "")}
+                            </label>
+                            <label className="flex items-center gap-1.5 flex-shrink-0 px-2 h-8 border border-[color:var(--border-hover)] rounded text-[11px] text-[color:var(--text-muted)] whitespace-nowrap cursor-pointer hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--accent)] transition-colors">
+                                <input type="checkbox" checked={nsfwOnly} onChange={e => setNsfwOnly(e.target.checked)} className="w-3 h-3 accent-[color:var(--accent)]" /> {t("nsfwOnly").replace(/\s+only$/i, "")}
+                            </label>
+                            {mode === "username" && <button onClick={() => setShowProfile(value => !value)} className={`flex items-center gap-1.5 flex-shrink-0 px-2.5 h-8 border rounded text-[11px] cursor-pointer transition-colors ${showProfile ? "bg-[color:var(--bg-elevated)] text-[color:var(--text)] border-[color:var(--text-muted)]" : "border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--accent)]"}`}><IconActivity />{t("stats")}</button>}
+                            <div className="relative flex flex-shrink-0 items-stretch rounded border border-[color:var(--border-hover)] bg-[color:var(--bg)] p-0.5 select-none" role="radiogroup" aria-label="Sort order">
+                                <button onClick={() => setSortOrder("desc")} role="radio" aria-checked={sortOrder === "desc"} className={`px-3 h-7 text-[11px] rounded transition-colors cursor-pointer ${sortOrder === "desc" ? "border border-[color:var(--border-hover)] bg-[color:var(--bg-elevated)] text-[color:var(--text)]" : "text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--accent)]"}`}>{t("newest")}</button>
+                                <button onClick={() => setSortOrder("asc")} role="radio" aria-checked={sortOrder === "asc"} className={`px-3 h-7 text-[11px] rounded transition-colors cursor-pointer ${sortOrder === "asc" ? "border border-[color:var(--border-hover)] bg-[color:var(--bg-elevated)] text-[color:var(--text)]" : "text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--accent)]"}`}>{t("oldest")}</button>
+                            </div>
+                            <div className="flex flex-shrink-0 items-stretch rounded border border-[color:var(--border-hover)] bg-[color:var(--bg)] overflow-hidden select-none">
+                            <button onClick={() => {
+                                const cols = ["id", "type", "created_utc", "subreddit", "author", "score", "permalink", "text"];
+                                const csv = [cols.join(",")].concat(filteredItems.map(item => {
+                                    const text = isPost(item) ? item.title : item.body;
+                                    return [item.id, isPost(item) ? "post" : "comment", item.created_utc, item.subreddit, item.author, item.score || 0, item.permalink, text ? `"${text.replace(/"/g, '""').replace(/\n/g, " ")}"` : ""].join(",");
+                                })).join("\n");
+                                downloadFile(`rosint_${query}_${activeTab}.csv`, csv, "text/csv");
+                            }} className="px-3 h-8 text-[11px] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--accent)] cursor-pointer">CSV</button>
+                            <div className="w-px self-stretch bg-[color:var(--border-hover)]" aria-hidden="true" />
+                            <button onClick={() => downloadFile(`rosint_${query}_${activeTab}.json`, JSON.stringify(filteredItems, null, 2), "application/json")} className="px-3 h-8 text-[11px] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--accent)] cursor-pointer">JSON</button>
+                            </div>
+                        </div>}
+
+                        {initialLoading ? <div className="mb-3 flex flex-nowrap items-center gap-1.5 overflow-hidden" aria-hidden="true">
+                                <div className="skeleton h-8 w-[116px] rounded flex-shrink-0"></div>
+                                <div className="skeleton h-8 w-[116px] rounded flex-shrink-0"></div>
+                                <div className="skeleton h-8 w-[84px] rounded flex-shrink-0"></div>
+                                <div className="skeleton h-8 w-[78px] rounded flex-shrink-0"></div>
+                                <div className="skeleton h-8 w-[73px] rounded flex-shrink-0"></div>
+                                <div className="skeleton h-8 w-[118px] rounded flex-shrink-0"></div>
+                                <div className="skeleton h-8 w-[95px] rounded flex-shrink-0"></div>
                             </div> : <>
-                                <div className="grid sm:hidden grid-cols-3 gap-1 mb-1.5">
+                                <div className="hidden grid-cols-3 gap-1 mb-1.5">
                                     <HoverHint hint={t("searchOnRedditHint")}>
                                         <a href={mode === "subreddit" ? `https://www.reddit.com/r/${query}` : `https://www.reddit.com/search/?q=author%3A%22${query}%22`} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-1 w-full min-w-0 text-[11px] text-[color:var(--text-muted)] hover:text-[color:var(--accent-text)] transition-colors h-8 border border-[color:var(--border-hover)] rounded">
                                             <IconExternal /> {t("searchOnReddit")}
@@ -1936,8 +1927,8 @@ export default function App() {
                                         <span className="text-[11px] whitespace-nowrap">{t("nsfwOnly")}</span>
                                     </label>
                                 </div>
-                                <div className="flex sm:hidden gap-1 mb-3">
-                                    <details className="relative group/sort flex-1" onKeyDown={closeOnEscape}>
+                                <div className="hidden gap-1 mb-3">
+                                    <details className="hidden relative group/sort flex-1" onKeyDown={closeOnEscape}>
                                         <summary aria-label={t("newest")} className="flex items-center justify-center gap-1.5 bg-[color:var(--bg)] border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] rounded h-8 px-2 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)] cursor-pointer list-none [&::-webkit-details-marker]:hidden">
                                             <span className="text-[11px] pointer-events-none">{sortOrder === "desc" ? t("newest") : t("oldest")}</span><svg className="w-3 h-3 text-[color:var(--text-muted)] pointer-events-none opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
                                         </summary>
@@ -1955,7 +1946,7 @@ export default function App() {
                                         <IconActivity />
                                         <span className="text-[11px] whitespace-nowrap">{t("stats")}</span>
                                     </button>}
-                                    <details className="relative group/export flex-1" onKeyDown={closeOnEscape}>
+                                    <details className="hidden relative group/export flex-1" onKeyDown={closeOnEscape}>
                                         <summary aria-label="Export" className="flex items-center justify-center gap-1.5 bg-[color:var(--bg)] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] hover:border-[color:var(--text-muted)] h-8 transition-colors border border-[color:var(--border-hover)] rounded text-[11px] whitespace-nowrap cursor-pointer list-none [&::-webkit-details-marker]:hidden outline-none">
                                             <svg className="w-3 h-3 text-[color:var(--text-muted)] pointer-events-none opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
                                             Export
@@ -1987,7 +1978,7 @@ export default function App() {
                                         </div>
                                     </details>
                                 </div>
-                                <div className="hidden sm:flex flex-wrap items-center gap-x-1 gap-y-1.5 mb-3 justify-between">
+                                <div className="hidden flex-wrap items-center gap-x-1 gap-y-1.5 mb-3 justify-between">
                                     <div className="flex items-center gap-1.5">
                                         <HoverHint hint={t("searchOnRedditHint")}>
                                             <a href={mode === "subreddit" ? `https://www.reddit.com/r/${query}` : `https://www.reddit.com/search/?q=author%3A%22${query}%22`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-[11px] text-[color:var(--text-muted)] hover:text-[color:var(--accent-text)] transition-colors leading-relaxed">
@@ -2004,7 +1995,7 @@ export default function App() {
                                         </label>
                                     </div>
                                     <div className="flex items-center gap-1.5">
-                                        <details className="relative group/sort" onKeyDown={closeOnEscape}>
+                                        <details className="hidden relative group/sort" onKeyDown={closeOnEscape}>
                                             <summary aria-label={t("newest")} className="flex items-center gap-1.5 bg-[color:var(--bg)] border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] rounded h-8 px-2 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)] cursor-pointer list-none [&::-webkit-details-marker]:hidden">
                                                 <span className="text-[11px] pointer-events-none">{sortOrder === "desc" ? t("newest") : t("oldest")}</span><svg className="w-3 h-3 text-[color:var(--text-muted)] pointer-events-none opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
                                             </summary>
@@ -2018,12 +2009,11 @@ export default function App() {
                                                 </button>
                                             </div>
                                         </details>
-                                        <div className="w-px h-6 bg-[color:var(--border)]" />
                                         {mode === "username" && <button onClick={() => setShowProfile(p => !p)} className={`flex items-center gap-1.5 px-2.5 h-8 transition-colors border rounded outline-none cursor-pointer select-none ${showProfile ? "bg-[color:var(--bg-elevated)] text-[color:var(--text)] border-[color:var(--text-muted)]" : "bg-[color:var(--bg)] text-[color:var(--text-muted)] border-[color:var(--border-hover)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] hover:border-[color:var(--text-muted)]"}`}>
                                             <IconActivity />
                                             <span className="text-[11px] whitespace-nowrap">{t("stats")}</span>
                                         </button>}
-                                        <details className="relative group/export" onKeyDown={closeOnEscape}>
+                                        <details className="hidden relative group/export" onKeyDown={closeOnEscape}>
                                             <summary aria-label="Export" className="flex items-center gap-1.5 bg-[color:var(--bg)] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] hover:border-[color:var(--text-muted)] px-2.5 h-8 transition-colors border border-[color:var(--border-hover)] rounded text-[11px] whitespace-nowrap cursor-pointer list-none [&::-webkit-details-marker]:hidden outline-none">
                                                 <svg className="w-3 h-3 text-[color:var(--text-muted)] pointer-events-none opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
                                                 Export

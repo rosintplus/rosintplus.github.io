@@ -28,11 +28,34 @@
     /* Translated UI: long German compounds / unspaced CJK runs must break
        instead of overflowing their containers. */
     overflow-wrap: break-word;
+    scrollbar-gutter: stable;
   }
 
   * {
     scrollbar-width: thin;
     scrollbar-color: var(--border) transparent;
+  }
+
+}
+
+/* Keep the mouse cursor stable across every interactive surface.
+   In @layer base so Tailwind cursor utilities (cursor-pointer,
+   cursor-not-allowed, ...) can still override when explicitly used. */
+@layer base {
+  :where(a, button, summary, label, [role="button"], [role="tab"], [role="radio"]) {
+    cursor: pointer;
+  }
+
+  :where(a, button, summary, label, [role="button"], [role="tab"], [role="radio"]) * {
+    cursor: inherit;
+  }
+
+  :where(input[type="text"], input[type="search"], textarea) {
+    cursor: text;
+  }
+
+  :where(input[type="date"], input[type="checkbox"], input[type="radio"], input[type="file"], select) {
+    cursor: pointer;
   }
 }
 
@@ -119,4 +142,3 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover {
         background: var(--border);
     }
 }
-
