@@ -70,11 +70,13 @@ export function relTime(utcSeconds, lang) {
 }
 
 const en = {
-  tagline: "Search any Reddit username to view their deleted posts, removed comments, and private profiles.",
+  tagline: "Search any Reddit username, subreddit, or paste a post link to view deleted content and private profiles.",
   privacy: "Privacy",
   searchPlaceholder: "username",
   modeUsername: "Username",
   modeSubreddit: "Subreddit",
+  modePost: "Post",
+  searchPlaceholderPost: "post link or ID",
   searchMode: "Search mode",
   emptyNoneSub: "No {tab} found in this subreddit.",
   advancedFilters: "Advanced filters",
@@ -192,6 +194,20 @@ const en = {
   removedText: "This comment was removed by a moderator — the archive captured no text.",
   deletedText: "This comment was deleted by its author — the archive captured no text.",
   noContent: "(no content)",
+  postViewTitle: "Post",
+  postAuthor: "by",
+  postIn: "in",
+  postComments: "{n} comments",
+  postScore: "{n} points",
+  postUpvoteRatio: "{pct}% upvoted",
+  postPermalink: "Permalink",
+  postOriginal: "Original post",
+  postNotFound: "Post not found in the archives. It may not have been archived yet, or the ID is incorrect.",
+  postInvalidUrl: "Could not parse a post ID from that input. Try a full Reddit post URL or a bare ID.",
+  postLoading: "Loading post…",
+  postCommentsTitle: "Comments",
+  postNoComments: "No archived comments found for this post.",
+  postCopyPost: "Copy post details",
 };
 
 const translations = {

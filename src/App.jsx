@@ -1,15 +1,18 @@
-import { safeFetch, fetchBoth, REDDIT_BASE, ARCTIC, LIMIT } from "./api";
-import { downloadFile, normalizeUsername, normalizeSubreddit } from "./utils";
+import { safeFetch, fetchBoth, REDDIT_BASE, ARCTIC, LIMIT, fetchPostById, fetchCommentsForPost } from "./api";
+import { downloadFile, normalizeUsername, normalizeSubreddit, parsePostInput } from "./utils";
 import { getSavedUsernames, emptyStats, processItem } from "./profileData.js";
 import { useI18n, LANGS, LOCALES, setLang, relTime, tN } from "./i18n.js";
 
-import { useState, useCallback, useEffect, useMemo, Component, memo, useRef, lazy, Suspense, useDeferredValue } from "react";
+import { useState, useCallback, useEffect, useLayoutEffect, useMemo, Component, memo, useRef, lazy, Suspense, useDeferredValue } from "react";
 import { createPortal } from "react-dom";
 
 const LOGO_PATH = "M696.25 1330.0 618.75 873.75H732.5Q752.5 550.0 1071.25 550.0Q1260.0 550.0 1360.625 688.75Q1461.25 827.5 1461.25 1088.75H1123.75Q1123.75 971.25 1080.625 920.0Q1037.5 868.75 942.5 868.75Q818.75 868.75 757.5 988.75Q696.25 1108.75 696.25 1330.0ZM78.75 1900.0V1610.0H1006.25V1900.0ZM358.75 1900.0V575.0H646.25L696.25 955.0V1900.0ZM128.75 865.0V575.0H628.75L653.75 865.0Z M2100.0 1920.0Q1559.0 1920.0 1559.0 1200.0Q1559.0 460.0 2100.0 460.0Q2641.0 460.0 2641.0 1200.0Q2641.0 1920.0 2100.0 1920.0ZM2100.0 1668.0Q2364.0 1668.0 2364.0 1200.0Q2364.0 712.0 2100.0 712.0Q1836.0 712.0 1836.0 1200.0Q1836.0 1668.0 2100.0 1668.0Z M3251.0 1920.0Q3130.0 1920.0 3016.0 1899.5Q2902.0 1879.0 2812.0 1842.0L2848.0 1572.0Q2958.0 1618.0 3066.5 1643.0Q3175.0 1668.0 3267.0 1668.0Q3374.0 1668.0 3431.0 1630.0Q3488.0 1592.0 3488.0 1521.0Q3488.0 1428.0 3371.0 1373.0L3167.0 1274.0Q3016.0 1200.0 2933.0 1091.0Q2850.0 982.0 2850.0 850.0Q2850.0 664.0 2973.0 562.0Q3096.0 460.0 3321.0 460.0Q3452.0 460.0 3569.5 506.0Q3687.0 552.0 3778.0 639.0L3596.0 848.0Q3527.0 782.0 3457.0 746.5Q3387.0 711.0 3322.0 711.0Q3234.0 711.0 3185.0 748.5Q3136.0 786.0 3136.0 857.0Q3136.0 904.0 3170.5 946.0Q3205.0 988.0 3269.0 1022.0L3461.0 1121.0Q3611.0 1199.0 3692.5 1303.0Q3774.0 1407.0 3774.0 1526.0Q3774.0 1715.0 3638.0 1817.5Q3502.0 1920.0 3251.0 1920.0Z M4367.0 1900.0V480.0H4631.0V1900.0ZM4051.0 1900.0V1662.0H4949.0V1900.0ZM4051.0 717.0V480.0H4949.0V717.0Z M5772.0 1900.0 5522.0 790.0H5413.0V480.0H5628.0L5878.0 1590.0H5945.0V1900.0ZM5231.0 1900.0V480.0H5485.0V1900.0ZM5915.0 1900.0V480.0H6169.0V1900.0Z M6768.0 1900.0V480.0H7032.0V1900.0ZM6363.0 723.0V480.0H7437.0V723.0Z M7966.0 1710.0V672.0H8234.0V1710.0ZM7600.0 1316.0V1066.0H8600.0V1316.0Z";
 const Logo = ({ className = "inline-block align-middle h-4 sm:h-5 w-auto" }) => (<svg viewBox="78.8 460 8521.2 1460" role="img" aria-label="Rosint+" fill="currentColor" className={className}><path d={LOGO_PATH} /></svg>);
 const NO_DECORATION = { textDecoration: 'none' };
 const STROKE_TRANSITION = { transition: "stroke 150ms" };
+// Shared hover treatment for inline metadata links — mirrors the header
+// buttons (bg-elevated wash + text-colored result + color transition).
+const LINK_PILL = "rounded px-1 -mx-1 transition-colors hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)]";
 const FLEX_1 = { flex: "1 1 0" };
 const closeOnEscape = e => { if (e.key === "Escape") e.currentTarget.removeAttribute("open"); };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -171,6 +174,12 @@ export const IconInfo = ({ className = "w-3.5 h-3.5" }) => (
   </svg>
 );
 
+const IconGitHub = ({ className = "w-5 h-5" }) => (
+  <svg className={className} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+    <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
+  </svg>
+);
+
 const CopyButton = memo(function CopyButton({ getText }) {
   const [done, setDone] = useState(false);
   const timerRef = useRef(null);
@@ -201,7 +210,7 @@ const CopyButton = memo(function CopyButton({ getText }) {
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => { timerRef.current = null; setDone(false); }, 1200);
   }, [getText]);
-  return <button onClick={copy} aria-label={done ? t("copied") : t("copyAria")} title={t("copyTitle")} className={`flex items-center gap-1 transition-colors ${done ? "text-[color:var(--accent)]" : "text-[color:var(--text-muted)] hover:text-[color:var(--accent)]"}`}>
+  return <button onClick={copy} aria-label={done ? t("copied") : t("copyAria")} title={t("copyTitle")} className={`flex items-center gap-1 transition-colors ${done ? "text-[color:var(--accent)]" : "text-[color:var(--text-muted)] hover:text-[color:var(--text)]"}`}>
             <IconCopy />{done && <span className="text-[10px]">{t("copied")}</span>}
         </button>;
 });
@@ -389,7 +398,7 @@ return <>
                                     <button onClick={e => {
                     e.preventDefault();
                     if (!comments) handleLoadComments();
-                  }} disabled={commentsLoading} className="relative z-10 flex items-center gap-1 hover:text-[color:var(--accent)] transition-colors disabled:opacity-50 cursor-pointer">
+                  }} disabled={commentsLoading} className="relative z-10 flex items-center gap-1 hover:text-[color:var(--text)] transition-colors disabled:opacity-50 cursor-pointer">
                                         <IconComment />{embedded ? t("commentsCount", { n: fmtNum(post.num_comments) }) : t("showCommentsCount", { n: fmtNum(post.num_comments) })}
                                     </button>
                                     <a href={postUrl} target="_blank" rel="noopener noreferrer" className="relative z-10 flex items-center gap-1 text-[color:var(--accent-text)] hover:underline truncate max-w-[200px]">
@@ -398,7 +407,7 @@ return <>
                                     {hasBody && <button aria-label={bodyOpen ? "Hide post body" : "Show post body"} onClick={e => {
                     e.preventDefault();
                     setBodyOpen(o => !o);
-                  }} className="relative z-10 flex items-center gap-1 text-[color:var(--text-muted)] hover:text-[color:var(--accent)] transition-colors">
+                  }} className="relative z-10 flex items-center gap-1 text-[color:var(--text-muted)] hover:text-[color:var(--text)] transition-colors">
                                                 <svg aria-hidden="true" className={`w-3 h-3 transition-transform duration-200 ${bodyOpen ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                                                 </svg>
@@ -500,7 +509,7 @@ const ParentChain = memo(function ParentChain({
                         </p>
                     </div>
                 </div>) : (<div className="px-3 py-1.5">
-                    <button onClick={handleLoad} disabled={loading} className="flex items-center gap-1 text-[11px] text-[color:var(--text-muted)] hover:text-[color:var(--accent)] hover:bg-[color:var(--border)] rounded px-2 py-0.5 transition-all disabled:opacity-50">
+                    <button onClick={handleLoad} disabled={loading} className="flex items-center gap-1 text-[11px] text-[color:var(--text-muted)] hover:text-[color:var(--text)] hover:bg-[color:var(--border)] rounded px-2 py-0.5 transition-all disabled:opacity-50">
                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
                         </svg>
@@ -655,7 +664,7 @@ const CommentCard = memo(function CommentCard({
                                     <path d="M 1 0 L 1 16 Q 1 23 8 23 L 28 23" stroke={lineHovered ? "var(--text-muted)" : "var(--border-hover)"} strokeWidth={2} fill="none" style={STROKE_TRANSITION} />
                                 </svg>
                             </button>
-                            <button onClick={handleLoadReplies} disabled={repliesLoading} aria-label="Load replies" className="relative w-[18px] h-[18px] rounded-full border-2 border-[color:var(--border)] bg-[color:var(--bg)] flex items-center justify-center text-[color:var(--text-muted)] hover:border-[color:var(--accent)] hover:text-[color:var(--accent)] transition-all disabled:opacity-40 flex-shrink-0 -ml-[1px]">
+                            <button onClick={handleLoadReplies} disabled={repliesLoading} aria-label="Load replies" className="relative w-[18px] h-[18px] rounded-full border-2 border-[color:var(--border)] bg-[color:var(--bg)] flex items-center justify-center text-[color:var(--text-muted)] hover:border-[color:var(--accent)] hover:text-[color:var(--text)] transition-all disabled:opacity-40 flex-shrink-0 -ml-[1px]">
                                 {repliesLoading ? <span className="text-[9px] leading-none">…</span> : <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
                                         <line x1="5" y1="1" x2="5" y2="9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
                                         <line x1="1" y1="5" x2="9" y2="5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
@@ -760,7 +769,7 @@ const TabBtn = memo(function TabBtn({
   active,
   onClick
 }) {
-  return <button onClick={onClick} role="tab" aria-selected={active} className={`group/tab relative flex-1 flex items-center justify-center px-2.5 py-2.5 text-[15px] sm:px-4 sm:py-2.5 sm:text-sm font-medium transition-colors ${active ? "text-[color:var(--text)]" : "text-[color:var(--text-muted)] hover:text-[color:var(--accent)]"}`}>
+  return <button onClick={onClick} role="tab" aria-selected={active} className={`group/tab relative flex-1 flex items-center justify-center px-2.5 py-2.5 text-[15px] sm:px-4 sm:py-2.5 sm:text-sm font-medium transition-colors ${active ? "text-[color:var(--text)]" : "text-[color:var(--text-muted)] hover:text-[color:var(--text)]"}`}>
             {label}
             {(count != null && count !== 0) && <span className={`ml-1.5 text-[13px] px-2 py-0.5 sm:text-[11px] sm:px-1.5 rounded-full transition-colors ${active ? "bg-[color:var(--accent)] text-[color:var(--bg)] font-bold" : "bg-[color:var(--border)] text-[color:var(--text-muted)] group-hover/tab:bg-[color:var(--accent)]/20 group-hover/tab:text-[color:var(--accent)]"}`}>
                     {countIsPlus ? `${count}+` : count}
@@ -1070,22 +1079,33 @@ const ModeSelector = memo(function ModeSelector({
 }) {
   const { t, lang } = useI18n();
   const btnRefs = useRef({});
+  // Measured synchronously before first paint (layout effect) so the sliding
+  // pill and dividers are correctly sized on the very first render — no
+  // width-0 flash while waiting for timers.
   const [w, setW] = useState(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const measure = () => {
       const widths = Object.values(btnRefs.current).map(el => el?.offsetWidth || 0);
       const max = Math.max(...widths, 0);
       if (max > 0) setW(max);
     };
-    const t1 = setTimeout(measure, 50);
-    const t2 = setTimeout(measure, 300);
-    return () => { clearTimeout(t1); clearTimeout(t2); };
+    measure();
+    // Re-measure after fonts load, since tab label widths change.
+    if (document.fonts?.ready) document.fonts.ready.then(measure);
   }, [lang]);
-  return <div className="relative ml-auto flex w-fit items-stretch rounded border border-[color:var(--border-hover)] bg-[color:var(--bg)] p-0.5 select-none" role="tablist" aria-label={t("searchMode")}>
-            <span aria-hidden="true" className="absolute top-0.5 bottom-0.5 left-0.5 rounded border border-[color:var(--border-hover)] bg-[color:var(--bg-elevated)] transition-transform duration-200 ease-out will-change-transform" style={{ width: w ?? 0, transform: `translate3d(${mode === "subreddit" && w ? w : 0}px,0,0)` }} />
-            {["username", "subreddit"].map(m => (
-                <button key={m} ref={el => { btnRefs.current[m] = el; }} type="button" role="tab" aria-selected={mode === m} onClick={() => onModeChange(m)} className={`relative z-10 flex items-center justify-center px-3 h-6 whitespace-nowrap text-[11px] font-medium rounded transition-colors ${mode === m ? "text-[color:var(--text)]" : "text-[color:var(--text-muted)] hover:text-[color:var(--accent)]"}`} style={w ? { width: w } : undefined}>
-                    {m === "subreddit" ? t("modeSubreddit") : t("modeUsername")}
+  const modes = ["username", "subreddit", "post"];
+  const activeIndex = Math.max(0, modes.indexOf(mode));
+  return <div className="relative ml-auto flex w-fit items-stretch rounded border border-[color:var(--border-hover)] bg-[color:var(--bg)] p-0.5 select-none overflow-hidden" role="tablist" aria-label={t("searchMode")}>
+            {w && (
+              <>
+                {activeIndex !== 0 && activeIndex !== 1 && <span aria-hidden="true" className="absolute top-1 bottom-1 w-px bg-[color:var(--border)] pointer-events-none transition-opacity duration-200" style={{ left: `${w + 2}px` }} />}
+                {activeIndex !== 1 && activeIndex !== 2 && <span aria-hidden="true" className="absolute top-1 bottom-1 w-px bg-[color:var(--border)] pointer-events-none transition-opacity duration-200" style={{ left: `${2 * w + 2}px` }} />}
+              </>
+            )}
+            <span aria-hidden="true" className="absolute top-0.5 bottom-0.5 left-0.5 rounded border border-[color:var(--border-hover)] bg-[color:var(--bg-elevated)] transition-transform duration-200 ease-out will-change-transform" style={{ width: w ?? 0, transform: `translate3d(${w ? activeIndex * w : 0}px,0,0)` }} />
+            {modes.map(m => (
+                <button key={m} ref={el => { btnRefs.current[m] = el; }} type="button" role="tab" aria-selected={mode === m} onClick={() => onModeChange(m)} className={`relative z-10 flex items-center justify-center px-3 h-6 whitespace-nowrap text-[11px] font-medium rounded transition-colors ${mode === m ? "text-[color:var(--text)]" : "text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)]"}`} style={w ? { width: w } : undefined}>
+                    {m === "post" ? t("modePost") : m === "subreddit" ? t("modeSubreddit") : t("modeUsername")}
                 </button>
             ))}
         </div>;
@@ -1098,13 +1118,14 @@ const SearchBar = memo(function SearchBar({
   mode = "username"
 }) {
   const { t } = useI18n();
-  const RECENT_KEYS = { username: "rosint-recent", subreddit: "rosint-recent-subs" };
+  const RECENT_KEYS = { username: "rosint-recent", subreddit: "rosint-recent-subs", post: "rosint-recent-posts" };
   const loadRecent = readStoredList;
   const [recentMap, setRecentMap] = useState(() => ({
     username: loadRecent("rosint-recent"),
-    subreddit: loadRecent("rosint-recent-subs")
+    subreddit: loadRecent("rosint-recent-subs"),
+    post: loadRecent("rosint-recent-posts")
   }));
-  const recent = recentMap[mode];
+  const recent = recentMap[mode] || [];
   const setRecent = list => setRecentMap(m => ({ ...m, [mode]: list }));
   const [username, setUsername] = useState(defaultQuery);
   const [focused, setFocused] = useState(false);
@@ -1148,6 +1169,13 @@ const SearchBar = memo(function SearchBar({
     if (e) e.preventDefault();
     const user = username.trim();
     if (!user) return;
+    if (mode === "post") {
+      const raw = user;
+      addRecent(raw);
+      inputRef.current?.blur();
+      onSearch(raw);
+      return;
+    }
     const normalized = mode === "subreddit" ? normalizeSubreddit(user) : normalizeUsername(user);
     if (!normalized) return;
     addRecent(normalized);
@@ -1156,6 +1184,13 @@ const SearchBar = memo(function SearchBar({
   };
 
   const handleRecentClick = (user) => {
+    if (mode === "post") {
+      setUsername(user);
+      addRecent(user);
+      setFocused(false);
+      onSearch(user);
+      return;
+    }
     const normalized = mode === "subreddit" ? normalizeSubreddit(user) : normalizeUsername(user);
     if (!normalized) return;
     setUsername(normalized);
@@ -1174,8 +1209,8 @@ const SearchBar = memo(function SearchBar({
 
   return <form onSubmit={handleSubmit} className="flex gap-2">
             <div className="relative" style={FLEX_1} onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) setFocused(false); }}>
-                <span className="absolute left-[14px] top-1/2 -translate-y-1/2 text-[color:var(--text-muted)] text-sm font-medium">{mode === "subreddit" ? "r/" : "u/"}</span>
-                <input ref={inputRef} aria-label="Search user" type="text" value={username} onChange={e => setUsername(e.target.value)} onFocus={() => setFocused(true)} placeholder={mode === "subreddit" ? t("subredditPlaceholder") : t("searchPlaceholder")} name="search_query_osint" id="search_query_osint" autoComplete="off" data-bwignore="true" data-lpignore="true" data-1p-ignore="true" spellCheck="false" className="w-full bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded pl-[32px] pr-10 py-2.5 text-sm text-[color:var(--text)] placeholder-[color:var(--text-muted)] focus:outline-none focus:border-[color:var(--accent)] transition-colors" onClick={() => setFocused(true)} onKeyDown={e => { if (e.key === "Escape") { setFocused(false); inputRef.current?.blur(); } }} />
+                {mode !== "post" && <span className="absolute left-[14px] top-1/2 -translate-y-1/2 text-[color:var(--text-muted)] text-sm font-medium">{mode === "subreddit" ? "r/" : "u/"}</span>}
+                <input ref={inputRef} aria-label="Search user" type="text" value={username} onChange={e => setUsername(e.target.value)} onFocus={() => setFocused(true)} placeholder={mode === "subreddit" ? t("subredditPlaceholder") : mode === "post" ? t("searchPlaceholderPost") : t("searchPlaceholder")} name="search_query_osint" id="search_query_osint" autoComplete="off" data-bwignore="true" data-lpignore="true" data-1p-ignore="true" spellCheck="false" className={`w-full bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded py-2.5 text-sm text-[color:var(--text)] placeholder-[color:var(--text-muted)] focus:outline-none focus:border-[color:var(--accent)] transition-colors ${mode === "post" ? "pl-4 pr-10" : "pl-[32px] pr-10"}`} onClick={() => setFocused(true)} onKeyDown={e => { if (e.key === "Escape") { setFocused(false); inputRef.current?.blur(); } }} />
                 {username && (
                     <button type="button" onMouseDown={e => e.preventDefault()} onClick={() => { setUsername(""); inputRef.current?.focus(); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-[color:var(--text-muted)] hover:text-[color:var(--accent-text)] transition-colors p-1" aria-label="Clear search">
                         <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
@@ -1228,17 +1263,42 @@ const AccountProfile = lazy(() => import('./AccountProfile.jsx'));
 
 export default function App() {
   const [initialParams] = useState(() => Object.fromEntries(new URLSearchParams(window.location.search)));
-  const [initialMode] = useState(() =>
-    initialParams.mode === "subreddit" || (!initialParams.u && initialParams.sub) ? "subreddit" : "username");
-  const [initialUser] = useState(() =>
-    initialMode === "subreddit" ? normalizeSubreddit(initialParams.sub) : normalizeUsername(initialParams.u) || "");
+  const _initialPostRaw = initialParams.post || initialParams.p || initialParams.postId || initialParams.id || "";
+  const _initialPostParsed = (() => {
+    const p = parsePostInput(_initialPostRaw);
+    if (p) return p;
+    const bare = String(_initialPostRaw || "").trim().replace(/^t3_/i, "");
+    if (/^[a-z0-9]{5,10}$/i.test(bare) && _initialPostRaw) return { postId: bare.toLowerCase(), commentId: null, kind: "post" };
+    const uAsPost = parsePostInput(initialParams.u || "");
+    if (uAsPost) return uAsPost;
+    return null;
+  })();
+  const [initialPostId] = useState(() => _initialPostParsed?.postId || null);
+  const [initialMode] = useState(() => {
+    if (_initialPostParsed) return "post";
+    return initialParams.mode === "subreddit" || (!initialParams.u && initialParams.sub) ? "subreddit" : "username";
+  });
+  const [initialUser] = useState(() => {
+    if (initialMode === "post") return _initialPostRaw || "";
+    return initialMode === "subreddit" ? normalizeSubreddit(initialParams.sub) : normalizeUsername(initialParams.u) || "";
+  });
+  const initialPostRaw = _initialPostRaw;
+  const initialPostParsed = _initialPostParsed;
   const { t } = useI18n();
   const [mode, setMode] = useState(initialMode);
   const modeRef = useRef(initialMode);
-  const [query, setQuery] = useState(initialUser);
+  const [query, setQuery] = useState(initialPostId ? initialPostRaw : initialUser);
   const [activeTab, setActiveTab] = useState(initialParams.tab === "comments" ? "comments" : initialParams.tab === "posts" ? "posts" : "all");
-  const [searched, setSearched] = useState(!!initialUser);
-  const [initialLoading, setInitialLoading] = useState(!!initialUser);
+  const [searched, setSearched] = useState(!!initialUser || !!initialPostId);
+  const [initialLoading, setInitialLoading] = useState(!!initialUser || !!initialPostId);
+  const [postId, setPostId] = useState(initialPostId);
+  const [postMode, setPostMode] = useState(!!initialPostId);
+  const [postData, setPostData] = useState(null);
+  const [postComments, setPostComments] = useState([]);
+  const [postSources, setPostSources] = useState([]);
+  const [postLoading, setPostLoading] = useState(!!initialPostId);
+  const [postError, setPostError] = useState(null);
+  const postIdRef = useRef(initialPostId);
   const [dateFrom, setDateFrom] = useState(initialParams.from ?? "");
   const [dateTo, setDateTo] = useState(initialParams.to ?? "");
   const [showDates, setShowDates] = useState(false);
@@ -1477,12 +1537,41 @@ export default function App() {
     return f;
   }, [dateFrom, dateTo, subreddit, showNsfw, mode]);
   const hasFilters = dateFrom || dateTo || (mode === "username" && subreddit.trim()) || !showNsfw;
+  const clearPostMode = useCallback(() => {
+    setPostMode(false);
+    setPostId(null);
+    postIdRef.current = null;
+    setPostData(null);
+    setPostComments([]);
+    setPostSources([]);
+    setPostError(null);
+    setPostLoading(false);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("post");
+    url.searchParams.delete("p");
+    url.searchParams.delete("postId");
+    url.searchParams.delete("id");
+    window.history.replaceState({}, "", url);
+  }, []);
   // Keep the URL in sync with the shareable view state so findings are
   // reproducible/tab-restoreable: ?u ?tab ?from ?to ?sub ?sort. replaceState
   // (not push) so swapping tabs/filters doesn't pollute browser history.
   useEffect(() => {
     if (!searched || !query) return;
+    if (postMode) {
+      const url = new URL(window.location.href);
+      if (postId) {
+        url.searchParams.set("post", postId);
+        url.searchParams.delete("u");
+        url.searchParams.delete("sub");
+        url.searchParams.delete("mode");
+      }
+      window.history.replaceState({}, "", url);
+      return;
+    }
     const url = new URL(window.location.href);
+    url.searchParams.delete("post");
+    url.searchParams.delete("p");
     if (mode === "subreddit") {
       url.searchParams.set("sub", query);
       url.searchParams.set("mode", "subreddit");
@@ -1510,17 +1599,98 @@ export default function App() {
     if (showProfile) url.searchParams.set("stats", "1");
     else url.searchParams.delete("stats");
     window.history.replaceState({}, "", url);
-  }, [searched, query, mode, activeTab, subreddit, dateFrom, dateTo, sortOrder, deletedOnly, nsfwOnly, showProfile]);
+  }, [searched, query, mode, activeTab, subreddit, dateFrom, dateTo, sortOrder, deletedOnly, nsfwOnly, showProfile, postMode, postId]);
   const {
     reset: resetPosts
   } = posts;
   const {
     reset: resetComments
   } = comments;
+  const searchPost = useCallback(async (rawInput, { push = true } = {}) => {
+    const parsed = parsePostInput(rawInput) || (() => {
+      const bare = String(rawInput || "").trim().replace(/^t3_/i, "");
+      if (/^[a-z0-9]{5,10}$/i.test(bare)) return { postId: bare.toLowerCase(), commentId: null, kind: "post" };
+      return null;
+    })();
+    if (!parsed) {
+      setPostError(t("postInvalidUrl"));
+      setPostLoading(false);
+      setInitialLoading(false);
+      return;
+    }
+    const id = parsed.postId;
+    const searchId = ++searchIdRef.current;
+    setPostId(id);
+    postIdRef.current = id;
+    setPostMode(true);
+    if (modeRef.current !== "post") {
+      modeRef.current = "post";
+      setMode("post");
+    }
+    setPostData(null);
+    setPostComments([]);
+    setPostSources([]);
+    setPostError(null);
+    setPostLoading(true);
+    setSearched(true);
+    setQuery(rawInput);
+    setInitialLoading(true);
+    if (push) {
+      const url = new URL(window.location.href);
+      url.searchParams.set("post", id);
+      url.searchParams.delete("u");
+      url.searchParams.delete("sub");
+      url.searchParams.delete("mode");
+      url.searchParams.delete("tab");
+      window.history.pushState({}, "", url);
+    }
+    try {
+      const [postRes, commentsRes] = await Promise.all([
+        fetchPostById(id),
+        fetchCommentsForPost(id, { limit: 100 })
+      ]);
+      if (searchId !== searchIdRef.current || postIdRef.current !== id) return;
+      if (postRes.post) {
+        setPostData(postRes.post);
+        const combined = [...new Set([...(postRes.sources || []), ...(commentsRes.sources || [])])];
+        setPostSources(combined);
+        setPostError(null);
+      } else {
+        setPostError(t("postNotFound"));
+        setPostData(null);
+      }
+      setPostComments(commentsRes.comments || []);
+    } catch (e) {
+      if (e?.name !== "AbortError") setPostError(e.message || t("postNotFound"));
+    } finally {
+      if (searchId === searchIdRef.current && postIdRef.current === id) {
+        setPostLoading(false);
+        setInitialLoading(false);
+      }
+    }
+  }, [t]);
   const searchUser = useCallback(async (rawUser, {
     push = true,
     silent = false
   } = {}) => {
+    if (modeRef.current === "post") {
+      return searchPost(rawUser, { push });
+    }
+    // exiting post mode for a normal user/subreddit search
+    if (postMode) {
+      setPostMode(false);
+      setPostId(null);
+      postIdRef.current = null;
+      setPostData(null);
+      setPostComments([]);
+      setPostSources([]);
+      setPostError(null);
+      setPostLoading(false);
+      const url = new URL(window.location.href);
+      url.searchParams.delete("post");
+      url.searchParams.delete("p");
+      window.history.replaceState({}, "", url);
+    }
     const m = modeRef.current;
     const user = m === "subreddit" ? normalizeSubreddit(rawUser) : normalizeUsername(rawUser);
     if (!user) return;
@@ -1546,19 +1716,32 @@ export default function App() {
       window.history.pushState({}, "", url);
     }
     if (!silent) setInitialLoading(false);
-  }, [buildFilters, resetPosts, resetComments, subreddit, sortOrder]);
+  }, [buildFilters, resetPosts, resetComments, subreddit, sortOrder, postMode, searchPost]);
   const searchUserRef = useRef(searchUser);
   searchUserRef.current = searchUser;
   const handleModeChange = useCallback(nextMode => {
     if (nextMode === modeRef.current) return;
     modeRef.current = nextMode;
     setMode(nextMode);
+    if (nextMode === "post") {
+      if (postMode) {
+        clearPostMode();
+      }
+      return;
+    }
+    if (postMode) {
+      clearPostMode();
+      setSearched(false);
+      setQuery("");
+      return;
+    }
     if (searched && query) searchUserRef.current(query, { push: true });
-  }, [searched, query]);
+  }, [searched, query, postMode, clearPostMode]);
   // Re-search when a discrete filter control changes (dates, NSFW toggle,
   // sort). The subreddit text field is deliberately NOT here: it changes on
   // every keystroke, so it commits only on blur/Enter in its own handler.
   useEffect(() => {
+    if (postMode) return;
     if (searched && query && !initialLoading) {
       searchUserRef.current(query, {
         push: false,
@@ -1568,9 +1751,20 @@ export default function App() {
     // searched/query/initialLoading are deliberately NOT deps: including them
     // refires the search on every completion, re-showing skeletons forever.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dateFrom, dateTo, showNsfw, sortOrder]);
+  }, [dateFrom, dateTo, showNsfw, sortOrder, postMode]);
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
+    const rawPost = p.get("post") || p.get("p") || p.get("postId") || p.get("id") || "";
+    const parsed = parsePostInput(rawPost) || (rawPost && /^[a-z0-9]{5,10}$/i.test(rawPost.trim()) ? { postId: rawPost.trim().replace(/^t3_/i, "").toLowerCase(), commentId: null } : null);
+    if (parsed?.postId) {
+      searchPost(rawPost, { push: false });
+      return;
+    }
+    const maybeUAsPost = parsePostInput(p.get("u") || "");
+    if (maybeUAsPost) {
+      searchPost(p.get("u"), { push: false });
+      return;
+    }
     const u = normalizeUsername(p.get("u"));
     const s = normalizeSubreddit(p.get("sub"));
     if (u) searchUser(u, {
@@ -1585,6 +1779,17 @@ export default function App() {
   useEffect(() => {
     const onPop = () => {
       const p = new URLSearchParams(window.location.search);
+      const rawPost = p.get("post") || p.get("p") || p.get("postId") || p.get("id") || "";
+      const parsed = parsePostInput(rawPost) || (rawPost && /^[a-z0-9]{5,10}$/i.test(rawPost.trim()) ? { postId: rawPost.trim().replace(/^t3_/i, "").toLowerCase() } : null);
+      if (parsed?.postId) {
+        searchPost(rawPost, { push: false });
+        return;
+      }
+      const maybeUAsPost = parsePostInput(p.get("u") || "");
+      if (maybeUAsPost) {
+        searchPost(p.get("u"), { push: false });
+        return;
+      }
       const nextMode = p.get("mode") === "subreddit" || (!p.get("u") && p.get("sub")) ? "subreddit" : "username";
       modeRef.current = nextMode;
       setMode(nextMode);
@@ -1601,12 +1806,17 @@ export default function App() {
       } else {
         setSearched(false);
         setQuery("");
+        clearPostMode();
       }
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
-  }, [searchUser]);
+  }, [searchUser, searchPost, clearPostMode]);
   const handleRetry = useCallback(async () => {
+    if (postMode && postId) {
+      await searchPost(postId, { push: false });
+      return;
+    }
     if (!query) return;
     setInitialLoading(true);
     const m = modeRef.current;
@@ -1617,19 +1827,23 @@ export default function App() {
       bypassCache: true, sort: sortOrder, mode: m
     })]);
     setInitialLoading(false);
-  }, [query, buildFilters, resetPosts, resetComments, sortOrder]);
+  }, [query, buildFilters, resetPosts, resetComments, sortOrder, postMode, postId, searchPost]);
   const clearFilters = useCallback(async () => {
     setDateFrom("");
     setDateTo("");
     setSubreddit("");
     setShowNsfw(true);
     setNsfwOnly(false);
+    if (postMode && postId) {
+      await searchPost(postId, { push: false });
+      return;
+    }
     if (!query) return;
     setInitialLoading(true);
     const m = modeRef.current;
     await Promise.all([resetPosts(query, {}, { sort: sortOrder, mode: m }), resetComments(query, {}, { sort: sortOrder, mode: m })]);
     setInitialLoading(false);
-  }, [query, resetPosts, resetComments, sortOrder]);
+  }, [query, resetPosts, resetComments, sortOrder, postMode, postId, searchPost]);
 
   const active = useMemo(() => activeTab === "posts" ? posts : activeTab === "comments" ? comments : { loading: posts.loading || comments.loading, error: posts.error || comments.error, done: posts.done && comments.done }, [activeTab, posts, comments]);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- active.items is undefined for "all" tab
@@ -1658,12 +1872,12 @@ export default function App() {
                     <a href="/" className="text-[color:var(--text)] hover:text-[color:var(--accent)] transition-colors font-bold text-base sm:text-lg leading-none whitespace-nowrap"style={NO_DECORATION}>
                         <Logo />
                     </a>
-                    <a href="/privacy.html" className="bg-[color:var(--bg)] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] px-3.5 h-9 sm:px-3 sm:h-8 transition-colors border border-[color:var(--border-hover)] hover:border-[color:var(--text-muted)] rounded flex items-center text-[13px] font-medium whitespace-nowrap"style={NO_DECORATION}>
-                    {t("privacy")}
+                <a href="https://github.com/rosintplus/rosintplus.github.io" target="_blank" rel="noopener noreferrer" className="bg-[color:var(--bg)] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] px-3.5 h-9 sm:px-3 sm:h-8 transition-colors border border-[color:var(--border-hover)] hover:border-[color:var(--text-muted)] rounded flex items-center text-[13px] font-medium whitespace-nowrap"style={NO_DECORATION}>
+                    GitHub
                 </a>
-            </div>
-            <ThemeSwitcher />
-        </header>
+                </div>
+                <ThemeSwitcher />
+            </header>
         <main className="max-w-3xl mx-auto px-4 pt-24 pb-20">
           <h1 className="text-4xl font-semibold mb-8 text-[color:var(--text)] leading-tight">{t("pvTitleA")} <span className="text-[color:var(--accent)]">{t("pvTitleB")}</span></h1>
 
@@ -1692,11 +1906,11 @@ export default function App() {
                 <a href="/" className="text-[color:var(--text)] hover:text-[color:var(--accent)] transition-colors font-bold text-base sm:text-lg leading-none whitespace-nowrap"style={NO_DECORATION}>
                     <Logo />
                 </a>
-                <a href="/privacy.html" className="bg-[color:var(--bg)] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] px-3.5 h-9 sm:px-3 sm:h-8 transition-colors border border-[color:var(--border-hover)] hover:border-[color:var(--text-muted)] rounded flex items-center text-[13px] font-medium whitespace-nowrap"style={NO_DECORATION}>
-                    {t("privacy")}
+                <a href="https://github.com/rosintplus/rosintplus.github.io" target="_blank" rel="noopener noreferrer" aria-label="GitHub" title="GitHub" className="w-9 h-9 sm:h-8 sm:w-8 bg-[color:var(--bg)] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] transition-colors border border-[color:var(--border-hover)] hover:border-[color:var(--text-muted)] rounded flex items-center justify-center flex-shrink-0"style={NO_DECORATION}>
+                    <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
                 </a>
-            </div>
-            <ThemeSwitcher />
+                </div>
+                <ThemeSwitcher />
         </header>
         <h1 className="text-6xl font-bold mb-4 text-[color:var(--text)]">404</h1>
         <p className="text-lg text-[color:var(--text-muted)] mb-8">{t("notFoundText")}</p>
@@ -1712,8 +1926,8 @@ export default function App() {
                 <a href="/" className="text-[color:var(--text)] hover:text-[color:var(--accent)] transition-colors font-bold text-base sm:text-lg leading-none whitespace-nowrap"style={NO_DECORATION}>
                     <Logo />
                 </a>
-                <a href="/privacy.html" className="bg-[color:var(--bg)] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] px-3.5 h-9 sm:px-3 sm:h-8 transition-colors border border-[color:var(--border-hover)] hover:border-[color:var(--text-muted)] rounded flex items-center text-[13px] font-medium whitespace-nowrap"style={NO_DECORATION}>
-                    {t("privacy")}
+                <a href="https://github.com/rosintplus/rosintplus.github.io" target="_blank" rel="noopener noreferrer" aria-label="GitHub" title="GitHub" className="w-9 h-9 sm:h-8 sm:w-8 bg-[color:var(--bg)] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] transition-colors border border-[color:var(--border-hover)] hover:border-[color:var(--text-muted)] rounded flex items-center justify-center flex-shrink-0"style={NO_DECORATION}>
+                    <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
                 </a>
                 </div>
                 <ThemeSwitcher />
@@ -1725,7 +1939,7 @@ export default function App() {
                             <span className="font-semibold">{t("bannerTitle")}</span>
                             {" "}{t("bannerBody")}
                         </p>
-                        <button onClick={() => setBannerDismissed(true)} aria-label="Dismiss" className="text-[color:var(--text-muted)] hover:text-[color:var(--accent)] flex-shrink-0 transition-colors text-lg leading-none">
+                        <button onClick={() => setBannerDismissed(true)} aria-label="Dismiss" className="text-[color:var(--text-muted)] hover:text-[color:var(--text)] flex-shrink-0 transition-colors text-lg leading-none">
                             ×
                         </button>
                     </div>}
@@ -1754,7 +1968,7 @@ export default function App() {
           maxWidth: '690px'
         }}>
                             <div className="flex items-center justify-between gap-2 w-full min-w-0">
-                            <button type="button" onClick={() => setShowAdvancedFilters(f => !f)} className="flex items-center gap-1.5 text-[12px] text-[color:var(--text-muted)] hover:text-[color:var(--accent)] transition-colors">
+                            <button type="button" onClick={() => setShowAdvancedFilters(f => !f)} className="flex items-center gap-1.5 h-[30px] px-3 text-[12px] text-[color:var(--text-muted)] border border-[color:var(--border-hover)] bg-[color:var(--bg)] rounded hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] transition-colors">
                                 {t("advancedFilters")}
                                 <svg aria-hidden="true" className={`w-3 h-3 transition-transform duration-200 ${showAdvancedFilters ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -1835,7 +2049,118 @@ export default function App() {
                             <AccountProfile query={query} activeTab={activeTab} onWordClick={handleWordClick} stats={profileStats} userMeta={userMeta} loadedCount={loadedCount} isCrawling={isCrawling} onRefresh={handleRefreshCrawl} />
                         </Suspense>}
 
-                        {searched && <h2 className="sr-only">{t("resultsFor")} {mode === "subreddit" ? "r/" : "u/"}{query}</h2>}
+                        {searched && <h2 className="sr-only">{postMode ? `${t("postViewTitle")} ${postId || ""}`.trim() : `${t("resultsFor")} ${mode === "subreddit" ? "r/" : "u/"}{query}`}</h2>}
+                        {postMode ? (
+                          <div className="w-full">
+                            <div className="flex items-center gap-2 mb-4">
+                              <button onClick={() => { clearPostMode(); setSearched(false); setQuery(""); }} className="flex items-center gap-1.5 px-3 h-8 border border-[color:var(--border-hover)] rounded bg-[color:var(--bg)] text-[11px] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] transition-colors">
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+                                {t("returnHome")}
+                              </button>
+                              <span className="text-[11px] text-[color:var(--text-faint)] truncate">{postId ? `t3_${postId}` : ""} {postSources.length ? `· ${postSources.join(" + ")}` : ""}</span>
+                            </div>
+                            {postLoading ? (
+                              <div aria-busy="true" className="w-full flex flex-col gap-3 py-2">
+                                <div className="w-full bg-[color:var(--bg-elevated)] border border-[color:var(--border-hover)] rounded overflow-hidden">
+                                  <div className="flex w-full">
+                                    <div className="flex flex-col items-center gap-1.5 px-2.5 py-3 bg-[color:var(--bg)] min-w-[40px]">
+                                      <div className="skeleton w-3.5 h-3.5 rounded-sm"></div>
+                                      <div className="skeleton w-5 h-2.5 rounded-sm"></div>
+                                    </div>
+                                    <div className="flex-1 p-3">
+                                      <div className="skeleton h-2.5 w-24 mb-2.5 rounded-sm"></div>
+                                      <div className="skeleton h-5 w-11/12 mb-2 rounded-sm"></div>
+                                      <div className="skeleton h-3 w-2/5 rounded-sm"></div>
+                                    </div>
+                                  </div>
+                                </div>
+                                {[0, 1].map(i => (
+                                  <div key={i} className="w-full bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded overflow-hidden">
+                                    <div className="flex w-full">
+                                      <div className="flex flex-col items-center gap-1.5 px-2 py-3 bg-[color:var(--bg)] min-w-[40px]">
+                                        <div className="skeleton w-3.5 h-3.5 rounded-sm"></div>
+                                      </div>
+                                      <div className="flex-1 p-3">
+                                        <div className="skeleton h-2.5 w-32 mb-2 rounded-sm"></div>
+                                        <div className="skeleton h-3 w-full mb-1.5 rounded-sm"></div>
+                                        <div className="skeleton h-3 w-3/5 rounded-sm"></div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                                <div className="flex items-center justify-center gap-2 text-[color:var(--text-muted)] pt-2">
+                                  <IconSpinner />
+                                  <span className="text-[11px]">{t("postLoading")}</span>
+                                </div>
+                              </div>
+                            ) : postError ? (
+                              <ErrorState message={postError} onRetry={() => searchPost(postId, { push: false })} />
+                            ) : postData ? (
+                              <div className="flex flex-col gap-4">
+                                <div className="bg-[color:var(--bg-elevated)] border border-[color:var(--border-hover)] rounded overflow-hidden">
+                                  <div className="px-3 py-2 border-b border-[color:var(--border)] flex flex-nowrap items-center gap-2 text-[11px] text-[color:var(--text-muted)] whitespace-nowrap">
+                                    <a href={`${REDDIT_BASE}/r/${postData.subreddit}`} target="_blank" rel="noopener noreferrer" className="font-medium rounded px-1 -mx-1 transition-colors hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)]">r/{postData.subreddit}</a>
+                                    <span>·</span>
+                                    <a href={`${REDDIT_BASE}/u/${postData.author}`} target="_blank" rel="noopener noreferrer" className="rounded px-1 -mx-1 transition-colors hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)]">{t("postAuthor")} u/{postData.author}</a>
+                                    <span>·</span>
+                                    <HoverTime utc={postData.created_utc} />
+                                    <span>·</span>
+                                    <span className="text-[color:var(--text)] font-medium">{fmtNum(postData.score)}</span>
+                                    {postData.upvote_ratio != null && (
+                                      <>
+                                        <span>·</span>
+                                        <span>{t("postUpvoteRatio").replace("{pct}", Math.round(postData.upvote_ratio * 100))}</span>
+                                      </>
+                                    )}
+                                    <span className="ml-auto flex items-center gap-1.5">
+                                      <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-[color:var(--border)] text-[color:var(--text-muted)]">
+                                        {postData.over_18 ? "NSFW" : postData.spoiler ? t("badgeSpoiler") : postData.distinguished === "moderator" ? "Mod" : postData.distinguished === "admin" ? "Admin" : t("postOriginal")}
+                                      </span>
+                                      <CopyButton getText={() => {
+                                        const flag = postData.removed_by_category ? " [removed]" : postData.author === "[deleted]" ? " [deleted]" : "";
+                                        const ts = postData.created_utc ? new Date(postData.created_utc * 1000).toISOString() : "";
+                                        return [postData.title, `u/${postData.author} · r/${postData.subreddit} · ${ts} · ${fmtNum(postData.score)} pts${flag}`, `${REDDIT_BASE}${postData.permalink || ""}`, postData.selftext ? `\n${postData.selftext}` : postData.url || ""].filter(Boolean).join("\n");
+                                      }} />
+                                    </span>
+                                  </div>
+                                  <div className="p-3">
+                                    <h2 className="text-base font-semibold text-[color:var(--text)] leading-snug mb-2 break-words">{postData.title || t("noContent")}</h2>
+                                    {postData.selftext ? (
+                                      <p className="text-[13px] text-[color:var(--text)] leading-relaxed whitespace-pre-wrap break-words">{postData.selftext}</p>
+                                    ) : postData.url ? (
+                                      <a href={postData.url} target="_blank" rel="noopener noreferrer" className="text-[13px] text-[color:var(--accent-text)] hover:underline break-words inline-flex items-center gap-1">
+                                        {postData.url} <IconExternal />
+                                      </a>
+                                    ) : null}
+                                    {(() => {
+                                      const thumb = getPostThumbnail(postData);
+                                      return thumb ? (
+                                        <div className="mt-3">
+                                          <a href={thumb} target="_blank" rel="noopener noreferrer" className="inline-flex rounded overflow-hidden border border-[color:var(--border-hover)]">
+                                            <img src={thumb} alt={t("openImage")} className="max-w-full max-h-[400px] object-contain" loading="lazy" />
+                                          </a>
+                                        </div>
+                                      ) : null;
+                                    })()}
+                                  </div>
+                                </div>
+                                <div>
+                                  <h3 className="text-[13px] font-semibold text-[color:var(--text)] mb-2 flex items-center gap-2">
+                                    {t("postCommentsTitle")} <span className="text-[11px] font-normal text-[color:var(--text-muted)]">{fmtNum(Math.max(postComments.length, postData.num_comments ?? 0))} {t("commentsWord")}</span>
+                                  </h3>
+                                  {postComments.length === 0 ? (
+                                    <p className="text-[11px] text-[color:var(--text-muted)] italic border border-[color:var(--border-hover)] rounded px-3 py-3 bg-[color:var(--bg)]">{t("postNoComments")}</p>
+                                  ) : (
+                                    <div className="flex flex-col gap-2">
+                                      {postComments.map(c => <CommentCard key={c.id} comment={c} skipPostLoad={true} />)}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : (
+                        <>
                         <div className="flex items-stretch border-b border-[color:var(--border)] mb-4" role="tablist" aria-label={t("tabAll")}>
                                 {TABS.map(tab => {
                   let liveCount, metaCount, countToDisplay, isPlus;
@@ -1878,16 +2203,16 @@ export default function App() {
                                     </div>
                                 </>}
                             </div>
-                            <label className="flex items-center gap-1.5 flex-shrink-0 px-2 h-8 border border-[color:var(--border-hover)] rounded text-[11px] text-[color:var(--text-muted)] whitespace-nowrap cursor-pointer hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--accent)] transition-colors">
+                            <label className="flex items-center gap-1.5 flex-shrink-0 px-2 h-8 border border-[color:var(--border-hover)] rounded text-[11px] text-[color:var(--text-muted)] whitespace-nowrap cursor-pointer hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] transition-colors">
                                 <input type="checkbox" checked={deletedOnly} onChange={e => setDeletedOnly(e.target.checked)} className="w-3 h-3 accent-[color:var(--accent)]" /> {t("deletedOnly").replace(/\s+only$/i, "")}
                             </label>
-                            <label className="flex items-center gap-1.5 flex-shrink-0 px-2 h-8 border border-[color:var(--border-hover)] rounded text-[11px] text-[color:var(--text-muted)] whitespace-nowrap cursor-pointer hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--accent)] transition-colors">
+                            <label className="flex items-center gap-1.5 flex-shrink-0 px-2 h-8 border border-[color:var(--border-hover)] rounded text-[11px] text-[color:var(--text-muted)] whitespace-nowrap cursor-pointer hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] transition-colors">
                                 <input type="checkbox" checked={nsfwOnly} onChange={e => setNsfwOnly(e.target.checked)} className="w-3 h-3 accent-[color:var(--accent)]" /> {t("nsfwOnly").replace(/\s+only$/i, "")}
                             </label>
-                            {mode === "username" && <button onClick={() => setShowProfile(value => !value)} className={`flex items-center gap-1.5 flex-shrink-0 px-2.5 h-8 border rounded text-[11px] cursor-pointer transition-colors ${showProfile ? "bg-[color:var(--bg-elevated)] text-[color:var(--text)] border-[color:var(--text-muted)]" : "border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--accent)]"}`}><IconActivity />{t("stats")}</button>}
+                            {mode === "username" && <button onClick={() => setShowProfile(value => !value)} className={`flex items-center gap-1.5 flex-shrink-0 px-2.5 h-8 border rounded text-[11px] cursor-pointer transition-colors ${showProfile ? "bg-[color:var(--bg-elevated)] text-[color:var(--text)] border-[color:var(--text-muted)]" : "border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)]"}`}><IconActivity />{t("stats")}</button>}
                             <div className="relative flex flex-shrink-0 items-stretch rounded border border-[color:var(--border-hover)] bg-[color:var(--bg)] p-0.5 select-none" role="radiogroup" aria-label="Sort order">
-                                <button onClick={() => setSortOrder("desc")} role="radio" aria-checked={sortOrder === "desc"} className={`px-3 h-7 text-[11px] rounded transition-colors cursor-pointer ${sortOrder === "desc" ? "border border-[color:var(--border-hover)] bg-[color:var(--bg-elevated)] text-[color:var(--text)]" : "text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--accent)]"}`}>{t("newest")}</button>
-                                <button onClick={() => setSortOrder("asc")} role="radio" aria-checked={sortOrder === "asc"} className={`px-3 h-7 text-[11px] rounded transition-colors cursor-pointer ${sortOrder === "asc" ? "border border-[color:var(--border-hover)] bg-[color:var(--bg-elevated)] text-[color:var(--text)]" : "text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--accent)]"}`}>{t("oldest")}</button>
+                                <button onClick={() => setSortOrder("desc")} role="radio" aria-checked={sortOrder === "desc"} className={`px-3 h-7 text-[11px] rounded transition-colors cursor-pointer ${sortOrder === "desc" ? "border border-[color:var(--border-hover)] bg-[color:var(--bg-elevated)] text-[color:var(--text)]" : "text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)]"}`}>{t("newest")}</button>
+                                <button onClick={() => setSortOrder("asc")} role="radio" aria-checked={sortOrder === "asc"} className={`px-3 h-7 text-[11px] rounded transition-colors cursor-pointer ${sortOrder === "asc" ? "border border-[color:var(--border-hover)] bg-[color:var(--bg-elevated)] text-[color:var(--text)]" : "text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)]"}`}>{t("oldest")}</button>
                             </div>
                             <div className="flex flex-shrink-0 items-stretch rounded border border-[color:var(--border-hover)] bg-[color:var(--bg)] overflow-hidden select-none">
                             <button onClick={() => {
@@ -1897,9 +2222,9 @@ export default function App() {
                                     return [item.id, isPost(item) ? "post" : "comment", item.created_utc, item.subreddit, item.author, item.score || 0, item.permalink, text ? `"${text.replace(/"/g, '""').replace(/\n/g, " ")}"` : ""].join(",");
                                 })).join("\n");
                                 downloadFile(`rosint_${query}_${activeTab}.csv`, csv, "text/csv");
-                            }} className="px-3 h-8 text-[11px] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--accent)] cursor-pointer">CSV</button>
+                            }} className="px-3 h-8 text-[11px] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] cursor-pointer">CSV</button>
                             <div className="w-px self-stretch bg-[color:var(--border-hover)]" aria-hidden="true" />
-                            <button onClick={() => downloadFile(`rosint_${query}_${activeTab}.json`, JSON.stringify(filteredItems, null, 2), "application/json")} className="px-3 h-8 text-[11px] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--accent)] cursor-pointer">JSON</button>
+                            <button onClick={() => downloadFile(`rosint_${query}_${activeTab}.json`, JSON.stringify(filteredItems, null, 2), "application/json")} className="px-3 h-8 text-[11px] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] cursor-pointer">JSON</button>
                             </div>
                         </div>}
 
@@ -2092,6 +2417,8 @@ export default function App() {
                                     </button>
                                 </div>}
                             </>}
+                        </>
+                        )}
                     </div>}
             </main>
 
@@ -2105,7 +2432,7 @@ export default function App() {
                         <span className="mx-2 opacity-50">•</span>
                         {tJsx(t, "footerUsing", { arctic: <a key="a" href="https://arctic-shift.photon-reddit.com" target="_blank" rel="noopener noreferrer" className="text-[color:var(--text-faint)] hover:underline transition-colors">Arctic Shift</a>, pullpush: <a key="p" href="https://pullpush.io/" target="_blank" rel="noopener noreferrer" className="text-[color:var(--text-faint)] hover:underline transition-colors">PullPush</a> })}
                         <span className="mx-2 opacity-50">•</span>
-                        <a href="https://github.com/rosintplus/rosintplus.github.io" target="_blank" rel="noopener noreferrer" className="text-[color:var(--text-faint)] hover:underline transition-colors">GitHub</a>
+                        <a href="/privacy.html" className="text-[color:var(--text-faint)] hover:underline transition-colors">{t("privacy")}</a>
                     </p>
                 </footer>
         </div>;
