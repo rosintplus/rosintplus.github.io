@@ -1644,29 +1644,47 @@ export default function App() {
       url.searchParams.delete("tab");
       window.history.pushState({}, "", url);
     }
-    try {
-      const [postRes, commentsRes] = await Promise.all([
-        fetchPostById(id),
-        fetchCommentsForPost(id, { limit: 100 })
-      ]);
+    // Stream: show post as soon as it arrives, don't wait for comments
+    const postPromise = fetchPostById(id).then(postRes => {
       if (searchId !== searchIdRef.current || postIdRef.current !== id) return;
       if (postRes.post) {
         setPostData(postRes.post);
-        const combined = [...new Set([...(postRes.sources || []), ...(commentsRes.sources || [])])];
-        setPostSources(combined);
+        setPostSources(prev => {
+          const s = postRes.sources || [];
+          return s.length ? [...new Set([...prev, ...s])] : prev;
+        });
         setPostError(null);
       } else {
         setPostError(t("postNotFound"));
         setPostData(null);
       }
+      setPostLoading(false);
+      setInitialLoading(false);
+    }).catch(e => {
+      if (e?.name !== "AbortError" && searchId === searchIdRef.current && postIdRef.current === id) {
+        setPostError(e.message || t("postNotFound"));
+        setPostLoading(false);
+        setInitialLoading(false);
+      }
+    });
+    const commentsPromise = fetchCommentsForPost(id, { limit: 100 }).then(commentsRes => {
+      if (searchId !== searchIdRef.current || postIdRef.current !== id) return;
       setPostComments(commentsRes.comments || []);
-    } catch (e) {
-      if (e?.name !== "AbortError") setPostError(e.message || t("postNotFound"));
-    } finally {
+      if (commentsRes.sources?.length) {
+        setPostSources(prev => [...new Set([...prev, ...commentsRes.sources])]);
+      }
+      setPostLoading(false);
+      setInitialLoading(false);
+    }).catch(() => {
       if (searchId === searchIdRef.current && postIdRef.current === id) {
         setPostLoading(false);
         setInitialLoading(false);
       }
+    });
+    await Promise.all([postPromise, commentsPromise]);
+    if (searchId === searchIdRef.current && postIdRef.current === id) {
+      setPostLoading(false);
+      setInitialLoading(false);
     }
   }, [t]);
   const searchUser = useCallback(async (rawUser, {
@@ -1699,8 +1717,23 @@ export default function App() {
     setSearched(true);
     if (!silent) setInitialLoading(true);
     const filters = buildFilters(m);
-    const postsPromise = resetPosts(user, filters, { sort: sortOrder, mode: m });
-    const commentsPromise = resetComments(user, filters, { sort: sortOrder, mode: m });
+    let doneCount = 0;
+    const maybeDone = () => {
+      doneCount++;
+      if (doneCount === 1 && !silent && searchId === searchIdRef.current) {
+        // First of posts/comments has landed — show results immediately
+        // instead of waiting for the slower type. No UI change, just faster paint.
+        setInitialLoading(false);
+      }
+    };
+    const postsPromise = resetPosts(user, filters, { sort: sortOrder, mode: m }).then(r => {
+      if (searchId === searchIdRef.current) maybeDone();
+      return r;
+    });
+    const commentsPromise = resetComments(user, filters, { sort: sortOrder, mode: m }).then(r => {
+      if (searchId === searchIdRef.current) maybeDone();
+      return r;
+    });
     await Promise.all([postsPromise, commentsPromise]);
     if (searchId !== searchIdRef.current) return;
     if (push) {

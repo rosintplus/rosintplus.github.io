@@ -77,7 +77,7 @@ async function fetchWithRetry(url, {
         // Retry server/rate-limit errors once; client 4xx (besides 429) won't
         // improve on a retry, so don't bother.
         if (attempt < retries && (res.status === 429 || res.status >= 500)) {
-          await sleep(600 * (attempt + 1));
+          await sleep(250 * (attempt + 1));
           continue;
         }
         return {
@@ -94,7 +94,7 @@ async function fetchWithRetry(url, {
       if (err?.name === "AbortError") throw err;
       lastErr = err;
       if (attempt < retries) {
-        await sleep(600 * (attempt + 1));
+        await sleep(250 * (attempt + 1));
         continue;
       }
     }
@@ -113,17 +113,46 @@ export function safeFetch(url, {
 } = {}) {
   if (!bypassCache) {
     const cached = FETCH_CACHE.get(url);
-    if (cached && Date.now() - cached.ts < 5 * 60 * 1000) {
-      // The cached promise may belong to a caller that aborted it (e.g.
-      // StrictMode's double-mount aborts the first mount's request). That
-      // abort isn't ours — if our signal is still live, refetch instead of
-      // inheriting the aborted result and painting a false outage screen.
-      return cached.promise.then(res => {
-        if (signal?.aborted) return { data: [], ok: false, aborted: true };
-        return res.aborted && !signal?.aborted
-          ? safeFetch(url, { bypassCache: true, signal, retries })
-          : res;
-      });
+    if (cached) {
+      const isFresh = Date.now() - cached.ts < 5 * 60 * 1000;
+      if (isFresh) {
+        // The cached promise may belong to a caller that aborted it (e.g.
+        // StrictMode's double-mount aborts the first mount's request). That
+        // abort isn't ours — if our signal is still live, refetch instead of
+        // inheriting the aborted result and painting a false outage screen.
+        return cached.promise.then(res => {
+          if (signal?.aborted) return { data: [], ok: false, aborted: true };
+          return res.aborted && !signal?.aborted
+            ? safeFetch(url, { bypassCache: true, signal, retries })
+            : res;
+        });
+      }
+      // Stale-while-revalidate: return stale immediately for perceived speed,
+      // revalidate in background. Caller gets instant data, fresh data arrives
+      // on next request or via background update.
+      if (cached.promise) {
+        // Kick off background revalidation (don't await)
+        fetchWithRetry(url, { signal: undefined, retries }).then(res => {
+          const fresh = {
+            data: res?.data ?? [],
+            ok: !!res?.ok
+          };
+          // Only cache successful non-empty
+          if (fresh.ok && fresh.data.length > 0) {
+            FETCH_CACHE.set(url, { ts: Date.now(), promise: Promise.resolve(fresh) });
+            if (FETCH_CACHE.size > MAX_CACHE) {
+              const oldest = FETCH_CACHE.keys().next().value;
+              if (oldest) FETCH_CACHE.delete(oldest);
+            }
+          }
+        }).catch(() => {});
+        return cached.promise.then(res => {
+          if (signal?.aborted) return { data: [], ok: false, aborted: true };
+          return res.aborted && !signal?.aborted
+            ? safeFetch(url, { bypassCache: true, signal, retries })
+            : res;
+        });
+      }
     }
   }
   const promise = fetchWithRetry(url, {
@@ -171,13 +200,41 @@ export async function fetchBoth(username, type, pagination = {}, dateFilters = {
     arctic,
     pullpush
   } = buildUrls(username, type, pagination, dateFilters, { sort, mode });
-  const [arcticRes, pullpushRes] = await Promise.all([safeFetch(arctic, {
-    bypassCache,
-    signal
-  }), safeFetch(pullpush, {
-    bypassCache,
-    signal
-  })]);
+  // Arctic-first fast path: start both, but return Arctic quickly if it has data.
+  // PullPush is often slower (and sometimes empty); waiting for it blocks
+  // time-to-first-result. We race Arctic vs PullPush with a short timeout.
+  const arcticPromise = safeFetch(arctic, { bypassCache, signal });
+  const pullpushPromise = safeFetch(pullpush, { bypassCache, signal });
+  const arcticRes = await arcticPromise;
+  let pullpushRes;
+  if (arcticRes.ok && arcticRes.data.length >= LIMIT) {
+    // Arctic has a full page — PullPush unlikely to add new items, don't block.
+    // Race PullPush with a short timeout; if it wins, merge, otherwise return Arctic.
+    pullpushRes = await Promise.race([
+      pullpushPromise,
+      sleep(280).then(() => ({ timeout: true, data: [], ok: false }))
+    ]);
+    if (pullpushRes.timeout) {
+      // Let PullPush finish in background for cache warming, but don't block
+      pullpushPromise.then(r => {
+        // Warm cache already via safeFetch; nothing to do
+      }).catch(() => {});
+      pullpushRes = { data: [], ok: false };
+    }
+  } else if (arcticRes.ok && arcticRes.data.length > 0) {
+    // Arctic has some data — give PullPush a short window to contribute
+    pullpushRes = await Promise.race([
+      pullpushPromise,
+      sleep(350).then(() => ({ timeout: true, data: [], ok: false }))
+    ]);
+    if (pullpushRes.timeout) {
+      pullpushPromise.then(() => {}).catch(() => {});
+      pullpushRes = { data: [], ok: false };
+    }
+  } else {
+    // Arctic empty/failed — must wait for PullPush
+    pullpushRes = await pullpushPromise;
+  }
   const seen = new Set();
   const merged = [];
   const sources = [];
@@ -213,44 +270,60 @@ export async function fetchPostById(postId, { signal } = {}) {
   const id = String(postId || "").replace(/^t3_/i, "").trim();
   if (!id) return { post: null, sources: [], arcticDown: false, pullpushDown: false };
   const arcticUrl = `${ARCTIC}/api/posts/ids?ids=${encodeURIComponent(id)}`;
-  const pullpushUrl = `${PULLPUSH}/reddit/search/submission/?test&ids=${encodeURIComponent(id)}`;
-  // Arctic's /ids prefers bare id; PullPush search-by-ids is not standard, so we fall
-  // back to a submission search filtered by id client-side.
-  const [arcticRes, ppRes] = await Promise.all([
-    safeFetch(arcticUrl, { signal }),
-    safeFetch(`${PULLPUSH}/reddit/search/submission/?test&ids=${encodeURIComponent(id)}&limit=5`, { signal }).then(r => {
-      // PullPush /ids is unreliable; try id search and filter
-      if (r.ok && r.data.length) {
-        const hit = r.data.find(x => x.id === id);
-        return hit ? { ok: true, data: [hit] } : r;
-      }
-      return r;
-    }).catch(() => ({ ok: false, data: [] }))
-  ]);
-  let post = arcticRes.data?.[0] || null;
-  const sources = [];
-  if (arcticRes.ok && post) sources.push("Arctic Shift");
-  if (!post && ppRes.ok && ppRes.data?.[0]) {
-    // PullPush shape is already a submission; normalize id
-    post = ppRes.data.find(x => x.id === id) || ppRes.data[0];
-    if (post) sources.push("PullPush");
-  }
-  // Fallback: try PullPush id-specific endpoint via submission search by id via arctic's other route
-  if (!post) {
-    const alt = await safeFetch(`${PULLPUSH}/reddit/search/submission/?test&q=id:${encodeURIComponent(id)}&limit=5`, { signal }).catch(() => ({ ok: false, data: [] }));
-    if (alt.ok && alt.data?.length) {
-      const hit = alt.data.find(x => x.id === id) || alt.data[0];
-      if (hit) { post = hit; if (!sources.includes("PullPush")) sources.push("PullPush"); }
+  // Start all fetches in parallel for fastest path
+  const arcticPromise = safeFetch(arcticUrl, { signal });
+  const ppPromise = safeFetch(`${PULLPUSH}/reddit/search/submission/?test&ids=${encodeURIComponent(id)}&limit=5`, { signal }).then(r => {
+    if (r.ok && r.data.length) {
+      const hit = r.data.find(x => x.id === id);
+      return hit ? { ok: true, data: [hit] } : r;
     }
+    return r;
+  }).catch(() => ({ ok: false, data: [] }));
+  const altPromise = safeFetch(`${PULLPUSH}/reddit/search/submission/?test&q=id:${encodeURIComponent(id)}&limit=5`, { signal }).catch(() => ({ ok: false, data: [] }));
+  const arcticRes = await arcticPromise;
+  if (arcticRes.ok && arcticRes.data?.[0]) {
+    return { post: arcticRes.data[0], sources: ["Arctic Shift"], arcticDown: false, pullpushDown: false };
   }
-  return { post, sources, arcticDown: !arcticRes.ok, pullpushDown: !ppRes.ok };
+  // Arctic miss — race the two PullPush paths with a short timeout
+  const ppRes = await Promise.race([
+    ppPromise,
+    sleep(400).then(() => ({ timeout: true, data: [], ok: false }))
+  ]);
+  if (!ppRes.timeout && ppRes.ok && ppRes.data?.[0]) {
+    const hit = ppRes.data.find(x => x.id === id) || ppRes.data[0];
+    if (hit) return { post: hit, sources: ["PullPush"], arcticDown: !arcticRes.ok, pullpushDown: false };
+  }
+  const altRes = await Promise.race([
+    altPromise,
+    sleep(300).then(() => ({ timeout: true, data: [], ok: false }))
+  ]);
+  if (!altRes.timeout && altRes.ok && altRes.data?.length) {
+    const hit = altRes.data.find(x => x.id === id) || altRes.data[0];
+    if (hit) return { post: hit, sources: ["PullPush"], arcticDown: !arcticRes.ok, pullpushDown: !ppRes.ok };
+  }
+  // Fallback: await whichever is still pending (if timeout, wait a bit more)
+  const finalPp = ppRes.timeout ? await ppPromise.catch(() => ({ ok: false, data: [] })) : ppRes;
+  if (finalPp.ok && finalPp.data?.[0]) {
+    const hit = finalPp.data.find(x => x.id === id) || finalPp.data[0];
+    if (hit) return { post: hit, sources: ["PullPush"], arcticDown: !arcticRes.ok, pullpushDown: false };
+  }
+  const finalAlt = altRes.timeout ? await altPromise.catch(() => ({ ok: false, data: [] })) : altRes;
+  if (finalAlt.ok && finalAlt.data?.length) {
+    const hit = finalAlt.data.find(x => x.id === id) || finalAlt.data[0];
+    if (hit) return { post: hit, sources: ["PullPush"], arcticDown: !arcticRes.ok, pullpushDown: false };
+  }
+  return { post: null, sources: [], arcticDown: !arcticRes.ok, pullpushDown: !finalPp.ok };
 }
 
 export async function fetchCommentsForPost(postId, { signal, limit = 100 } = {}) {
   const id = String(postId || "").replace(/^t3_/i, "").trim();
   if (!id) return { comments: [], sources: [], arcticDown: false, pullpushDown: false };
   const arcticUrl = `${ARCTIC}/api/comments/tree?link_id=t3_${encodeURIComponent(id)}&limit=${limit}`;
-  const arcticRes = await safeFetch(arcticUrl, { signal });
+  const pullpushUrl = `${PULLPUSH}/reddit/search/comment/?test&link_id=t3_${encodeURIComponent(id)}&limit=${limit}`;
+  // Start both in parallel; Arctic tree is usually faster and richer
+  const arcticPromise = safeFetch(arcticUrl, { signal });
+  const ppPromise = safeFetch(pullpushUrl, { signal }).catch(() => ({ ok: false, data: [] }));
+  const arcticRes = await arcticPromise;
   let comments = [];
   const sources = [];
   if (arcticRes.ok && Array.isArray(arcticRes.data)) {
@@ -259,13 +332,23 @@ export async function fetchCommentsForPost(postId, { signal, limit = 100 } = {})
     }
     if (comments.length) sources.push("Arctic Shift");
   }
-  if (comments.length === 0) {
-    const ppRes = await safeFetch(`${PULLPUSH}/reddit/search/comment/?test&link_id=t3_${encodeURIComponent(id)}&limit=${limit}`, { signal }).catch(() => ({ ok: false, data: [] }));
-    if (ppRes.ok && ppRes.data.length) {
-      comments = ppRes.data;
-      sources.push("PullPush");
-      return { comments, sources, arcticDown: !arcticRes.ok, pullpushDown: !ppRes.ok };
-    }
+  if (comments.length > 0) {
+    // Have Arctic comments — return quickly, don't block on PullPush
+    // Let PullPush warm cache in background
+    ppPromise.then(() => {}).catch(() => {});
+    return { comments, sources, arcticDown: false, pullpushDown: false };
   }
-  return { comments, sources, arcticDown: !arcticRes.ok, pullpushDown: false };
+  // No Arctic comments — wait for PullPush with short timeout
+  const ppRes = await Promise.race([
+    ppPromise,
+    sleep(350).then(() => ({ timeout: true, data: [], ok: false }))
+  ]);
+  if (!ppRes.timeout && ppRes.ok && ppRes.data.length) {
+    return { comments: ppRes.data, sources: ["PullPush"], arcticDown: !arcticRes.ok, pullpushDown: false };
+  }
+  const finalPp = ppRes.timeout ? await ppPromise : ppRes;
+  if (finalPp.ok && finalPp.data.length) {
+    return { comments: finalPp.data, sources: ["PullPush"], arcticDown: !arcticRes.ok, pullpushDown: false };
+  }
+  return { comments: [], sources, arcticDown: !arcticRes.ok, pullpushDown: !finalPp.ok };
 }
