@@ -80,3 +80,6 @@ PullPush:      https://api.pullpush.io/reddit/search/submission/?test&author={us
 - **[rosint.dev](https://rosint.dev)** - the original project this fork is based on
 - [Arctic Shift](https://github.com/ArthurHeitmann/arctic_shift) by ArthurHeitmann
 - [PullPush](https://pullpush.io)
+- [Botometer (Indiana University OSoMe)](https://botometer.osome.iu.edu/) - temporal entropy and automation heuristics methodology
+- [Reddit BotDefense / BotBuster](https://www.reddit.com/r/BotDefense/) - multi-subreddit carpet-bombing and submission depth heuristics
+- [Navigating Multidimensional Ideologies with Reddit's Political Compass (ACM WWW '24)](https://github.com/arnestc/political-compass) - community polarity taxonomy and 2D ideological mapping methodology

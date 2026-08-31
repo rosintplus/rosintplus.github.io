@@ -19,6 +19,21 @@ function buildUrls(username, type, pagination = {}, dateFilters = {}, { sort = "
     base.push(`subreddit=${encodeURIComponent(dateFilters.subreddit)}`);
   }
 
+  // OSINT content filters — server-side keyword search (much faster than
+  // client filtering 100 rows). Only added when the user fills the field.
+  if (type === "posts") {
+    if (dateFilters.query) base.push(`query=${encodeURIComponent(dateFilters.query)}`);
+    else {
+      if (dateFilters.title) base.push(`title=${encodeURIComponent(dateFilters.title)}`);
+      if (dateFilters.selftext) base.push(`selftext=${encodeURIComponent(dateFilters.selftext)}`);
+    }
+    if (dateFilters.url) base.push(`url=${encodeURIComponent(dateFilters.url)}`);
+    if (dateFilters.link_flair_text) base.push(`link_flair_text=${encodeURIComponent(dateFilters.link_flair_text)}`);
+    if (dateFilters.author_flair_text) base.push(`author_flair_text=${encodeURIComponent(dateFilters.author_flair_text)}`);
+  }
+  if (type === "comments" && dateFilters.body) {
+    base.push(`body=${encodeURIComponent(dateFilters.body)}`);
+  }
   // NSFW is a post-only field; Arctic Shift honors over_18 server-side.
   if (type === "posts" && dateFilters.over18 != null) {
     base.push(`over_18=${dateFilters.over18}`);
@@ -216,7 +231,7 @@ export async function fetchBoth(username, type, pagination = {}, dateFilters = {
     ]);
     if (pullpushRes.timeout) {
       // Let PullPush finish in background for cache warming, but don't block
-      pullpushPromise.then(r => {
+      pullpushPromise.then(() => {
         // Warm cache already via safeFetch; nothing to do
       }).catch(() => {});
       pullpushRes = { data: [], ok: false };
@@ -351,4 +366,66 @@ export async function fetchCommentsForPost(postId, { signal, limit = 100 } = {})
     return { comments: finalPp.data, sources: ["PullPush"], arcticDown: !arcticRes.ok, pullpushDown: false };
   }
   return { comments: [], sources, arcticDown: !arcticRes.ok, pullpushDown: !finalPp.ok };
+}
+
+// ─── OSINT helpers (all lazy — not used on initial search) ────────────────
+
+export async function fetchUserInteractions(author, { subreddit, after, before, min_count = 2, limit = 20, signal } = {}) {
+  const qs = [`author=${encodeURIComponent(author)}`, `min_count=${min_count}`, `limit=${limit}`];
+  if (subreddit) qs.push(`subreddit=${encodeURIComponent(subreddit)}`);
+  if (after) qs.push(`after=${encodeURIComponent(after)}`);
+  if (before) qs.push(`before=${encodeURIComponent(before)}`);
+  const url = `${ARCTIC}/api/users/interactions/users?${qs.join("&")}`;
+  const res = await safeFetch(url, { signal });
+  return { data: res.data || [], ok: res.ok };
+}
+
+export async function fetchSubredditInteractions(author, { min_count = 2, limit = 15, signal } = {}) {
+  const qs = [`author=${encodeURIComponent(author)}`, `min_count=${min_count}`, `limit=${limit}`];
+  const url = `${ARCTIC}/api/users/interactions/subreddits?${qs.join("&")}`;
+  const res = await safeFetch(url, { signal });
+  return { data: res.data || [], ok: res.ok };
+}
+
+export async function fetchFlairAggregation(author, { signal } = {}) {
+  const url = `${ARCTIC}/api/users/aggregate_flairs?author=${encodeURIComponent(author)}`;
+  const res = await safeFetch(url, { signal });
+  return { data: res.data || [], ok: res.ok };
+}
+
+export async function fetchShortLinks(paths, { signal } = {}) {
+  const list = Array.isArray(paths) ? paths.join(",") : String(paths);
+  if (!list) return { data: [], ok: false };
+  const url = `${ARCTIC}/api/short_links?paths=${encodeURIComponent(list)}`;
+  const res = await safeFetch(url, { signal });
+  return { data: res.data || [], ok: res.ok };
+}
+
+export async function fetchSubredditMeta(subreddit, { signal } = {}) {
+  const name = String(subreddit || "").replace(/^r\//i, "").trim();
+  if (!name) return { meta: null, rules: [], wikis: [] };
+  const [metaRes, rulesRes] = await Promise.all([
+    safeFetch(`${ARCTIC}/api/subreddits/search?subreddit=${encodeURIComponent(name)}&limit=1`, { signal }),
+    safeFetch(`${ARCTIC}/api/subreddits/rules?subreddits=${encodeURIComponent(name)}`, { signal })
+  ]);
+  return {
+    meta: metaRes.data?.[0] || null,
+    rules: rulesRes.data || [],
+    wikis: [] // lazy: fetch wikis/list only when user expands
+  };
+}
+
+export async function fetchSubredditWikis(subreddit, { signal } = {}) {
+  const name = String(subreddit || "").replace(/^r\//i, "").trim();
+  const res = await safeFetch(`${ARCTIC}/api/subreddits/wikis/list?subreddit=${encodeURIComponent(name)}`, { signal });
+  return { data: res.data || [], ok: res.ok };
+}
+
+export async function fetchTimeSeries(key, { precision = "month", after, before, signal } = {}) {
+  const qs = [`key=${encodeURIComponent(key)}`, `precision=${precision}`];
+  if (after) qs.push(`after=${encodeURIComponent(after)}`);
+  if (before) qs.push(`before=${encodeURIComponent(before)}`);
+  const url = `${ARCTIC}/api/time_series?${qs.join("&")}`;
+  const res = await safeFetch(url, { signal });
+  return { data: res.data || [], ok: res.ok };
 }

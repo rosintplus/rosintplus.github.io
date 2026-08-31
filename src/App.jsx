@@ -60,17 +60,39 @@ export const HoverHint = memo(function HoverHint({
 }) {
   const [pos, setPos] = useState(null);
   const rafRef = useRef(null);
+  const lastEvRef = useRef(null);
   const track = useCallback(e => {
+    lastEvRef.current = e;
     if (rafRef.current) return;
     rafRef.current = requestAnimationFrame(() => {
+      const ev = lastEvRef.current;
       rafRef.current = null;
+      if (!ev) return;
       const vw = window.innerWidth || document.documentElement.clientWidth || 0;
-      setPos({ x: vw ? Math.min(e.clientX + 14, vw - 180) : e.clientX + 14, y: e.clientY + 14 });
+      setPos({ x: vw ? Math.min(ev.clientX + 14, vw - 180) : ev.clientX + 14, y: ev.clientY + 14 });
     });
   }, []);
-  const leave = useCallback(() => { setPos(null); if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = null; } }, []);
+  const leave = useCallback(() => {
+    lastEvRef.current = null;
+    setPos(null);
+    if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
+  }, []);
   useEffect(() => () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); }, []);
-  return <div className={className} onMouseEnter={track} onMouseMove={track} onMouseLeave={leave}>
+  // Safety: if mouse leaves window, tooltip would otherwise get stuck
+  useEffect(() => {
+    if (!pos) return;
+    const onWinLeave = () => leave();
+    window.addEventListener("mouseleave", onWinLeave);
+    window.addEventListener("blur", onWinLeave);
+    const onScroll = () => leave();
+    window.addEventListener("scroll", onScroll, true);
+    return () => {
+      window.removeEventListener("mouseleave", onWinLeave);
+      window.removeEventListener("blur", onWinLeave);
+      window.removeEventListener("scroll", onScroll, true);
+    };
+  }, [pos, leave]);
+  return <div className={className} onMouseEnter={track} onMouseMove={track} onMouseLeave={leave} onPointerLeave={leave} onMouseOut={leave}>
             {children}
             {pos && createPortal(
                 <span className="pointer-events-none fixed z-[100] whitespace-nowrap rounded border border-[color:var(--border-hover)] bg-[color:var(--bg)] px-2 py-1 text-[11px] text-[color:var(--text)] shadow-lg shadow-black/40" style={{ left: pos.x, top: pos.y }}>
@@ -92,17 +114,66 @@ function fmtNum(n) {
 
 function matchKeyword(item, kw, type) {
   if (!kw) return true;
-  const k = kw.toLowerCase();
+  const raw = kw.trim();
+  if (!raw) return true;
+
+  // Strict subreddit filter when query is formatted as "r/subname" or "/r/subname"
+  if (/^(?:\/?r\/)/i.test(raw)) {
+    const subClean = raw.replace(/^(?:\/?r\/)/i, "").toLowerCase();
+    const itemSub = (item.subreddit || "").toLowerCase();
+    return itemSub === subClean;
+  }
+
+  // Strict author filter when query is formatted as "u/username" or "/u/username"
+  if (/^(?:\/?u\/)/i.test(raw)) {
+    const userClean = raw.replace(/^(?:\/?u\/)/i, "").toLowerCase();
+    const itemAuthor = (item.author || "").toLowerCase();
+    return itemAuthor === userClean;
+  }
+
+  const clean = raw.replace(/^["']|["']$/g, "");
+  if (!clean) return true;
+
+  const escaped = clean.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regex = /^\w+$/.test(clean) ? new RegExp(`\\b${escaped}\\b`, "i") : new RegExp(escaped, "i");
+
   const fields = [
     type === "posts" ? item.title : item.body,
     type === "posts" ? item.selftext : item.body,
     item.subreddit,
     item.subreddit_name_prefixed,
-    item.permalink,
     item.link_flair_text,
     item.author_flair_text
   ];
-  return fields.some(f => typeof f === "string" && f.toLowerCase().includes(k));
+  return fields.some(f => typeof f === "string" && regex.test(f));
+}
+
+export function HighlightText({ text, highlight }) {
+  if (!text || typeof text !== "string") return null;
+  if (!highlight || !highlight.trim()) return text;
+
+  const clean = highlight.trim().replace(/^(?:r\/|u\/)/i, "").replace(/^["']|["']$/g, "");
+  if (!clean) return text;
+
+  const escaped = clean.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = /^\w+$/.test(clean) ? `\\b(${escaped})\\b` : `(${escaped})`;
+  const regex = new RegExp(pattern, "gi");
+  const parts = text.split(regex);
+
+  if (parts.length === 1) return text;
+
+  return parts.map((part, i) =>
+    regex.test(part) ? (
+      <mark
+        key={i}
+        className="bg-amber-400/30 text-[color:var(--text)] font-semibold rounded-[2px] px-0.5"
+      >
+        {part}
+      </mark>
+    ) : (
+      part
+    )
+  );
 }
 
 function getPostThumbnail(post) {
@@ -311,10 +382,11 @@ const StatusBadges = memo(function StatusBadges({
 
 const PostCard = memo(function PostCard({
   post,
-  embedded = false
+  embedded = false,
+  highlightTerm = ""
 }) {
   const { t } = useI18n();
-  const [bodyOpen, setBodyOpen] = useState(false);
+  const [userBodyOpen, setUserBodyOpen] = useState(false);
   const [comments, setComments] = useState(null);
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [moreCommentsCount, setMoreComments] = useState(null);
@@ -324,11 +396,20 @@ const PostCard = memo(function PostCard({
   const postUrl = useMemo(() => post.permalink ? `${REDDIT_BASE}${post.permalink}` : `${REDDIT_BASE}/r/${post.subreddit}/comments/${post.id}`, [post]);
   const hasBody = useMemo(() => post.selftext && post.selftext !== "[deleted]" && post.selftext !== "[removed]", [post]);
   const status = useMemo(() => getStatus(post, "posts"), [post]);
+
+  const hasMatchInBody = useMemo(() => {
+    if (!hasBody || !highlightTerm) return false;
+    const clean = highlightTerm.trim().toLowerCase().replace(/^(?:r\/|u\/)/i, "").replace(/^["']|["']$/g, "");
+    return clean ? (post.selftext || "").toLowerCase().includes(clean) : false;
+  }, [hasBody, highlightTerm, post.selftext]);
+
+  const bodyOpen = userBodyOpen || hasMatchInBody;
+
   // Tap on the card toggles the body instead of opening the permalink.
   // Clicks that land on real links/buttons keep their own behavior.
   const handleCardClick = useCallback(e => {
     if (e.target.closest("a, button, [role='button']")) return;
-    if (hasBody) setBodyOpen(o => !o);
+    if (hasBody) setUserBodyOpen(o => !o);
   }, [hasBody]);
   useEffect(() => () => { if (commentsAbortRef.current) commentsAbortRef.current.abort(); }, []);
   useEffect(() => { setImgError(false); }, [post]);
@@ -391,7 +472,7 @@ return <>
                                 </div>
                                 <div className="relative z-10">
                                     <p className="text-sm font-medium text-[color:var(--text)] leading-snug mb-1.5 transition-colors break-words">
-                                        {post.title}
+                                        <HighlightText text={post.title} highlight={highlightTerm} />
                                     </p>
                                 </div>
                                 <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-[11px] text-[color:var(--text-muted)] mt-1">
@@ -406,7 +487,7 @@ return <>
                                     </a>
                                     {hasBody && <button aria-label={bodyOpen ? "Hide post body" : "Show post body"} onClick={e => {
                     e.preventDefault();
-                    setBodyOpen(o => !o);
+                    setUserBodyOpen(o => !o);
                   }} className="relative z-10 flex items-center gap-1 text-[color:var(--text-muted)] hover:text-[color:var(--text)] transition-colors">
                                                 <svg aria-hidden="true" className={`w-3 h-3 transition-transform duration-200 ${bodyOpen ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -435,7 +516,7 @@ return <>
 
                 {hasBody && bodyOpen && <div className="border-t border-[color:var(--border)] px-4 pt-3 pb-3 ml-[44px]">
                         <p className="text-[12px] text-[color:var(--text)] leading-relaxed whitespace-pre-wrap break-words">
-                            {post.selftext}
+                            <HighlightText text={post.selftext} highlight={highlightTerm} />
                         </p>
                     </div>}
 
@@ -449,7 +530,7 @@ return <>
                                     {moreCommentsCount > 0 ? ` · ${t("moreNotShown", { n: moreCommentsCount })}` : ""}
                                 </div>
                                 <div className="flex flex-col gap-2 px-3 pb-3">
-                                    {comments.map(c => <CommentCard key={c.id} comment={c} skipPostLoad={true} />)}
+                                    {comments.map(c => <CommentCard key={c.id} comment={c} skipPostLoad={true} highlightTerm={highlightTerm} />)}
                                 </div>
                             </div>}
                     </div>}
@@ -522,7 +603,8 @@ const ParentChain = memo(function ParentChain({
 const CommentCard = memo(function CommentCard({
   comment,
   isNested = false,
-  skipPostLoad = false
+  skipPostLoad = false,
+  highlightTerm = ""
 }) {
   const { t, lang } = useI18n();
   const [collapsed, setCollapsed] = useState(false);
@@ -587,7 +669,7 @@ const CommentCard = memo(function CommentCard({
   return <div className={`bg-[color:var(--bg)] border ${statusBorderBase(status)} rounded overflow-hidden transition-all duration-150 ${!isNested ? `${statusBorderHover(status)} hover:shadow-lg` : ""}`}>
 
             {post && <div className="border-b border-[color:var(--border-hover)]">
-                    <PostCard post={post} embedded={true} />
+                    <PostCard post={post} embedded={true} highlightTerm={highlightTerm} />
                 </div>}
 
             {!isNested && <ParentChain parentId={comment.parent_id} />}
@@ -640,7 +722,7 @@ const CommentCard = memo(function CommentCard({
                             {status.removed || status.deleted ? <p className="text-sm text-[color:var(--text-muted)] italic leading-relaxed relative z-10">
                                     {status.removed ? t("removedText") : t("deletedText")}
                                 </p> : <p className="text-sm text-[color:var(--text)] leading-relaxed whitespace-pre-wrap break-words relative z-10">
-                                    {comment.body || t("noContent")}
+                                    <HighlightText text={comment.body || t("noContent")} highlight={highlightTerm} />
                                 </p>}
                             {img && <HoverHint hint={t("openImage")} className="inline-block mt-2 relative z-10">
                                     <a href={img} target="_blank" rel="noopener noreferrer" className="relative flex items-center justify-center w-24 h-16 rounded overflow-hidden bg-[color:var(--bg-elevated)] border border-[color:var(--border-hover)] cursor-zoom-in">
@@ -697,7 +779,7 @@ const CommentCard = memo(function CommentCard({
                                                     <path d="M 1 0 Q 1 7 8 7 L 14 7" stroke="currentColor" strokeWidth={2} fill="none" />
                                                 </svg>
                                                 <div className="flex-1 min-w-0">
-                                                    <CommentCard comment={reply} isNested={true} />
+                                                    <CommentCard comment={reply} isNested={true} highlightTerm={highlightTerm} />
                                                 </div>
                                             </div>)}
                                     </div> : <div className="flex items-center py-2">
@@ -811,6 +893,8 @@ function usePaginatedFetch(type) {
   const storedFiltersRef = useRef({});
   const storedModeRef = useRef("username");
 
+  const storedUserRef = useRef("");
+
   const _fetch = useCallback(async (username, pagination, filters, {
     bypassCache = false,
     sort = "desc",
@@ -854,6 +938,7 @@ function usePaginatedFetch(type) {
     sort = "desc",
     mode = "username"
   } = {}) => {
+    storedUserRef.current = username;
     storedFiltersRef.current = filters;
     storedSortRef.current = sort;
     storedModeRef.current = mode;
@@ -872,8 +957,9 @@ function usePaginatedFetch(type) {
     return data;
   }, [_fetch]);
   const loadMore = useCallback(async username => {
-    if (!cursorRef.current || doneRef.current) return;
-    const result = await _fetch(username, forwardPagination(cursorRef.current, storedSortRef.current), storedFiltersRef.current, {
+    const targetUser = username || storedUserRef.current;
+    if (!targetUser || !cursorRef.current || doneRef.current) return;
+    const result = await _fetch(targetUser, forwardPagination(cursorRef.current, storedSortRef.current), storedFiltersRef.current, {
       sort: storedSortRef.current,
       mode: storedModeRef.current,
       suppressError: true
@@ -893,7 +979,7 @@ function usePaginatedFetch(type) {
         return [...prev, ...data.filter(i => i.id && !seen.has(i.id))];
       });
     }
-    if (streamDone) { setDone(true); doneRef.current = true; }
+    if (streamDone || data.length === 0) { setDone(true); doneRef.current = true; }
   }, [_fetch]);
   useEffect(() => () => { if (abortRef.current) abortRef.current.abort(); }, []);
   return useMemo(() => ({
@@ -1125,7 +1211,7 @@ const SearchBar = memo(function SearchBar({
     subreddit: loadRecent("rosint-recent-subs"),
     post: loadRecent("rosint-recent-posts")
   }));
-  const recent = recentMap[mode] || [];
+  const recent = useMemo(() => recentMap[mode] || [], [recentMap, mode]);
   const setRecent = list => setRecentMap(m => ({ ...m, [mode]: list }));
   const [username, setUsername] = useState(defaultQuery);
   const [focused, setFocused] = useState(false);
@@ -1135,7 +1221,11 @@ const SearchBar = memo(function SearchBar({
     const fetchSaved = () => getSavedUsernames().then(setSavedUsers);
     fetchSaved();
     window.addEventListener('savedUsersChanged', fetchSaved);
-    return () => window.removeEventListener('savedUsersChanged', fetchSaved);
+    window.addEventListener('storage', fetchSaved);
+    return () => {
+      window.removeEventListener('savedUsersChanged', fetchSaved);
+      window.removeEventListener('storage', fetchSaved);
+    };
   }, []);
   
   const MAX_DROPDOWN = 5;
@@ -1283,7 +1373,6 @@ export default function App() {
     return initialMode === "subreddit" ? normalizeSubreddit(initialParams.sub) : normalizeUsername(initialParams.u) || "";
   });
   const initialPostRaw = _initialPostRaw;
-  const initialPostParsed = _initialPostParsed;
   const { t } = useI18n();
   const [mode, setMode] = useState(initialMode);
   const modeRef = useRef(initialMode);
@@ -1303,6 +1392,7 @@ export default function App() {
   const [dateTo, setDateTo] = useState(initialParams.to ?? "");
   const [showDates, setShowDates] = useState(false);
   const [subreddit, setSubreddit] = useState(initialMode === "username" && initialParams.sub ? String(initialParams.sub).replace(/^r\//, "") : "");
+  const [urlQuery, setUrlQuery] = useState(initialParams.url || "");
   const [showNsfw, setShowNsfw] = useState(true); // checked = show NSFW (no filter); unchecked = exclude NSFW
   const [sortOrder, setSortOrder] = useState(initialParams.sort === "asc" ? "asc" : "desc");
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
@@ -1373,11 +1463,19 @@ export default function App() {
   const crawlItemsRef = useRef(0);
   const crawledTotalRef = useRef(0);
   const crawlProcessedRef = useRef(new Set());
+  const lastCrawlQueryRef = useRef(null);
 
   const handleRefreshCrawl = useCallback(() => setCrawlKey(k => k + 1), []);
 
   useEffect(() => {
     if (!showProfile || !query || mode !== "username") return;
+    // If we already crawled this exact query and it's not a forced refresh (crawlKey 0),
+    // don't refetch — use cached bgStats. Saved profiles are already cached via
+    // getProfileData's IndexedDB, so reopening the panel shouldn't re-crawl.
+    if (lastCrawlQueryRef.current === query.toLowerCase() && bgStatsRef.current && crawlKey === 0) {
+      return;
+    }
+    lastCrawlQueryRef.current = query.toLowerCase();
     if (bgCrawlRef.current) bgCrawlRef.current.abort();
 
     setIsCrawling(true);
@@ -1418,10 +1516,9 @@ export default function App() {
             processItem(crawlStats, item, isComment);
           }
 
-          // Keep paging even when this page was fully seen — older pages may
-          // hold items the user hasn't loaded yet. The lastId guard below and
-          // the empty-page break bound the walk.
-          if (anyNew) setBgStatsVersion(v => v + 1);
+          if (anyNew) {
+            setBgStatsVersion(v => v + 1);
+          }
 
           const last = result.items[result.items.length - 1];
           if (last.id === lastId) break;
@@ -1496,7 +1593,7 @@ export default function App() {
     return loaded + crawlItemsRef.current - overlap;
   }, [posts.items, comments.items, bgStatsVersion]);
 
-  const [visibleCount, setVisibleCount] = useState(Infinity);
+  const [visibleCount, setVisibleCount] = useState(100);
   const prevFilteredLenRef = useRef(0);
   useEffect(() => {
     const prevLen = prevFilteredLenRef.current;
@@ -1504,11 +1601,9 @@ export default function App() {
     if (prevLen === 0 && filteredItems.length > 0) {
       setVisibleCount(100);
     } else if (filteredItems.length > prevLen) {
-      setVisibleCount(c => Math.max(c, filteredItems.length));
-    } else if (filteredItems.length < prevLen) {
-      setVisibleCount(c => Math.min(c, filteredItems.length));
+      setVisibleCount(c => c + (filteredItems.length - prevLen));
     }
-  }, [filteredItems]);
+  }, [filteredItems.length]);
 
   const isOutageTakeover = bothSourcesFailed && posts.items.length === 0 && comments.items.length === 0;
   useEffect(() => {
@@ -1534,9 +1629,10 @@ export default function App() {
     if (dateTo) f.dateTo = Math.floor(new Date(dateTo).getTime() / 1000) + 86399;
     if (subreddit.trim() && searchMode !== "subreddit") f.subreddit = subreddit.trim();
     if (!showNsfw) f.over18 = false;
+    if (urlQuery.trim()) f.url = urlQuery.trim();
     return f;
-  }, [dateFrom, dateTo, subreddit, showNsfw, mode]);
-  const hasFilters = dateFrom || dateTo || (mode === "username" && subreddit.trim()) || !showNsfw;
+  }, [dateFrom, dateTo, subreddit, showNsfw, mode, urlQuery]);
+  const hasFilters = dateFrom || dateTo || (mode === "username" && subreddit.trim()) || !showNsfw || urlQuery.trim();
   const clearPostMode = useCallback(() => {
     setPostMode(false);
     setPostId(null);
@@ -1596,10 +1692,12 @@ export default function App() {
     else url.searchParams.delete("deleted");
     if (nsfwOnly) url.searchParams.set("nsfw", "1");
     else url.searchParams.delete("nsfw");
+    if (urlQuery.trim()) url.searchParams.set("url", urlQuery.trim());
+    else url.searchParams.delete("url");
     if (showProfile) url.searchParams.set("stats", "1");
     else url.searchParams.delete("stats");
     window.history.replaceState({}, "", url);
-  }, [searched, query, mode, activeTab, subreddit, dateFrom, dateTo, sortOrder, deletedOnly, nsfwOnly, showProfile, postMode, postId]);
+  }, [searched, query, mode, activeTab, subreddit, dateFrom, dateTo, sortOrder, deletedOnly, nsfwOnly, showProfile, postMode, postId, urlQuery]);
   const {
     reset: resetPosts
   } = posts;
@@ -1749,7 +1847,7 @@ export default function App() {
       window.history.pushState({}, "", url);
     }
     if (!silent) setInitialLoading(false);
-  }, [buildFilters, resetPosts, resetComments, subreddit, sortOrder, postMode, searchPost]);
+  }, [buildFilters, resetPosts, resetComments, sortOrder, postMode, searchPost]);
   const searchUserRef = useRef(searchUser);
   searchUserRef.current = searchUser;
   const handleModeChange = useCallback(nextMode => {
@@ -1865,6 +1963,7 @@ export default function App() {
     setDateFrom("");
     setDateTo("");
     setSubreddit("");
+    setUrlQuery("");
     setShowNsfw(true);
     setNsfwOnly(false);
     if (postMode && postId) {
@@ -1881,14 +1980,21 @@ export default function App() {
   const active = useMemo(() => activeTab === "posts" ? posts : activeTab === "comments" ? comments : { loading: posts.loading || comments.loading, error: posts.error || comments.error, done: posts.done && comments.done }, [activeTab, posts, comments]);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- active.items is undefined for "all" tab
   const activeItemCount = useMemo(() => activeTab === "all" ? posts.items.length + comments.items.length : active.items.length, [activeTab, posts.items.length, comments.items.length]);
-  const activeHasMore = useMemo(() => activeTab === "all" ? (!posts.done || !comments.done) : !active.done, [activeTab, posts.done, comments.done, active.done]);
+  const activeHasMore = useMemo(() => {
+    if (visibleCount < filteredItems.length) return true;
+    return activeTab === "all" ? (!posts.done || !comments.done) : !active.done;
+  }, [visibleCount, filteredItems.length, activeTab, posts.done, comments.done, active.done]);
+
   const loadMoreActive = () => {
+    if (visibleCount < filteredItems.length) {
+      setVisibleCount(c => Math.min(c + 100, filteredItems.length));
+    }
     if (posts.loading || comments.loading) return;
     if (activeTab === "all") {
       if (!posts.done) posts.loadMore(query);
       if (!comments.done) comments.loadMore(query);
     } else {
-      active.loadMore(query);
+      if (!active.done) active.loadMore(query);
     }
   };
   const handleWordClick = useCallback((word) => setKeyword(word), []);
@@ -1905,8 +2011,8 @@ export default function App() {
                     <a href="/" className="text-[color:var(--text)] hover:text-[color:var(--accent)] transition-colors font-bold text-base sm:text-lg leading-none whitespace-nowrap"style={NO_DECORATION}>
                         <Logo />
                     </a>
-                <a href="https://github.com/rosintplus/rosintplus.github.io" target="_blank" rel="noopener noreferrer" className="bg-[color:var(--bg)] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] px-3.5 h-9 sm:px-3 sm:h-8 transition-colors border border-[color:var(--border-hover)] hover:border-[color:var(--text-muted)] rounded flex items-center text-[13px] font-medium whitespace-nowrap"style={NO_DECORATION}>
-                    GitHub
+                <a href="https://github.com/rosintplus/rosintplus.github.io" target="_blank" rel="noopener noreferrer" aria-label="GitHub" title="GitHub" className="w-9 h-9 sm:h-8 sm:w-8 bg-[color:var(--bg)] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] transition-colors border border-[color:var(--border-hover)] hover:border-[color:var(--text-muted)] rounded flex items-center justify-center flex-shrink-0"style={NO_DECORATION}>
+                    <IconGitHub className="w-4 h-4" />
                 </a>
                 </div>
                 <ThemeSwitcher />
@@ -2009,13 +2115,12 @@ export default function App() {
                             </button>
                             <div className="ml-auto flex-shrink-0"><ModeSelector mode={mode} onModeChange={handleModeChange} /></div>
                             </div>
-                            {showAdvancedFilters && <div className="w-full flex flex-col gap-2 items-start">
-                                    <div className="flex flex-nowrap items-center gap-2 w-full overflow-x-auto">
+                            {showAdvancedFilters && <div className="w-full flex flex-col gap-2">
+                                    <div className="flex flex-wrap items-center gap-2 w-full">
                                         <span className="text-[11px] text-[color:var(--text-muted)]">{t("from")}</span>
-                                        <input aria-label="Date from" type="date" max={dateTo || undefined} value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-2 h-7  text-[12px] text-[color:var(--text)] focus:outline-none focus:border-[color:var(--accent)] transition-colors block" />
+                                        <input aria-label="Date from" type="date" max={dateTo || undefined} value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-2 h-7 text-[12px] text-[color:var(--text)] focus:outline-none focus:border-[color:var(--accent)] transition-colors" />
                                         <span className="text-[11px] text-[color:var(--text-muted)]">{t("to")}</span>
-                                        <input aria-label="Date to" type="date" min={dateFrom || undefined} value={dateTo} onChange={e => setDateTo(e.target.value)} className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-2 h-7  text-[12px] text-[color:var(--text)] focus:outline-none focus:border-[color:var(--accent)] transition-colors block" />
-                                        <div className="flex items-center gap-2 w-full sm:w-auto">
+                                        <input aria-label="Date to" type="date" min={dateFrom || undefined} value={dateTo} onChange={e => setDateTo(e.target.value)} className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-2 h-7 text-[12px] text-[color:var(--text)] focus:outline-none focus:border-[color:var(--accent)] transition-colors" />
                                         {mode === "username" && <><span className="text-[11px] text-[color:var(--text-muted)]">{t("in")}</span>
                                         <div className="relative">
                                             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[color:var(--text-muted)] text-sm font-medium select-none">r/</span>
@@ -2031,17 +2136,22 @@ export default function App() {
                         push: false
                       });
                     }
-                  }} placeholder={t("subredditPlaceholder")} className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded pl-8 pr-3 py-1 text-[12px] text-[color:var(--text)] placeholder-[color:var(--text-muted)] focus:outline-none focus:border-[color:var(--accent)] transition-colors" />
+                  }} placeholder={t("subredditPlaceholder")} className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded pl-8 pr-3 py-1 text-[12px] text-[color:var(--text)] placeholder-[color:var(--text-muted)] focus:outline-none focus:border-[color:var(--accent)] transition-colors min-w-[120px] flex-1" />
                                         </div></>}
+                                        <div className="flex items-center gap-2 flex-shrink-0">
+                                            <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                                                <input type="checkbox" checked={deletedOnly} onChange={e => setDeletedOnly(e.target.checked)} className="w-3.5 h-3.5 accent-[color:var(--accent)] cursor-pointer" />
+                                                <span className="text-[11px] leading-none flex flex-col text-[color:var(--text-muted)]"><span>Deleted</span><span>only</span></span>
+                                            </label>
+                                            <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                                                <input type="checkbox" checked={showNsfw} onChange={e => setShowNsfw(e.target.checked)} className="w-3.5 h-3.5 accent-[color:var(--accent)] cursor-pointer" />
+                                                <span className="text-[11px] leading-none flex flex-col text-[color:var(--text-muted)]"><span>Show</span><span>NSFW</span></span>
+                                            </label>
                                         </div>
-                                        <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                                            <input type="checkbox" checked={deletedOnly} onChange={e => setDeletedOnly(e.target.checked)} className="w-3.5 h-3.5 accent-[color:var(--accent)] cursor-pointer" />
-                                            <span className="text-[11px] text-[color:var(--text-muted)]">{t("deletedOnly")}</span>
-                                        </label>
-                                        <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                                            <input type="checkbox" checked={showNsfw} onChange={e => setShowNsfw(e.target.checked)} className="w-3.5 h-3.5 accent-[color:var(--accent)] cursor-pointer" />
-                                            <span className="text-[11px] text-[color:var(--text-muted)]">{t("showNsfw")}</span>
-                                        </label>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-2 w-full">
+                                        <span className="text-[11px] text-[color:var(--text-muted)] whitespace-nowrap">External link</span>
+                                        <input aria-label="External link URL contains" type="text" value={urlQuery} onChange={e => setUrlQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && searched && query && !initialLoading) searchUser(query, { push: false }); }} onBlur={() => { if (searched && query && !initialLoading && urlQuery.trim()) searchUser(query, { push: false }); }} placeholder="domain (e.g. youtube.com)" className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-2 py-1 text-[11px] text-[color:var(--text)] placeholder-[color:var(--text-muted)] focus:outline-none focus:border-[color:var(--accent)] transition-colors min-w-[160px] flex-1" />
                                     </div>
                                 </div>}
                         </div>}
@@ -2079,7 +2189,7 @@ export default function App() {
     </div>
   </div>
 }>
-                            <AccountProfile query={query} activeTab={activeTab} onWordClick={handleWordClick} stats={profileStats} userMeta={userMeta} loadedCount={loadedCount} isCrawling={isCrawling} onRefresh={handleRefreshCrawl} />
+                            <AccountProfile query={query} activeTab={activeTab} onWordClick={handleWordClick} stats={profileStats} userMeta={userMeta} loadedCount={loadedCount} isCrawling={isCrawling} onRefresh={handleRefreshCrawl} posts={posts.items} comments={comments.items} />
                         </Suspense>}
 
                         {searched && <h2 className="sr-only">{postMode ? `${t("postViewTitle")} ${postId || ""}`.trim() : `${t("resultsFor")} ${mode === "subreddit" ? "r/" : "u/"}{query}`}</h2>}
@@ -2185,7 +2295,7 @@ export default function App() {
                                     <p className="text-[11px] text-[color:var(--text-muted)] italic border border-[color:var(--border-hover)] rounded px-3 py-3 bg-[color:var(--bg)]">{t("postNoComments")}</p>
                                   ) : (
                                     <div className="flex flex-col gap-2">
-                                      {postComments.map(c => <CommentCard key={c.id} comment={c} skipPostLoad={true} />)}
+                                      {postComments.map(c => <CommentCard key={c.id} comment={c} skipPostLoad={true} highlightTerm={deferredKeyword} />)}
                                     </div>
                                   )}
                                 </div>
@@ -2440,8 +2550,8 @@ export default function App() {
                             </div> : filteredItems.length === 0 ? active.error ? <ErrorState message={active.error} onRetry={handleRetry} /> : <EmptyState tab={activeTab} hasFilters={!!hasFilters} query={query} mode={mode} onSwitchTab={() => setActiveTab(activeTab === "posts" ? "comments" : "posts")} onClearFilters={clearFilters} deletedOnly={deletedOnly} nsfwOnly={nsfwOnly} keyword={keyword} /> : <>
                                 <div aria-live="polite" aria-atomic="true" className="flex flex-col gap-2">
                                     {filteredItems.slice(0, visibleCount).map(item => isPost(item)
-                                      ? <CardBoundary key={`p-${item.id}`}><div className="cv-auto"><PostCard post={item} /></div></CardBoundary>
-                                      : <CardBoundary key={`c-${item.id}`}><div className="cv-auto"><CommentCard comment={item} /></div></CardBoundary>
+                                      ? <CardBoundary key={`p-${item.id}`}><div className="cv-auto"><PostCard post={item} highlightTerm={deferredKeyword} /></div></CardBoundary>
+                                      : <CardBoundary key={`c-${item.id}`}><div className="cv-auto"><CommentCard comment={item} highlightTerm={deferredKeyword} /></div></CardBoundary>
                                     )}
                                 </div>
                                 {activeHasMore && <div className="flex justify-center mt-6">

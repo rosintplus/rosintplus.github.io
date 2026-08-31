@@ -3,6 +3,7 @@ import { safeFetch, ARCTIC } from "./api";
 const DB_NAME = "rosint-db";
 const DB_VERSION = 2;
 const STORE_NAME = "profiles";
+const LS_SAVED_KEY = "rosint_saved_users";
 
 const memoryCache = new Map();
 const MAX_CACHE_SIZE = 100;
@@ -15,7 +16,32 @@ function cacheSet(key, value) {
   memoryCache.set(key, value);
 }
 
-// ─── Stopwords (shared with AccountProfile for consistency) ──────────────────
+// ─── LocalStorage Fallback Helper ────────────────────────────────────────────
+
+function getSavedFromLS() {
+  try {
+    const raw = localStorage.getItem(LS_SAVED_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function setSavedInLS(username, saved) {
+  try {
+    const current = new Set(getSavedFromLS().map(u => u.toLowerCase()));
+    if (saved) {
+      current.add(username.toLowerCase());
+    } else {
+      current.delete(username.toLowerCase());
+    }
+    localStorage.setItem(LS_SAVED_KEY, JSON.stringify(Array.from(current)));
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+// ─── Stopwords ───────────────────────────────────────────────────────────────
 
 const STOPWORDS = new Set([
   'the','a','an','and','or','but','to','of','in','on','at','for','with',
@@ -33,13 +59,14 @@ const STOPWORDS = new Set([
   'http','www','com','org','jpg','jpeg','gif','svg','html','css',
 ]);
 
-// ─── Stats helpers (exported for client-side use in App.jsx) ──────────────────
+// ─── Stats helpers ───────────────────────────────────────────────────────────
 
 function emptyStats() {
   return {
     subredditCounts: {},
     heatmap: Array.from({ length: 7 }, () => Array(24).fill(0)),
     wordFreqs: { posts: {}, comments: {} },
+    sampleItems: [],
   };
 }
 
@@ -54,6 +81,16 @@ function processItem(stats, item, isComment) {
 
   const text = isComment ? (item.body || "") : (item.selftext || item.title || "");
   if (text && text !== "[deleted]" && text !== "[removed]") {
+    if (!stats.sampleItems) stats.sampleItems = [];
+    if (stats.sampleItems.length < 1000) {
+      stats.sampleItems.push({
+        subreddit: sub,
+        body: isComment ? item.body : (item.selftext || item.title || ""),
+        title: item.title || "",
+        score: item.score || 0
+      });
+    }
+
     const words = text.toLowerCase().replace(/[''']/g, "").split(/[^a-z]+/);
     const bucket = isComment ? stats.wordFreqs.comments : stats.wordFreqs.posts;
     const seen = new Set();
@@ -85,6 +122,12 @@ function mergeStats(target, source) {
       target.wordFreqs[type][word].items += counts.items;
     }
   }
+  if (source.sampleItems && Array.isArray(source.sampleItems)) {
+    if (!target.sampleItems) target.sampleItems = [];
+    if (target.sampleItems.length < 1000) {
+      target.sampleItems = target.sampleItems.concat(source.sampleItems).slice(0, 1000);
+    }
+  }
 }
 
 export { emptyStats, processItem, mergeStats, STOPWORDS };
@@ -93,9 +136,6 @@ export { emptyStats, processItem, mergeStats, STOPWORDS };
 
 let dbPromise = null;
 
-// Older stored profiles may predate the current shape (added totals,
-// itemsCrawled, maxCreatedUtc, saved). Fill any missing fields with defaults
-// so downstream code never trips over undefined.
 function migrateIfNeeded(profile) {
   if (!profile || typeof profile !== "object") return null;
   profile.stats = profile.stats || emptyStats();
@@ -106,6 +146,7 @@ function migrateIfNeeded(profile) {
   profile.stats.wordFreqs = profile.stats.wordFreqs || { posts: {}, comments: {} };
   profile.stats.wordFreqs.posts = profile.stats.wordFreqs.posts || {};
   profile.stats.wordFreqs.comments = profile.stats.wordFreqs.comments || {};
+  profile.stats.sampleItems = profile.stats.sampleItems || [];
   profile.totals = profile.totals || { posts: 0, comments: 0 };
   profile.itemsCrawled = profile.itemsCrawled || { posts: 0, comments: 0 };
   profile.maxCreatedUtc = profile.maxCreatedUtc || 0;
@@ -130,16 +171,18 @@ function openDB() {
   return dbPromise;
 }
 
-async function getCachedProfile(username) {
-  if (memoryCache.has(username)) {
-    return migrateIfNeeded(memoryCache.get(username));
+export async function getCachedProfile(username) {
+  if (!username) return null;
+  const normalized = username.toLowerCase();
+  if (memoryCache.has(normalized)) {
+    return migrateIfNeeded(memoryCache.get(normalized));
   }
   try {
     const db = await openDB();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, "readonly");
       const store = tx.objectStore(STORE_NAME);
-      const request = store.get(username);
+      const request = store.get(normalized);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => {
         const result = request.result;
@@ -167,13 +210,13 @@ async function saveCachedProfile(profile) {
   }
 }
 
-async function deleteCachedProfile(username) {
+export async function deleteCachedProfile(username) {
   try {
     const db = await openDB();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, "readwrite");
       const store = tx.objectStore(STORE_NAME);
-      const request = store.delete(username);
+      const request = store.delete(username.toLowerCase());
       request.onerror = () => reject(request.error);
       request.onsuccess = () => resolve();
     });
@@ -200,9 +243,6 @@ export async function getProfileData(username, onProgress, forceUpdate = false) 
   }
 
   const controller = new AbortController();
-  // Stall timeout: abort only if a single request/page makes no progress for
-  // TIMEOUT_MS. Re-armed after every successful fetch so large multi-page
-  // crawls (which legitimately take longer than one timeout) aren't killed.
   const TIMEOUT_MS = 30000;
   let timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
   const armTimeout = () => {
@@ -362,49 +402,63 @@ export async function getProfileData(username, onProgress, forceUpdate = false) 
   return promise;
 }
 
-export async function toggleProfileSaved(username, saved) {
+export async function toggleProfileSaved(username, saved, currentStats = null, currentTotals = null) {
+  if (!username) return;
   const normalized = username.toLowerCase();
-  let profile = memoryCache.get(normalized);
+  setSavedInLS(normalized, saved);
 
+  let profile = memoryCache.get(normalized);
   if (!profile) {
     profile = await getCachedProfile(normalized);
   }
-
   if (!profile) {
     profile = {
       username: normalized,
-      stats: emptyStats(),
-      totals: { posts: 0, comments: 0 },
-      itemsCrawled: { posts: 0, comments: 0 },
+      stats: currentStats || emptyStats(),
+      totals: currentTotals || { posts: 0, comments: 0 },
+      itemsCrawled: { posts: currentTotals?.posts || 0, comments: currentTotals?.comments || 0 },
       maxCreatedUtc: 0,
       fetchedAt: Date.now(),
     };
-  }
-
-  profile.saved = saved;
-
-  if (saved) {
-    await saveCachedProfile(profile);
-    memoryCache.delete(normalized);
   } else {
-    await deleteCachedProfile(normalized);
-    cacheSet(normalized, profile);
+    if (currentStats) profile.stats = currentStats;
+    if (currentTotals) {
+      profile.totals = currentTotals;
+      profile.itemsCrawled = { posts: currentTotals.posts || 0, comments: currentTotals.comments || 0 };
+    }
   }
+
+  profile.username = normalized;
+  profile.saved = saved;
+  profile.fetchedAt = Date.now();
+
+  try {
+    await saveCachedProfile(profile);
+  } catch (e) {
+    console.warn("Could not save to IndexedDB, fallback LS active:", e);
+  }
+
+  cacheSet(normalized, profile);
   window.dispatchEvent(new CustomEvent('savedUsersChanged'));
 }
 
 export async function getSavedUsernames() {
+  const lsList = getSavedFromLS();
   try {
     const db = await openDB();
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       const tx = db.transaction(STORE_NAME, "readonly");
       const store = tx.objectStore(STORE_NAME);
-      const request = store.getAllKeys();
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve(request.result || []);
+      const request = store.getAll();
+      request.onerror = () => resolve(lsList);
+      request.onsuccess = () => {
+        const results = request.result || [];
+        const idbSaved = results.filter(r => r && r.saved).map(r => r.username);
+        const union = Array.from(new Set([...idbSaved, ...lsList]));
+        resolve(union);
+      };
     });
-  } catch (e) {
-    console.warn("IndexedDB getSavedUsernames error:", e);
-    return [];
+  } catch {
+    return lsList;
   }
 }
