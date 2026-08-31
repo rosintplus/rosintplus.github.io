@@ -24,6 +24,8 @@ jobs:
           node-version: 20
       - run: npm ci
       - run: npm run build
+        env:
+          VITE_OPENROUTER_KEY: ${{ secrets.VITE_OPENROUTER_KEY }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
