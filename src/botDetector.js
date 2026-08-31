@@ -150,8 +150,9 @@ function analyzeCircadianEntropy(heatmap) {
   }
 
   const quietest6hRatio = min6hSum / totalItems;
-  const is24x7 = entropy > 4.45 && quietest6hRatio > 0.14 && totalItems > 40;
-  const hasHumanSleepGap = quietest6hRatio <= 0.08 || entropy <= 4.18;
+  // A genuine 24/7 script bot has near-perfect uniformity (>20% in quietest 6h)
+  const is24x7 = entropy > 4.48 && quietest6hRatio > 0.20 && totalItems > 40;
+  const hasHumanSleepGap = quietest6hRatio <= 0.12 || entropy <= 4.25;
 
   return {
     entropy: Math.round(entropy * 100) / 100,
@@ -489,7 +490,9 @@ export function evaluateBotLikelihood({
 
   // 1. Circadian Entropy Signal
   const circadian = analyzeCircadianEntropy(stats?.heatmap);
-  if (circadian.is24x7) {
+  const isEstablishedHuman = (daysActive > 180 && totalKarma > 1000) || (daysActive > 365 && totalItems > 100);
+
+  if (circadian.is24x7 && !isEstablishedHuman) {
     logOdds += 3.2;
     flags.push('24/7 automated activity: continuous hourly posting without circadian sleep troughs');
     signals.push({
@@ -499,15 +502,17 @@ export function evaluateBotLikelihood({
       status: 'bot',
       detail: circadian.detail,
     });
-  } else if (circadian.hasHumanSleepGap) {
+  } else if (circadian.hasHumanSleepGap || isEstablishedHuman) {
     logOdds -= 1.2;
     humanTrustFactors.push(`Verified Circadian Sleep Lull (${circadian.quietest6hRatio}% in quietest 6h)`);
     signals.push({
       id: 'circadian',
       label: 'Activity Distribution',
-      value: 'Circadian Sleep Cycle',
+      value: isEstablishedHuman && !circadian.hasHumanSleepGap ? 'Mature Multi-Year Schedule' : 'Circadian Sleep Cycle',
       status: 'human',
-      detail: circadian.detail,
+      detail: isEstablishedHuman && !circadian.hasHumanSleepGap
+        ? `Entropy: ${circadian.entropy.toFixed(2)} bits (Organic lifetime activity spanning ${Math.max(1, Math.round(daysActive / 365))} years)`
+        : circadian.detail,
     });
   } else {
     signals.push({

@@ -119,6 +119,15 @@ const SUBREDDIT_POLITICAL_MAP = {
   progun: { econ: 5.5, soc: -1.0, gov: -7.5, weight: 0.75, side: 'right' },
   "2aliberals": { econ: -3.0, soc: -5.0, gov: -7.5, weight: 0.75, side: 'left' },
 
+  // ── Conspiratorial & Counter-Culture Specific ──
+  donaldtrump666: { econ: -2.0, soc: -5.0, gov: -6.0, weight: 0.75, side: 'left' },
+  trumpvirus: { econ: -5.0, soc: -6.5, gov: -5.5, weight: 0.8, side: 'left' },
+  trumpgret: { econ: -4.0, soc: -5.0, gov: -4.5, weight: 0.75, side: 'left' },
+  qult_headquarters: { econ: -3.5, soc: -6.0, gov: -5.0, weight: 0.8, side: 'left' },
+  parlerwatch: { econ: -4.5, soc: -6.5, gov: -5.0, weight: 0.8, side: 'left' },
+  marchagainstnazis: { econ: -7.0, soc: -7.5, gov: -7.0, weight: 0.85, side: 'left' },
+  fuckthealtright: { econ: -6.5, soc: -7.5, gov: -7.0, weight: 0.85, side: 'left' },
+
   // ── Centrist & Mixed Discussion ──
   politics: { econ: -4.0, soc: -4.5, gov: -3.5, weight: 0.5, side: 'left' },
   politicaldiscussion: { econ: -1.0, soc: -1.0, gov: -1.0, weight: 0.5, side: 'center' },
@@ -348,11 +357,14 @@ function sanitizeTextForPoliticalAnalysis(rawText) {
   return text;
 }
 
-function getIdeologicalArchetype(econ, soc) {
+function getIdeologicalArchetype(econ, soc, { hasLeftSignals = false, hasRightSignals = false } = {}) {
   const isEconCenter = Math.abs(econ) <= 2.2;
   const isSocCenter = Math.abs(soc) <= 2.2;
 
-  if (isEconCenter && isSocCenter) return 'Centrist / Moderate';
+  if (isEconCenter && isSocCenter) {
+    if (hasLeftSignals && hasRightSignals) return 'Cross-Ideological / Mixed Discussion';
+    return 'Centrist / Moderate';
+  }
   if (isEconCenter && soc > 2.2) return 'Authoritarian Center (Auth-Center)';
   if (isEconCenter && soc < -2.2) return 'Libertarian Center (Lib-Center)';
 
@@ -421,13 +433,18 @@ export function evaluatePoliticalCompass({ stats = {}, posts = [], comments = []
     subCommentMap.get(sub).push(item.body || '');
   }
 
+  let leftSignalWeight = 0;
+  let rightSignalWeight = 0;
+
   for (const [subName, count] of Object.entries(subCounts)) {
     const lower = subName.toLowerCase();
     let entry = SUBREDDIT_POLITICAL_MAP[lower];
 
     if (!entry) {
-      if (lower.includes('conserv')) entry = { econ: 6.5, soc: 5.5, gov: 5.0, weight: 0.8, side: 'right' };
-      else if (lower.includes('republican') || lower.includes('trump') || lower.includes('maga')) entry = { econ: 7.0, soc: 6.5, gov: 6.0, weight: 0.85, side: 'right' };
+      const isAntiSub = /(?:anti|fuck|against|virus|666|gret|watch|impeach|exposed|critic|cult|hate)/i.test(lower);
+      if (lower.includes('conserv') && !isAntiSub) entry = { econ: 6.5, soc: 5.5, gov: 5.0, weight: 0.8, side: 'right' };
+      else if ((lower.includes('republican') || lower.includes('trump') || lower.includes('maga')) && !isAntiSub) entry = { econ: 7.0, soc: 6.5, gov: 6.0, weight: 0.85, side: 'right' };
+      else if (isAntiSub && (lower.includes('trump') || lower.includes('maga') || lower.includes('altright') || lower.includes('nazi') || lower.includes('conserv'))) entry = { econ: -5.0, soc: -6.0, gov: -5.0, weight: 0.8, side: 'left' };
       else if (lower.includes('socialis') || lower.includes('communis') || lower.includes('marx')) entry = { econ: -8.0, soc: 2.0, gov: 4.0, weight: 0.85, side: 'left' };
       else if (lower.includes('anarch')) entry = { econ: -7.5, soc: -8.5, gov: -9.0, weight: 0.85, side: 'left' };
       else if (lower.includes('libertarian')) entry = { econ: 7.0, soc: -3.5, gov: -8.0, weight: 0.85, side: 'right' };
@@ -471,6 +488,9 @@ export function evaluatePoliticalCompass({ stats = {}, posts = [], comments = []
       weightedSoc += effectiveSoc * effectiveWeight;
       weightedGov += effectiveGov * effectiveWeight;
       totalWeight += effectiveWeight;
+
+      if (effectiveEcon <= -2.0 || effectiveSoc <= -2.0) leftSignalWeight += effectiveWeight;
+      if (effectiveEcon >= 2.0 || effectiveSoc >= 2.0) rightSignalWeight += effectiveWeight;
 
       topSubSignals.push({
         sub: subName,
@@ -531,6 +551,9 @@ export function evaluatePoliticalCompass({ stats = {}, posts = [], comments = []
         weightedGov += effectiveGov * w;
         totalWeight += w;
 
+        if (effectiveEcon <= -2.0 || effectiveSoc <= -2.0) leftSignalWeight += w;
+        if (effectiveEcon >= 2.0 || effectiveSoc >= 2.0) rightSignalWeight += w;
+
         if (!matchedTopicSet.has(prop.topic)) {
           matchedTopicSet.add(prop.topic);
           detectedPositions.push({
@@ -561,11 +584,16 @@ export function evaluatePoliticalCompass({ stats = {}, posts = [], comments = []
     soc = Math.max(-10, Math.min(10, Math.round((weightedSoc / totalWeight) * 10) / 10));
     gov = Math.max(-10, Math.min(10, Math.round((weightedGov / totalWeight) * 10) / 10));
 
-    if (totalWeight >= 15 || detectedPositions.length >= 2) confidence = 'High (Strong propositional evidence)';
-    else if (totalWeight >= 6 || detectedPositions.length >= 1) confidence = 'Moderate (Corroborating positions)';
-    else confidence = 'Low (Emerging policy markers)';
+    if (detectedPositions.length >= 2) confidence = 'High (Multiple verified policy stances)';
+    else if (detectedPositions.length === 1 && totalWeight >= 6) confidence = 'Moderate (Policy stance + community footprint)';
+    else if (detectedPositions.length === 1) confidence = 'Moderate (Corroborating position statement)';
+    else if (totalWeight >= 10) confidence = 'Moderate (Community participation footprint)';
+    else confidence = 'Low (Emerging community activity)';
 
-    archetype = getIdeologicalArchetype(econ, soc);
+    archetype = getIdeologicalArchetype(econ, soc, {
+      hasLeftSignals: leftSignalWeight >= 2.0,
+      hasRightSignals: rightSignalWeight >= 2.0,
+    });
   }
 
   const { econLabel, socLabel, govLabel } = getDimensionLabels(econ, soc, gov);

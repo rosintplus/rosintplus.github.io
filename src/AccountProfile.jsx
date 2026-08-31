@@ -44,6 +44,9 @@ function getArchetypeColorClass(archetype) {
   if (archetype.includes('Left-Center') || archetype.includes('Social Democrat')) {
     return "bg-pink-500/15 text-pink-400 border border-pink-500/30";
   }
+  if (archetype.includes('Cross-Ideological') || archetype.includes('Mixed Discussion')) {
+    return "bg-purple-500/15 text-purple-400 border border-purple-500/30";
+  }
   if (archetype.includes('Right-Center') || archetype.includes('Fiscal Conservative')) {
     return "bg-sky-500/15 text-sky-400 border border-sky-500/30";
   }
@@ -376,12 +379,23 @@ const AccountProfile = memo(function AccountProfile({
                 </button>
               </div>
 
-              {botAnalysis.flags.length > 0 && (
+              {botAnalysis.flags.length > 0 && botAnalysis.score >= 25 && (
                 <div className="flex flex-col gap-1 bg-amber-500/10 border border-amber-500/20 rounded p-2 text-[11px] text-amber-300">
                   <span className="font-bold text-[10px] uppercase tracking-wider text-amber-400">Detected Risk Factors:</span>
                   <ul className="list-disc list-inside space-y-0.5 text-[11px]">
                     {botAnalysis.flags.map((flag, idx) => (
                       <li key={idx}>{flag}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {botAnalysis.humanTrustFactors?.length > 0 && botAnalysis.score <= 35 && (
+                <div className="flex flex-col gap-1 bg-emerald-500/10 border border-emerald-500/20 rounded p-2 text-[11px] text-emerald-300">
+                  <span className="font-bold text-[10px] uppercase tracking-wider text-emerald-400">Verified Human Trust Factors:</span>
+                  <ul className="list-disc list-inside space-y-0.5 text-[11px]">
+                    {botAnalysis.humanTrustFactors.map((factor, idx) => (
+                      <li key={idx}>{factor}</li>
                     ))}
                   </ul>
                 </div>
