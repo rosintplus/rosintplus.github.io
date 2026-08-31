@@ -1457,21 +1457,34 @@ export default function App() {
 
   const [bgStatsVersion, setBgStatsVersion] = useState(0);
   const [isCrawling, setIsCrawling] = useState(false);
+  const [crawledCount, setCrawledCount] = useState(0);
   const [crawlKey, setCrawlKey] = useState(0);
   const bgStatsRef = useRef(null);
   const bgCrawlRef = useRef(null);
   const crawlItemsRef = useRef(0);
   const crawledTotalRef = useRef(0);
   const crawlProcessedRef = useRef(new Set());
+  const crawledPostsRef = useRef([]);
+  const crawledCommentsRef = useRef([]);
   const lastCrawlQueryRef = useRef(null);
 
-  const handleRefreshCrawl = useCallback(() => setCrawlKey(k => k + 1), []);
+  const handleRefreshCrawl = useCallback(() => {
+    bgStatsRef.current = null;
+    lastCrawlQueryRef.current = null;
+    setIsCrawling(true);
+    setCrawledCount(0);
+    setCrawlKey(k => k + 1);
+  }, []);
+
+  const handleStopCrawl = useCallback(() => {
+    if (bgCrawlRef.current) {
+      bgCrawlRef.current.abort();
+    }
+    setIsCrawling(false);
+  }, []);
 
   useEffect(() => {
-    if (!showProfile || !query || mode !== "username") return;
-    // If we already crawled this exact query and it's not a forced refresh (crawlKey 0),
-    // don't refetch — use cached bgStats. Saved profiles are already cached via
-    // getProfileData's IndexedDB, so reopening the panel shouldn't re-crawl.
+    if (!showProfile || !query || mode !== "username" || initialLoading) return;
     if (lastCrawlQueryRef.current === query.toLowerCase() && bgStatsRef.current && crawlKey === 0) {
       return;
     }
@@ -1479,9 +1492,12 @@ export default function App() {
     if (bgCrawlRef.current) bgCrawlRef.current.abort();
 
     setIsCrawling(true);
+    setCrawledCount(0);
     crawlItemsRef.current = 0;
     crawledTotalRef.current = 0;
     crawlProcessedRef.current = new Set();
+    crawledPostsRef.current = [];
+    crawledCommentsRef.current = [];
 
     const controller = new AbortController();
     bgCrawlRef.current = controller;
@@ -1499,11 +1515,21 @@ export default function App() {
         let before = null;
         let lastId = null;
 
+        // Seed cursor with oldest item from initial page to start deep paging immediately
+        const initialList = isComment ? comments.items : posts.items;
+        if (initialList && initialList.length > 0) {
+          const oldest = initialList[initialList.length - 1];
+          if (oldest?.created_utc) {
+            before = oldest.created_utc;
+            lastId = oldest.id;
+          }
+        }
+
         while (!controller.signal.aborted) {
           const pagination = before ? { before } : {};
           const result = await fetchBoth(query, type, pagination, {}, { signal: controller.signal, sort: "desc", mode });
 
-          if (controller.signal.aborted || result.items.length === 0) break;
+          if (controller.signal.aborted || !result?.items || result.items.length === 0) break;
 
           let anyNew = false;
           for (const item of result.items) {
@@ -1514,17 +1540,24 @@ export default function App() {
             crawlItemsRef.current++;
             anyNew = true;
             processItem(crawlStats, item, isComment);
+
+            if (isComment && crawledCommentsRef.current.length < 150) {
+              crawledCommentsRef.current.push(item);
+            } else if (!isComment && crawledPostsRef.current.length < 100) {
+              crawledPostsRef.current.push(item);
+            }
           }
 
           if (anyNew) {
+            setCrawledCount(crawlItemsRef.current);
             setBgStatsVersion(v => v + 1);
           }
 
           const last = result.items[result.items.length - 1];
-          if (last.id === lastId) break;
+          if (!last || last.id === lastId || result.items.length < LIMIT) break;
           lastId = last.id;
           before = last.created_utc;
-          await sleep(500);
+          await sleep(400);
         }
       }
 
@@ -1538,10 +1571,8 @@ export default function App() {
     })();
 
     return () => { controller.abort(); setIsCrawling(false); };
-    // posts.items/comments.items are intentionally excluded: the crawl seeds
-    // `seen` once at start and must not restart when the user loads more.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showProfile, query, crawlKey, mode]);
+  }, [showProfile, query, crawlKey, mode, initialLoading]);
 
   const profileStats = useMemo(() => {
     const stats = emptyStats();
@@ -1592,6 +1623,16 @@ export default function App() {
     }
     return loaded + crawlItemsRef.current - overlap;
   }, [posts.items, comments.items, bgStatsVersion]);
+
+  const allPosts = useMemo(() => {
+    if (bgStatsVersion >= 0 && (!crawledPostsRef.current || crawledPostsRef.current.length === 0)) return posts.items;
+    return [...posts.items, ...crawledPostsRef.current];
+  }, [posts.items, bgStatsVersion]);
+
+  const allComments = useMemo(() => {
+    if (bgStatsVersion >= 0 && (!crawledCommentsRef.current || crawledCommentsRef.current.length === 0)) return comments.items;
+    return [...comments.items, ...crawledCommentsRef.current];
+  }, [comments.items, bgStatsVersion]);
 
   const [visibleCount, setVisibleCount] = useState(100);
   const prevFilteredLenRef = useRef(0);
@@ -1813,6 +1854,13 @@ export default function App() {
     const searchId = ++searchIdRef.current;
     setQuery(user);
     setSearched(true);
+    if (m === "username") {
+      setIsCrawling(true);
+      setCrawledCount(0);
+      bgStatsRef.current = null;
+      lastCrawlQueryRef.current = null;
+      setCrawlKey(k => k + 1);
+    }
     if (!silent) setInitialLoading(true);
     const filters = buildFilters(m);
     let doneCount = 0;
@@ -2172,24 +2220,37 @@ export default function App() {
 
                         {/* key remounts the card per user so stale stats never flash */}
                         {!initialLoading && showProfile && mode === "username" && <Suspense fallback={
-  <div className="flex flex-col gap-4 mb-4 mt-4 select-none">
+  <div className="flex flex-col gap-4 mb-4 mt-4 select-none animate-pulse">
+    {/* KPI Stats Bar */}
+    <div className="bg-[color:var(--bg-elevated)] border border-[color:var(--border)] rounded-lg h-16 w-full"></div>
+
+    {/* Top Row: Subreddits & Activity Heatmap */}
     <div className="flex flex-col md:flex-row gap-4">
-      <div className="flex-1 bg-[color:var(--bg-elevated)] border border-[color:var(--border)] rounded px-4 py-3 shadow-sm skeleton-card">
-        <div className="skeleton h-4 w-28 rounded-sm mb-3"></div>
-        <div className="skeleton h-24 w-full rounded"></div>
-      </div>
-      <div className="flex-[2] bg-[color:var(--bg-elevated)] border border-[color:var(--border)] rounded px-4 py-3 shadow-sm skeleton-card">
-        <div className="skeleton h-4 w-24 rounded-sm mb-3"></div>
-        <div className="skeleton h-24 w-full rounded"></div>
-      </div>
+      <div className="flex-1 bg-[color:var(--bg-elevated)] border border-[color:var(--border)] rounded-lg h-[260px]"></div>
+      <div className="flex-[2] bg-[color:var(--bg-elevated)] border border-[color:var(--border)] rounded-lg h-[260px]"></div>
     </div>
-    <div className="bg-[color:var(--bg-elevated)] border border-[color:var(--border)] rounded px-4 py-3 shadow-sm skeleton-card">
-      <div className="skeleton h-4 w-32 rounded-sm mb-3"></div>
-      <div className="skeleton h-12 w-full rounded"></div>
-    </div>
+
+    {/* Common Words */}
+    <div className="bg-[color:var(--bg-elevated)] border border-[color:var(--border)] rounded-lg h-20 w-full"></div>
+
+    {/* Political Compass Card */}
+    <div className="bg-[color:var(--bg-elevated)] border border-[color:var(--border)] rounded-lg h-[340px] w-full"></div>
   </div>
 }>
-                            <AccountProfile query={query} activeTab={activeTab} onWordClick={handleWordClick} stats={profileStats} userMeta={userMeta} loadedCount={loadedCount} isCrawling={isCrawling} onRefresh={handleRefreshCrawl} posts={posts.items} comments={comments.items} />
+                            <AccountProfile
+                              query={query}
+                              activeTab={activeTab}
+                              onWordClick={handleWordClick}
+                              stats={profileStats}
+                              userMeta={userMeta}
+                              loadedCount={loadedCount}
+                              crawledCount={crawledCount}
+                              isCrawling={isCrawling}
+                              onRefresh={handleRefreshCrawl}
+                              onStopCrawl={handleStopCrawl}
+                              posts={allPosts}
+                              comments={allComments}
+                            />
                         </Suspense>}
 
                         {searched && <h2 className="sr-only">{postMode ? `${t("postViewTitle")} ${postId || ""}`.trim() : `${t("resultsFor")} ${mode === "subreddit" ? "r/" : "u/"}{query}`}</h2>}

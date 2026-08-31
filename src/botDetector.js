@@ -665,39 +665,7 @@ export function evaluateBotLikelihood({
     flags.push('Compound risk: Auto-generated Reddit handle operating in automated repost farm');
   }
 
-  // 8. Interaction Depth (Comments vs Submissions)
-  const commentRatio = totalItems > 0 ? (totalComments / totalItems) : 0.5;
-  if (totalItems >= 15 && totalComments === 0 && totalPosts >= 15) {
-    logOdds += 2.2;
-    flags.push('One-way submission bot: 100% link/post submissions with 0 comment engagement');
-    signals.push({
-      id: 'interaction',
-      label: 'Interaction Balance',
-      value: '100% Post Submissions',
-      status: 'warning',
-      detail: 'Pure one-way link broadcasting without conversational replies',
-    });
-  } else if (commentRatio >= 0.25) {
-    logOdds -= 1.0;
-    humanTrustFactors.push(`Active conversational interaction (${Math.round(commentRatio * 100)}% comments)`);
-    signals.push({
-      id: 'interaction',
-      label: 'Interaction Balance',
-      value: `${Math.round(commentRatio * 100)}% Comments / ${Math.round((1 - commentRatio) * 100)}% Posts`,
-      status: 'human',
-      detail: 'Healthy conversational engagement',
-    });
-  } else {
-    signals.push({
-      id: 'interaction',
-      label: 'Interaction Balance',
-      value: `${Math.round(commentRatio * 100)}% Comments / ${Math.round((1 - commentRatio) * 100)}% Posts`,
-      status: 'neutral',
-      detail: 'Predominantly submission-focused activity',
-    });
-  }
-
-  // 9. Activity Velocity Cadence
+  // 8. Activity Velocity Cadence
   if (postsPerDay > 45 && totalItems > 80) {
     logOdds += 2.2;
     flags.push(`Extreme velocity: ${postsPerDay.toFixed(1)} items/day`);
