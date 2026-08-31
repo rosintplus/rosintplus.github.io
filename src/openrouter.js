@@ -86,7 +86,7 @@ A user does NOT need to discuss explicit legislation or political parties to hav
    - Everyday signals: Tech privacy/telemetry, censorship, rules/regulations, personal autonomy.
 
 CRITICAL GUIDELINES:
-- ARCHETYPE: Use a concise 2 to 4 word standard label (e.g. "Libertarian Left (Lib-Left)", "Social Democrat", "Democratic Socialist", "Progressive Libertarian", "Centrist / Moderate", "Fiscal Conservative", "Libertarian Right", "Traditionalist / Auth-Right"). Never use long compound phrases.
+- ARCHETYPE: Use a concise 2 to 4 word standard label that STRICTLY matches the quadrant of your (econ, gov) coordinates. If econ > 0 and gov < 0 ➔ Lib-Right (e.g. "Libertarian Right (Lib-Right)", "Classical Liberal", "Market Libertarian"). If econ < 0 and gov < 0 ➔ Lib-Left (e.g. "Libertarian Left (Lib-Left)", "Social Democrat", "Democratic Socialist"). If econ > 0 and gov > 0 ➔ Auth-Right. If econ < 0 and gov > 0 ➔ Auth-Left. Never output an archetype from a conflicting quadrant.
 - DIMENSION LABELS: Strictly 1 to 2 words per dimension label (e.g. "Free Market", "Mixed Left", "Socialist", "Progressive", "Moderate", "Traditional", "Libertarian", "Balanced", "Statist"). NEVER output long multi-clause descriptions, compound slashes, or parenthetical notes.
 - SUMMARY: A detailed, perceptive 2-sentence overview capturing the user's core worldview, economic stance, and social philosophy.
 - STANCES: Extract 2 to 4 specific worldview stances:

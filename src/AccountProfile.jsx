@@ -64,6 +64,36 @@ function getPolarityColorClass(polarity = '') {
   return "bg-[color:var(--bg)] text-[color:var(--text-muted)] border border-[color:var(--border)]";
 }
 
+function getQuadrantArchetype(econ = 0, gov = 0, rawArchetype = '') {
+  const a = (rawArchetype || '').trim();
+  const isLeft = econ < -1.0;
+  const isRight = econ > 1.0;
+  const isAuth = gov > 1.0;
+  const isLib = gov < -1.0;
+
+  if (isAuth && isLeft) {
+    if (a && (a.toLowerCase().includes('auth-left') || a.toLowerCase().includes('socialist') || a.toLowerCase().includes('communist') || (a.toLowerCase().includes('left') && !a.toLowerCase().includes('lib')))) return a;
+    return "Authoritarian Left (Auth-Left)";
+  }
+  if (isAuth && isRight) {
+    if (a && (a.toLowerCase().includes('auth-right') || a.toLowerCase().includes('conservative') || a.toLowerCase().includes('traditional') || a.toLowerCase().includes('nationalist') || (a.toLowerCase().includes('right') && !a.toLowerCase().includes('lib')))) return a;
+    return "Authoritarian Right (Auth-Right)";
+  }
+  if (isLib && isLeft) {
+    if (a && (a.toLowerCase().includes('lib-left') || a.toLowerCase().includes('social democrat') || a.toLowerCase().includes('democratic socialist') || (a.toLowerCase().includes('left') && a.toLowerCase().includes('lib')))) return a;
+    return "Libertarian Left (Lib-Left)";
+  }
+  if (isLib && isRight) {
+    if (a && (a.toLowerCase().includes('lib-right') || a.toLowerCase().includes('capitalist') || a.toLowerCase().includes('market') || a.toLowerCase().includes('classical liberal') || (a.toLowerCase().includes('right') && a.toLowerCase().includes('lib')))) return a;
+    return "Libertarian Right (Lib-Right)";
+  }
+  if (isLib) return a && a.toLowerCase().includes('lib') ? a : "Libertarian Center";
+  if (isAuth) return a && a.toLowerCase().includes('auth') ? a : "Authoritarian Center";
+  if (isLeft) return a && a.toLowerCase().includes('left') ? a : "Center-Left";
+  if (isRight) return a && a.toLowerCase().includes('right') ? a : "Center-Right";
+  return a || "Centrist / Moderate";
+}
+
 function cleanDimensionLabel(label) {
   if (!label) return '';
   let clean = String(label).replace(/\s*\([^)]*\)/g, '').trim();
@@ -342,20 +372,25 @@ const AccountProfile = memo(function AccountProfile({
   // Context & Stance-aware Political Compass evaluation (AI-Driven)
   const compassAnalysis = useMemo(() => {
     if (aiResult && typeof aiResult.econ === 'number') {
+      const econ = Math.round(aiResult.econ * 10) / 10;
+      const gov = Math.round((typeof aiResult.gov === 'number' ? aiResult.gov : 0) * 10) / 10;
+      const soc = Math.round((typeof aiResult.soc === 'number' ? aiResult.soc : 0) * 10) / 10;
+      const archetype = getQuadrantArchetype(econ, gov, aiResult.archetype);
+
       return {
         hasSignal: true,
-        econ: Math.round(aiResult.econ * 10) / 10,
-        soc: Math.round(aiResult.soc * 10) / 10,
-        gov: Math.round(aiResult.gov * 10) / 10,
-        x: Math.max(-1, Math.min(1, aiResult.econ / 10)),
-        y: Math.max(-1, Math.min(1, aiResult.soc / 10)),
-        archetype: aiResult.archetype || "Centrist / Moderate",
+        econ,
+        soc,
+        gov,
+        x: Math.max(-1, Math.min(1, econ / 10)),
+        y: Math.max(-1, Math.min(1, gov / 10)),
+        archetype,
         confidence: aiResult.confidence || "High (AI Model Analysis)",
         summary: aiResult.summary,
         dimensions: aiResult.dimensions || {
-          econ: { score: aiResult.econ, label: "Economic Stance" },
-          soc: { score: aiResult.soc, label: "Social Stance" },
-          gov: { score: aiResult.gov, label: "Civil Authority" }
+          econ: { score: econ, label: "Economic Stance" },
+          soc: { score: soc, label: "Social Stance" },
+          gov: { score: gov, label: "Civil Authority" }
         },
         detectedPositions: (aiResult.stances || []).map(s => ({
           topic: s.topic,
@@ -364,8 +399,9 @@ const AccountProfile = memo(function AccountProfile({
           keyword: s.topic,
           snippet: s.quote ? (s.quote.startsWith('"') ? s.quote : `"${s.quote}"`) : "",
           reasoning: s.reasoning,
-          econ: aiResult.econ,
-          soc: aiResult.soc
+          econ,
+          soc,
+          gov
         })),
         topSubSignals: Object.entries(stats?.subredditCounts || {})
           .sort((a, b) => b[1] - a[1])
@@ -716,9 +752,9 @@ const AccountProfile = memo(function AccountProfile({
           </div>
 
           <div className="flex items-center gap-2 shrink-0 ml-auto">
-            {compassAnalysis.hasSignal && (compassAnalysis.econ !== 0 || compassAnalysis.soc !== 0) ? (
+            {compassAnalysis.hasSignal && (compassAnalysis.econ !== 0 || compassAnalysis.gov !== 0) ? (
               <span className="text-[10px] sm:text-[10.5px] font-mono text-[color:var(--text-muted)]">
-                Econ: {compassAnalysis.econ > 0 ? `+${compassAnalysis.econ}` : compassAnalysis.econ} · Soc: {compassAnalysis.soc > 0 ? `+${compassAnalysis.soc}` : compassAnalysis.soc}
+                Econ: {compassAnalysis.econ > 0 ? `+${compassAnalysis.econ}` : compassAnalysis.econ} · Gov: {compassAnalysis.gov > 0 ? `+${compassAnalysis.gov}` : compassAnalysis.gov}
               </span>
             ) : (
               <span className="text-[10px] sm:text-[10.5px] text-[color:var(--text-muted)] italic">
