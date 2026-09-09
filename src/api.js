@@ -48,11 +48,10 @@ function buildUrls(username, type, pagination = {}, dateFilters = {}, { sort = "
   } else if (dateFilters.dateFrom) {
     base.push(`after=${dateFilters.dateFrom}`);
   }
-  // Stable secondary cursor so a created_utc tie at a page boundary doesn't
-  // skip or repeat rows. Arctic Shift honors before_id/after_id; PullPush
-  // ignores unknown params, so it's a safe progressive enhancement.
-  if (pagination.beforeId) base.push(`before_id=${encodeURIComponent(pagination.beforeId)}`);
-  if (pagination.afterId) base.push(`after_id=${encodeURIComponent(pagination.afterId)}`);
+  // NOTE: Arctic Shift rejects before_id/after_id with HTTP 400 (verified),
+  // so pagination is timestamp-only. Same-second ties at a page boundary are
+  // handled client-side by deduping on id (see callers). PullPush honors
+  // `before`/`after` epoch timestamps.
   const qs = base.join("&");
   return {
     arctic: type === "posts" ? `${ARCTIC}/api/posts/search?${qs}` : `${ARCTIC}/api/comments/search?${qs}`,
@@ -272,12 +271,15 @@ export async function fetchBoth(username, type, pagination = {}, dateFilters = {
   // Respect the server/requested sort rather than forcing desc — Oldest must
   // actually page into older history, not just flip the current page.
   result.sort((a, b) => sort === "asc" ? a.created_utc - b.created_utc : b.created_utc - a.created_utc);
+  // Only mark pagination done when both sources actually answered.
+  // A timeout/failure (ok:false) means the tail is unknown — keep Load More enabled.
+  const bothOk = arcticRes.ok && pullpushRes.ok;
   return {
     items: result,
     sources,
     arcticDown: !arcticRes.ok,
     pullpushDown: !pullpushRes.ok,
-    done: arcticRes.data.length < LIMIT && pullpushRes.data.length < LIMIT
+    done: bothOk && arcticRes.data.length < LIMIT && pullpushRes.data.length < LIMIT
   };
 }
 
@@ -316,13 +318,14 @@ export async function fetchPostById(postId, { signal } = {}) {
     const hit = altRes.data.find(x => x.id === id) || altRes.data[0];
     if (hit) return { post: hit, sources: ["PullPush"], arcticDown: !arcticRes.ok, pullpushDown: !ppRes.ok };
   }
-  // Fallback: await whichever is still pending (if timeout, wait a bit more)
-  const finalPp = ppRes.timeout ? await ppPromise.catch(() => ({ ok: false, data: [] })) : ppRes;
+  // Fallback: bounded wait (2s) so a hung PullPush can't hang the view forever.
+  const bounded = (p) => Promise.race([p.catch(() => ({ ok: false, data: [] })), sleep(2000).then(() => ({ ok: false, data: [], timeout: true }))]);
+  const finalPp = ppRes.timeout ? await bounded(ppPromise) : ppRes;
   if (finalPp.ok && finalPp.data?.[0]) {
     const hit = finalPp.data.find(x => x.id === id) || finalPp.data[0];
     if (hit) return { post: hit, sources: ["PullPush"], arcticDown: !arcticRes.ok, pullpushDown: false };
   }
-  const finalAlt = altRes.timeout ? await altPromise.catch(() => ({ ok: false, data: [] })) : altRes;
+  const finalAlt = altRes.timeout ? await bounded(altPromise) : altRes;
   if (finalAlt.ok && finalAlt.data?.length) {
     const hit = finalAlt.data.find(x => x.id === id) || finalAlt.data[0];
     if (hit) return { post: hit, sources: ["PullPush"], arcticDown: !arcticRes.ok, pullpushDown: false };
@@ -361,7 +364,9 @@ export async function fetchCommentsForPost(postId, { signal, limit = 100 } = {})
   if (!ppRes.timeout && ppRes.ok && ppRes.data.length) {
     return { comments: ppRes.data, sources: ["PullPush"], arcticDown: !arcticRes.ok, pullpushDown: false };
   }
-  const finalPp = ppRes.timeout ? await ppPromise : ppRes;
+  const finalPp = ppRes.timeout
+    ? await Promise.race([ppPromise, sleep(2000).then(() => ({ ok: false, data: [], timeout: true }))])
+    : ppRes;
   if (finalPp.ok && finalPp.data.length) {
     return { comments: finalPp.data, sources: ["PullPush"], arcticDown: !arcticRes.ok, pullpushDown: false };
   }

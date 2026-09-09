@@ -10,7 +10,10 @@
     --status-mod: #ff6a33;
 
     --bg: #0d0d0d;
+    --accent: #ff4500;
     --tint: var(--accent);
+    --text-base: white;
+    --color-scheme: dark;
     --accent-text: color-mix(in srgb, var(--tint) 70%, var(--text-base, white));
     --text: color-mix(in srgb, var(--tint) 30%, var(--text-base, white));
     --text-muted: color-mix(in srgb, var(--tint) 30%, color-mix(in srgb, var(--text-base, white) 65%, var(--bg)));

@@ -3,7 +3,7 @@ import { downloadFile, normalizeUsername, normalizeSubreddit, parsePostInput } f
 import { getSavedUsernames, emptyStats, processItem } from "./profileData.js";
 import { useI18n, LANGS, LOCALES, setLang, relTime, tN } from "./i18n.js";
 
-import { useState, useCallback, useEffect, useLayoutEffect, useMemo, Component, memo, useRef, lazy, Suspense, useDeferredValue } from "react";
+import { useState, useCallback, useEffect, useLayoutEffect, useMemo, Component, memo, useRef, lazy, Suspense, useDeferredValue, useId } from "react";
 import { createPortal } from "react-dom";
 
 const LOGO_PATH = "M696.25 1330.0 618.75 873.75H732.5Q752.5 550.0 1071.25 550.0Q1260.0 550.0 1360.625 688.75Q1461.25 827.5 1461.25 1088.75H1123.75Q1123.75 971.25 1080.625 920.0Q1037.5 868.75 942.5 868.75Q818.75 868.75 757.5 988.75Q696.25 1108.75 696.25 1330.0ZM78.75 1900.0V1610.0H1006.25V1900.0ZM358.75 1900.0V575.0H646.25L696.25 955.0V1900.0ZM128.75 865.0V575.0H628.75L653.75 865.0Z M2100.0 1920.0Q1559.0 1920.0 1559.0 1200.0Q1559.0 460.0 2100.0 460.0Q2641.0 460.0 2641.0 1200.0Q2641.0 1920.0 2100.0 1920.0ZM2100.0 1668.0Q2364.0 1668.0 2364.0 1200.0Q2364.0 712.0 2100.0 712.0Q1836.0 712.0 1836.0 1200.0Q1836.0 1668.0 2100.0 1668.0Z M3251.0 1920.0Q3130.0 1920.0 3016.0 1899.5Q2902.0 1879.0 2812.0 1842.0L2848.0 1572.0Q2958.0 1618.0 3066.5 1643.0Q3175.0 1668.0 3267.0 1668.0Q3374.0 1668.0 3431.0 1630.0Q3488.0 1592.0 3488.0 1521.0Q3488.0 1428.0 3371.0 1373.0L3167.0 1274.0Q3016.0 1200.0 2933.0 1091.0Q2850.0 982.0 2850.0 850.0Q2850.0 664.0 2973.0 562.0Q3096.0 460.0 3321.0 460.0Q3452.0 460.0 3569.5 506.0Q3687.0 552.0 3778.0 639.0L3596.0 848.0Q3527.0 782.0 3457.0 746.5Q3387.0 711.0 3322.0 711.0Q3234.0 711.0 3185.0 748.5Q3136.0 786.0 3136.0 857.0Q3136.0 904.0 3170.5 946.0Q3205.0 988.0 3269.0 1022.0L3461.0 1121.0Q3611.0 1199.0 3692.5 1303.0Q3774.0 1407.0 3774.0 1526.0Q3774.0 1715.0 3638.0 1817.5Q3502.0 1920.0 3251.0 1920.0Z M4367.0 1900.0V480.0H4631.0V1900.0ZM4051.0 1900.0V1662.0H4949.0V1900.0ZM4051.0 717.0V480.0H4949.0V717.0Z M5772.0 1900.0 5522.0 790.0H5413.0V480.0H5628.0L5878.0 1590.0H5945.0V1900.0ZM5231.0 1900.0V480.0H5485.0V1900.0ZM5915.0 1900.0V480.0H6169.0V1900.0Z M6768.0 1900.0V480.0H7032.0V1900.0ZM6363.0 723.0V480.0H7437.0V723.0Z M7966.0 1710.0V672.0H8234.0V1710.0ZM7600.0 1316.0V1066.0H8600.0V1316.0Z";
@@ -92,10 +92,21 @@ export const HoverHint = memo(function HoverHint({
       window.removeEventListener("scroll", onScroll, true);
     };
   }, [pos, leave]);
-  return <div className={className} onMouseEnter={track} onMouseMove={track} onMouseLeave={leave} onPointerLeave={leave} onMouseOut={leave}>
+  const hintId = useId();
+  const showAtAnchor = useCallback((e) => {
+    try {
+      const r = e.currentTarget?.getBoundingClientRect?.();
+      if (r) {
+        setPos({ x: Math.min(r.left, (window.innerWidth || 0) - 180), y: r.bottom + 6 });
+        return;
+      }
+    } catch { /* ignore */ }
+    setPos({ x: 16, y: 16 });
+  }, []);
+  return <div className={className} tabIndex={0} role="button" aria-describedby={pos ? hintId : undefined} onMouseEnter={track} onMouseMove={track} onMouseLeave={leave} onPointerLeave={leave} onMouseOut={leave} onFocus={showAtAnchor} onBlur={leave} onClick={showAtAnchor} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") showAtAnchor(e); if (e.key === "Escape") leave(); }}>
             {children}
             {pos && createPortal(
-                <span className="pointer-events-none fixed z-[100] whitespace-nowrap rounded border border-[color:var(--border-hover)] bg-[color:var(--bg)] px-2 py-1 text-[11px] text-[color:var(--text)] shadow-lg shadow-black/40" style={{ left: pos.x, top: pos.y }}>
+                <span id={hintId} role="tooltip" className="pointer-events-none fixed z-[100] whitespace-nowrap rounded border border-[color:var(--border-hover)] bg-[color:var(--bg)] px-2 py-1 text-[11px] text-[color:var(--text)] shadow-lg shadow-black/40" style={{ left: pos.x, top: pos.y }}>
                     {hint}
                 </span>,
                 document.body
@@ -103,8 +114,14 @@ export const HoverHint = memo(function HoverHint({
         </div>;
 });
 
-function fmtNum(n) {
+function fmtNum(n, locale) {
   if (n == null) return null;
+  try {
+    if (locale) {
+      const nf = new Intl.NumberFormat(locale, { notation: "compact", maximumFractionDigits: 1 });
+      return nf.format(n);
+    }
+  } catch { /* fall through to manual */ }
   if (Math.abs(n) >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
   if (Math.abs(n) >= 1000) return `${(n / 1000).toFixed(1)}k`;
   return String(n);
@@ -148,38 +165,54 @@ function matchKeyword(item, kw, type) {
   return fields.some(f => typeof f === "string" && regex.test(f));
 }
 
-export function HighlightText({ text, highlight }) {
-  if (!text || typeof text !== "string") return null;
-  if (!highlight || !highlight.trim()) return text;
+export const HighlightText = memo(function HighlightText({ text, highlight }) {
+  const parts = useMemo(() => {
+    if (!text || typeof text !== "string") return null;
+    if (!highlight || !highlight.trim()) return [text];
+    const clean = highlight.trim().replace(/^(?:r\/|u\/)/i, "").replace(/^["']|["']$/g, "");
+    if (!clean) return [text];
+    const escaped = clean.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = /^\w+$/.test(clean) ? `\\b(${escaped})\\b` : `(${escaped})`;
+    let split;
+    try {
+      split = text.split(new RegExp(pattern, "gi"));
+    } catch {
+      return [text];
+    }
+    if (split.length === 1) return [text];
+    // Non-global test regex: global /g .test() is stateful via lastIndex and skips matches.
+    let testRe;
+    try {
+      testRe = new RegExp(`^(?:${pattern})$`, "i");
+    } catch {
+      return split;
+    }
+    return split.map((part, i) => ({ part, hit: testRe.test(part), i }));
+  }, [text, highlight]);
 
-  const clean = highlight.trim().replace(/^(?:r\/|u\/)/i, "").replace(/^["']|["']$/g, "");
-  if (!clean) return text;
-
-  const escaped = clean.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const pattern = /^\w+$/.test(clean) ? `\\b(${escaped})\\b` : `(${escaped})`;
-  const regex = new RegExp(pattern, "gi");
-  const parts = text.split(regex);
-
-  if (parts.length === 1) return text;
-
-  return parts.map((part, i) =>
-    regex.test(part) ? (
+  if (!parts) return null;
+  if (parts.length === 1 && typeof parts[0] === "string") return parts[0];
+  return parts.map((entry) => {
+    if (typeof entry === "string") return entry;
+    if (!entry.hit) return entry.part;
+    return (
       <mark
-        key={i}
+        key={entry.i}
         className="bg-amber-400/30 text-[color:var(--text)] font-semibold rounded-[2px] px-0.5"
       >
-        {part}
+        {entry.part}
       </mark>
-    ) : (
-      part
-    )
-  );
-}
+    );
+  });
+});
 
 function getPostThumbnail(post) {
   try {
     if (post.preview?.images?.length) {
-      const src = post.preview.images[0].source?.url;
+      const img = post.preview.images[0];
+      // Prefer a small resolution for the 70x52 list thumb — full source can be MBs.
+      const small = img.resolutions?.[0]?.url || img.resolutions?.[Math.min(1, (img.resolutions?.length || 1) - 1)]?.url;
+      const src = small || img.source?.url;
       if (src) return src.replace(/&amp;/g, "&");
     }
   } catch {/* ignore */}
@@ -371,12 +404,12 @@ const StatusBadges = memo(function StatusBadges({
     return null;
   }
   return <>
-            {removed && <span className={`${BADGE} text-[color:var(--status-removed)] bg-[color:var(--status-removed)]/10 border border-[color:var(--status-removed)]/20`}>{t("badgeRemoved")}</span>}
-            {deleted && <span className={`${BADGE} text-[color:var(--status-deleted)] bg-[color:var(--status-deleted)]/10 border border-[color:var(--status-deleted)]/20`}>{t("badgeDeleted")}</span>}
-            {item.over_18 && <span className={`${BADGE} text-[color:var(--accent)] bg-[color:var(--accent)]/10 border border-[color:var(--accent)]/20`}>NSFW</span>}
+            {removed && <span className={`${BADGE} text-[color:var(--status-removed)] brightness-75 dark:brightness-125 bg-[color:var(--status-removed)]/10 border border-[color:var(--status-removed)]/20`}>{t("badgeRemoved")}</span>}
+            {deleted && <span className={`${BADGE} text-[color:var(--status-deleted)] brightness-75 dark:brightness-125 bg-[color:var(--status-deleted)]/10 border border-[color:var(--status-deleted)]/20`}>{t("badgeDeleted")}</span>}
+            {item.over_18 && <span className={`${BADGE} text-[color:var(--accent)] brightness-75 dark:brightness-125 bg-[color:var(--accent)]/10 border border-[color:var(--accent)]/20`}>NSFW</span>}
             {item.spoiler && <span className={`${BADGE} bg-[color:var(--border)] text-[color:var(--text)] border border-[color:var(--border)]`}>{t("badgeSpoiler")}</span>}
-            {dist === "admin" && <span className={`${BADGE} text-[color:var(--status-mod)] bg-[color:var(--status-mod)]/10 border border-[color:var(--status-mod)]/20`}>Admin</span>}
-            {dist === "moderator" && <span className={`${BADGE} text-[color:var(--accent-text)] bg-[color:var(--accent)]/10 border border-[color:var(--accent)]/20`}>Mod</span>}
+            {dist === "admin" && <span className={`${BADGE} text-[color:var(--status-mod)] brightness-75 dark:brightness-125 bg-[color:var(--status-mod)]/10 border border-[color:var(--status-mod)]/20`}>Admin</span>}
+            {dist === "moderator" && <span className={`${BADGE} text-[color:var(--accent-text)] brightness-90 dark:brightness-125 bg-[color:var(--accent)]/10 border border-[color:var(--accent)]/20`}>Mod</span>}
         </>;
 });
 
@@ -445,7 +478,7 @@ const PostCard = memo(function PostCard({
     ].filter(Boolean).join("\n");
   }, [post, status, postUrl]);
 return <>
-            <div onClick={handleCardClick} className={`bg-[color:var(--bg-elevated)] border ${statusBorder(status)} rounded overflow-hidden transition-all duration-150 hover:shadow-lg group ${hasBody ? "cursor-pointer" : ""}`}>
+            <div onClick={handleCardClick} role={hasBody ? "button" : undefined} tabIndex={hasBody ? 0 : undefined} aria-expanded={hasBody ? bodyOpen : undefined} onKeyDown={hasBody ? (e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setUserBodyOpen(o => !o); } }) : undefined} className={`bg-[color:var(--bg-elevated)] border ${statusBorder(status)} rounded overflow-hidden transition-all duration-150 hover:shadow-lg group ${hasBody ? "cursor-pointer" : ""}`}>
                 <div className="flex">
                     <div className="flex flex-col items-center justify-start gap-1 px-2 py-3 bg-[color:var(--bg)] min-w-[40px]">
                         <IconArrowUp />
@@ -485,7 +518,7 @@ return <>
                                     <a href={postUrl} target="_blank" rel="noopener noreferrer" className="relative z-10 flex items-center gap-1 text-[color:var(--accent-text)] hover:underline truncate max-w-[200px]">
                                         <IconExternal /><span className="truncate">{post.domain || post.subreddit_name_prefixed || `r/${post.subreddit}`}</span>
                                     </a>
-                                    {hasBody && <button aria-label={bodyOpen ? "Hide post body" : "Show post body"} onClick={e => {
+                                    {hasBody && <button aria-label={bodyOpen ? t("hideBody") : t("showBody")} aria-expanded={bodyOpen} onClick={e => {
                     e.preventDefault();
                     setUserBodyOpen(o => !o);
                   }} className="relative z-10 flex items-center gap-1 text-[color:var(--text-muted)] hover:text-[color:var(--text)] transition-colors">
@@ -506,7 +539,7 @@ return <>
                                         e.stopPropagation();
                                         window.open(thumb, "_blank", "noopener,noreferrer");
                                     }} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); window.open(thumb, "_blank", "noopener,noreferrer"); } }} className="relative flex items-center justify-center w-[70px] h-[52px] rounded overflow-hidden bg-[color:var(--bg-elevated)] border border-[color:var(--border-hover)] cursor-zoom-in">
-                                        <img src={thumb} alt={`${post.title}`} width="70" height="52" className="absolute inset-0 w-full h-full object-cover" loading="lazy" onError={() => setImgError(true)} />
+                                        <img src={thumb} alt="" width="70" height="52" className="absolute inset-0 w-full h-full object-cover aspect-[70/52]" loading="lazy" decoding="async" onError={() => setImgError(true)} />
                                     </div>
                                 </HoverHint>}
                             </div>
@@ -675,7 +708,7 @@ const CommentCard = memo(function CommentCard({
             {!isNested && <ParentChain parentId={comment.parent_id} />}
 
             <div className="flex">
-                <button aria-label={collapsed ? "Expand comment" : "Collapse comment"} onClick={toggleCollapsed} onMouseEnter={onLineEnter} onMouseLeave={onLineLeave} className="relative flex-shrink-0 w-5 bg-[color:var(--bg)] transition-colors">
+                <button aria-label={collapsed ? t("expandComment") : t("collapseComment")} aria-expanded={!collapsed} onClick={toggleCollapsed} onMouseEnter={onLineEnter} onMouseLeave={onLineLeave} className="relative flex-shrink-0 w-5 bg-[color:var(--bg)] transition-colors">
                     <svg className="absolute inset-x-0 top-0 w-full" style={{ height: collapsed ? 'calc(100% - 8px)' : '100%' }} fill="none">
                         <line x1="10.75" y1="8" x2="10.75" y2="100%"
                             stroke={collapsed ? "var(--accent)" : lineHovered ? "var(--text-muted)" : "var(--border-hover)"}
@@ -738,7 +771,7 @@ const CommentCard = memo(function CommentCard({
                     {!replies && <div className="flex items-center py-1.5" style={{
         paddingLeft: 9
       }}>
-                            <button aria-label="Collapse comment" onClick={toggleCollapsed} onMouseEnter={onLineEnter} onMouseLeave={onLineLeave} className="flex-shrink-0 -mt-[14px] bg-transparent border-0 p-0 cursor-pointer">
+                            <button aria-label={t("collapseComment")} onClick={toggleCollapsed} onMouseEnter={onLineEnter} onMouseLeave={onLineLeave} className="flex-shrink-0 -mt-[14px] bg-transparent border-0 p-0 cursor-pointer">
                                 <svg width="22" height="32" viewBox="0 0 22 32" fill="none" className="overflow-visible">
                                     {/* Horizontal run extends past the viewBox (overflow-visible) so it
                                         passes under the circle button — its opaque bg masks the excess,
@@ -746,7 +779,7 @@ const CommentCard = memo(function CommentCard({
                                     <path d="M 1 0 L 1 16 Q 1 23 8 23 L 28 23" stroke={lineHovered ? "var(--text-muted)" : "var(--border-hover)"} strokeWidth={2} fill="none" style={STROKE_TRANSITION} />
                                 </svg>
                             </button>
-                            <button onClick={handleLoadReplies} disabled={repliesLoading} aria-label="Load replies" className="relative w-[18px] h-[18px] rounded-full border-2 border-[color:var(--border)] bg-[color:var(--bg)] flex items-center justify-center text-[color:var(--text-muted)] hover:border-[color:var(--accent)] hover:text-[color:var(--text)] transition-all disabled:opacity-40 flex-shrink-0 -ml-[1px]">
+                            <button onClick={handleLoadReplies} disabled={repliesLoading} aria-label={t("loadReplies")} className="relative w-[18px] h-[18px] rounded-full border-2 border-[color:var(--border)] bg-[color:var(--bg)] flex items-center justify-center text-[color:var(--text-muted)] hover:border-[color:var(--accent)] hover:text-[color:var(--text)] transition-all disabled:opacity-40 flex-shrink-0 -ml-[1px]">
                                 {repliesLoading ? <span className="text-[9px] leading-none">…</span> : <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
                                         <line x1="5" y1="1" x2="5" y2="9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
                                         <line x1="1" y1="5" x2="9" y2="5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
@@ -823,7 +856,7 @@ const EmptyState = memo(function EmptyState({
                 {hasFilters && <button type="button" onClick={onClearFilters} className="text-[color:var(--accent-text)] hover:underline">
                         {t("clearRetry")}
                     </button>}
-                <a href={mode === "subreddit" ? `https://www.reddit.com/r/${query}` : `https://www.reddit.com/search/?q=author%3A%22${query}%22&type=${tab}`} target="_blank" rel="noopener noreferrer" className="text-[color:var(--accent-text)] hover:underline">
+                <a href={mode === "subreddit" ? `https://www.reddit.com/r/${encodeURIComponent(query)}` : `https://www.reddit.com/search/?q=author%3A%22${encodeURIComponent(query)}%22&type=${tab}`} target="_blank" rel="noopener noreferrer" className="text-[color:var(--accent-text)] hover:underline">
                     {t("searchDirectly")}
                 </a>
             </div>
@@ -849,9 +882,11 @@ const TabBtn = memo(function TabBtn({
   count,
   countIsPlus,
   active,
-  onClick
+  tab,
+  onSelect
 }) {
-  return <button onClick={onClick} role="tab" aria-selected={active} className={`group/tab relative flex-1 flex items-center justify-center px-2.5 py-2.5 text-[15px] sm:px-4 sm:py-2.5 sm:text-sm font-medium transition-colors ${active ? "text-[color:var(--text)]" : "text-[color:var(--text-muted)] hover:text-[color:var(--text)]"}`}>
+  const handleClick = useCallback(() => onSelect(tab), [onSelect, tab]);
+  return <button onClick={handleClick} role="tab" aria-selected={active} className={`group/tab relative flex-1 flex items-center justify-center px-2.5 py-2.5 text-[15px] sm:px-4 sm:py-2.5 sm:text-sm font-medium transition-colors ${active ? "text-[color:var(--text)]" : "text-[color:var(--text-muted)] hover:text-[color:var(--text)]"}`}>
             {label}
             {(count != null && count !== 0) && <span className={`ml-1.5 text-[13px] px-2 py-0.5 sm:text-[11px] sm:px-1.5 rounded-full transition-colors ${active ? "bg-[color:var(--accent)] text-[color:var(--bg)] font-bold" : "bg-[color:var(--border)] text-[color:var(--text-muted)] group-hover/tab:bg-[color:var(--accent)]/20 group-hover/tab:text-[color:var(--accent)]"}`}>
                     {countIsPlus ? `${count}+` : count}
@@ -1069,9 +1104,24 @@ function applyTheme(t, isDark) {
   if (meta) meta.setAttribute("content", t.bg);
 }
 
+function safeGet(key, fallback) {
+  try {
+    return localStorage.getItem(key) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+function safeSet(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* storage unavailable (private mode) — theme still applies in-memory */
+  }
+}
+
 const ThemeSwitcher = memo(() => {
-  const [theme, setTheme] = useState(() => localStorage.getItem("rosint-theme") || "default");
-  const [colorMode, setColorMode] = useState(() => localStorage.getItem("rosint-color-mode") || "auto");
+  const [theme, setTheme] = useState(() => safeGet("rosint-theme", "default"));
+  const [colorMode, setColorMode] = useState(() => safeGet("rosint-color-mode", "auto"));
 
   useEffect(() => {
     let isDark = true;
@@ -1086,9 +1136,13 @@ const ThemeSwitcher = memo(() => {
 
     applyTheme(t, isDark);
 
-    localStorage.setItem("rosint-theme", theme);
-    localStorage.setItem("rosint-color-mode", colorMode);
-    localStorage.setItem("rosint-resolved", JSON.stringify({ dark: tGroup.dark, light: tGroup.light, mode: colorMode }));
+    safeSet("rosint-theme", theme);
+    safeSet("rosint-color-mode", colorMode);
+    try {
+      localStorage.setItem("rosint-resolved", JSON.stringify({ dark: tGroup.dark, light: tGroup.light, mode: colorMode }));
+    } catch {
+      /* ignore */
+    }
   }, [theme, colorMode]);
 
   useEffect(() => {
@@ -1378,6 +1432,8 @@ export default function App() {
   const modeRef = useRef(initialMode);
   const [query, setQuery] = useState(initialPostId ? initialPostRaw : initialUser);
   const [activeTab, setActiveTab] = useState(initialParams.tab === "comments" ? "comments" : initialParams.tab === "posts" ? "posts" : "all");
+  const handleTabSelect = useCallback((tab) => setActiveTab(tab), []);
+  const handleSwitchTab = useCallback(() => setActiveTab(prev => prev === "posts" ? "comments" : "posts"), []);
   const [searched, setSearched] = useState(!!initialUser || !!initialPostId);
   const [initialLoading, setInitialLoading] = useState(!!initialUser || !!initialPostId);
   const [postId, setPostId] = useState(initialPostId);
@@ -1526,6 +1582,7 @@ export default function App() {
         }
 
         while (!controller.signal.aborted) {
+          // Timestamp-only cursor: Arctic rejects before_id with HTTP 400.
           const pagination = before ? { before } : {};
           const result = await fetchBoth(query, type, pagination, {}, { signal: controller.signal, sort: "desc", mode });
 
@@ -1554,9 +1611,16 @@ export default function App() {
           }
 
           const last = result.items[result.items.length - 1];
-          if (!last || last.id === lastId || result.items.length < LIMIT) break;
-          lastId = last.id;
-          before = last.created_utc;
+          if (!last || result.items.length < LIMIT) break;
+          if (last.id === lastId) {
+            // Repeated page (cursor didn't advance) — step back 1s to force
+            // progress instead of stalling. `before` strictly decreases here,
+            // so this always terminates.
+            before = (before ?? last.created_utc) - 1;
+          } else {
+            lastId = last.id;
+            before = last.created_utc;
+          }
           await sleep(400);
         }
       }
@@ -2133,7 +2197,7 @@ export default function App() {
                 <div className={`w-full max-w-3xl mx-auto px-3 sm:px-4 ${mounted ? "transition-all duration-300" : ""} ${searched ? "pt-6" : "flex-1 flex flex-col pt-[10vh] sm:pt-[14vh] pb-[10vh] sm:pb-[15vh]"}`}>
                     {!searched && (
                         <div className="text-center mb-8">
-                            <h1 className="text-[11rem] sm:text-[18rem] font-bold text-[color:var(--text)] tracking-tight leading-none select-none ml-16 sm:ml-24" style={{ WebkitFontSmoothing: 'antialiased', MozOsxFontSmoothing: 'grayscale' }}>
+                            <h1 className="font-bold text-[color:var(--text)] tracking-tight leading-none select-none text-[clamp(4rem,28vw,11rem)] sm:text-[clamp(6rem,30vw,18rem)]" style={{ WebkitFontSmoothing: 'antialiased', MozOsxFontSmoothing: 'grayscale' }}>
                                 <svg className="inline-block align-middle overflow-visible w-auto h-[1em]" viewBox="0 0 180 120" fill="none" aria-hidden="true">
                                     <path fill="currentColor" d="M36.6533203125 76.1796875 33.6865234375 58.7138671875H38.041015625Q38.806640625 46.3203125 51.0087890625 46.3203125Q58.234375 46.3203125 62.08642578125 51.6318359375Q65.9384765625 56.943359375 65.9384765625 66.9443359375H53.0185546875Q53.0185546875 62.4462890625 51.36767578125 60.484375Q49.716796875 58.5224609375 46.080078125 58.5224609375Q41.3427734375 58.5224609375 38.998046875 63.1162109375Q36.6533203125 67.7099609375 36.6533203125 76.1796875ZM13.0146484375 98.0V86.8984375H48.5205078125V98.0ZM23.7333984375 98.0V47.27734375H34.7392578125L36.6533203125 61.82421875V98.0ZM14.9287109375 58.37890625V47.27734375H34.0693359375L35.0263671875 58.37890625Z" />
                                     <path fill="var(--accent)" d="M101.720703125 97.908203125V48.23828125H114.544921875V97.908203125ZM84.20703125 79.0546875V67.091796875H132.05859375V79.0546875Z" />
@@ -2381,7 +2445,7 @@ export default function App() {
                     isPlus = typeof metaCount !== "number" && liveCount >= LIMIT;
                   }
                   const tabLabel = tab === "all" ? t("tabAll") : tab === "posts" ? t("tabPosts") : t("tabComments");
-                  return <TabBtn key={tab} label={tabLabel} count={countToDisplay} countIsPlus={isPlus} active={activeTab === tab} onClick={() => setActiveTab(tab)} />;
+                  return <TabBtn key={tab} label={tabLabel} count={countToDisplay} countIsPlus={isPlus} active={activeTab === tab} tab={tab} onSelect={handleTabSelect} />;
                 })}
                         </div>
 
@@ -2443,7 +2507,7 @@ export default function App() {
                             </div> : <>
                                 <div className="hidden grid-cols-3 gap-1 mb-1.5">
                                     <HoverHint hint={t("searchOnRedditHint")}>
-                                        <a href={mode === "subreddit" ? `https://www.reddit.com/r/${query}` : `https://www.reddit.com/search/?q=author%3A%22${query}%22`} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-1 w-full min-w-0 text-[11px] text-[color:var(--text-muted)] hover:text-[color:var(--accent-text)] transition-colors h-8 border border-[color:var(--border-hover)] rounded">
+                                        <a href={mode === "subreddit" ? `https://www.reddit.com/r/${encodeURIComponent(query)}` : `https://www.reddit.com/search/?q=author%3A%22${encodeURIComponent(query)}%22`} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-1 w-full min-w-0 text-[11px] text-[color:var(--text-muted)] hover:text-[color:var(--accent-text)] transition-colors h-8 border border-[color:var(--border-hover)] rounded">
                                             <IconExternal /> {t("searchOnReddit")}
                                         </a>
                                     </HoverHint>
@@ -2510,7 +2574,7 @@ export default function App() {
                                 <div className="hidden flex-wrap items-center gap-x-1 gap-y-1.5 mb-3 justify-between">
                                     <div className="flex items-center gap-1.5">
                                         <HoverHint hint={t("searchOnRedditHint")}>
-                                            <a href={mode === "subreddit" ? `https://www.reddit.com/r/${query}` : `https://www.reddit.com/search/?q=author%3A%22${query}%22`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-[11px] text-[color:var(--text-muted)] hover:text-[color:var(--accent-text)] transition-colors leading-relaxed">
+                                            <a href={mode === "subreddit" ? `https://www.reddit.com/r/${encodeURIComponent(query)}` : `https://www.reddit.com/search/?q=author%3A%22${encodeURIComponent(query)}%22`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-[11px] text-[color:var(--text-muted)] hover:text-[color:var(--accent-text)] transition-colors leading-relaxed">
                                                 <IconExternal /> {t("searchOnReddit")}
                                             </a>
                                         </HoverHint>
@@ -2608,7 +2672,7 @@ export default function App() {
                                     <IconSpinner />
                                     <span className="text-[11px]">{t("fetching")}</span>
                                 </div>
-                            </div> : filteredItems.length === 0 ? active.error ? <ErrorState message={active.error} onRetry={handleRetry} /> : <EmptyState tab={activeTab} hasFilters={!!hasFilters} query={query} mode={mode} onSwitchTab={() => setActiveTab(activeTab === "posts" ? "comments" : "posts")} onClearFilters={clearFilters} deletedOnly={deletedOnly} nsfwOnly={nsfwOnly} keyword={keyword} /> : <>
+                            </div> : filteredItems.length === 0 ? active.error ? <ErrorState message={active.error} onRetry={handleRetry} /> : <EmptyState tab={activeTab} hasFilters={!!hasFilters} query={query} mode={mode} onSwitchTab={handleSwitchTab} onClearFilters={clearFilters} deletedOnly={deletedOnly} nsfwOnly={nsfwOnly} keyword={keyword} /> : <>
                                 <div aria-live="polite" aria-atomic="true" className="flex flex-col gap-2">
                                     {filteredItems.slice(0, visibleCount).map(item => isPost(item)
                                       ? <CardBoundary key={`p-${item.id}`}><div className="cv-auto"><PostCard post={item} highlightTerm={deferredKeyword} /></div></CardBoundary>

@@ -10,28 +10,45 @@ function getApiKey() {
   if (typeof globalThis !== "undefined" && globalThis.process?.env?.VITE_OPENROUTER_KEY) {
     return globalThis.process.env.VITE_OPENROUTER_KEY;
   }
-  if (typeof window !== "undefined" && window.localStorage) {
-    const userKey = window.localStorage.getItem("rosint_openrouter_key");
-    if (userKey) return userKey;
-  }
   try {
-    return atob("c2stb3ItdjEtOWZhZDY1ZjlhZDhhYzg2ZmMyZTY0ZTMzYjgzMWM0ODkyZDMxMjdhZDAyYzQxNDZiMWE1NjEwMTE1NDY4NDIyMQ==");
+    if (typeof window !== "undefined" && window.localStorage) {
+      const userKey = window.localStorage.getItem("rosint_openrouter_key");
+      if (userKey) return userKey;
+    }
   } catch {
-    return "";
+    /* storage unavailable — fall through to env key */
   }
+  // No bundled secret: client builds must supply VITE_OPENROUTER_KEY or a
+  // user-provided key. Never ship a hardcoded bearer token in the bundle.
+  return "";
+}
+
+function hashIds(items, key = "id", limit = 12) {
+  let h = 0;
+  const n = Math.min(items?.length || 0, limit);
+  for (let i = 0; i < n; i++) {
+    const s = String(items[i]?.[key] || "");
+    for (let j = 0; j < s.length; j++) {
+      h = (Math.imul(h, 31) + s.charCodeAt(j)) | 0;
+    }
+    h = (Math.imul(h, 31) + 0x9e3779b9) | 0;
+  }
+  return (h >>> 0).toString(36);
 }
 
 const OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
 
-// Ordered list of active free-tier models with fallback support
+// Ordered list of active free-tier models with fallback support.
+// Live-verified: every entry here returned HTTP 200. The Gemma :free models
+// were dropped — Google rate-limits them upstream (HTTP 429 on every call).
+// IDs not present in https://openrouter.ai/api/v1/models return HTTP 404,
+// so keep this list in sync or every model fails.
 export const FREE_MODELS = [
-  "minimax/minimax-m3:free",
   "openrouter/free",
   "nvidia/nemotron-3-super-120b-a12b:free",
-  "google/gemma-4-26b-a4b-it:free",
-  "google/gemma-4-31b-it:free",
   "nvidia/nemotron-3.5-lightning:free",
-  "z-ai/glm-5.2:free"
+  "nvidia/nemotron-3-ultra-550b-a55b:free",
+  "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
 ];
 
 const aiResponseCache = new Map();
@@ -159,7 +176,7 @@ export async function analyzeProfileWithAI({
 } = {}) {
   if (!username) throw new Error("Username required for AI analysis");
 
-  const cacheKey = `${username.toLowerCase()}_${(posts?.length || 0)}_${(comments?.length || 0)}`;
+  const cacheKey = `${username.toLowerCase()}_${(posts?.length || 0)}_${(comments?.length || 0)}_${hashIds(posts)}_${hashIds(comments)}_${hashIds(Object.keys(stats?.subredditCounts || {}).sort().slice(0, 8).map(s => ({ id: s })), "id", 8)}`;
   if (!bypassCache && aiResponseCache.has(cacheKey)) {
     return aiResponseCache.get(cacheKey);
   }
@@ -212,9 +229,16 @@ export async function analyzeProfileWithAI({
       });
 
       if (!response.ok) {
-        const errBody = await response.text().catch(() => "");
+        const errBody = (await response.text().catch(() => "")).slice(0, 300);
         console.warn(`OpenRouter model ${model} error (${response.status}):`, errBody);
-        lastError = new Error(`OpenRouter HTTP ${response.status}`);
+        // Account-level blocks (daily free quota spent, payment required) apply
+        // to every model — trying the next one just burns more quota. Stop now.
+        if (response.status === 402 || /per-day|per_day|add \d+ credits|insufficient/i.test(errBody)) {
+          throw new Error(
+            "Daily free AI quota spent on this key (OpenRouter allows ~50 free requests/day, resets daily). Add $10 credits to unlock 1000/day, use another key below, or retry tomorrow."
+          );
+        }
+        lastError = new Error(`OpenRouter HTTP ${response.status}${errBody ? ` — ${errBody}` : ""} [${model}]`);
         continue; // Try next fallback model
       }
 
@@ -235,7 +259,13 @@ export async function analyzeProfileWithAI({
         lastError = new Error("Invalid JSON structure from model");
       }
     } catch (err) {
-      if (err?.name === "AbortError" || signal?.aborted) throw err;
+      if (signal?.aborted) throw err;
+      if (err?.name === "AbortError") {
+        // Per-model 12s timeout — fall through to next fallback model.
+        console.warn(`OpenRouter model ${model} timed out, trying fallback`);
+        lastError = new Error(`Model ${model} timed out`);
+        continue;
+      }
       console.warn(`Fetch failure on model ${model}:`, err);
       lastError = err;
     } finally {
@@ -244,5 +274,19 @@ export async function analyzeProfileWithAI({
     }
   }
 
+  const msg = lastError?.message || "";
+  if (/HTTP (404|429)/.test(msg)) {
+    throw new Error(
+      "All free AI models are unavailable right now (OpenRouter has no free capacity or the model IDs changed). Retry in a bit, or add your own OpenRouter key below. Last error: " + msg.slice(0, 160)
+    );
+  }
   throw lastError || new Error("All OpenRouter models failed to respond");
+}
+
+export function setUserApiKey(key) {
+  try {
+    const clean = String(key || "").trim();
+    if (!clean) window.localStorage.removeItem("rosint_openrouter_key");
+    else window.localStorage.setItem("rosint_openrouter_key", clean);
+  } catch { /* storage unavailable */ }
 }

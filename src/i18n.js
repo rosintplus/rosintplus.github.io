@@ -48,7 +48,11 @@ export function tN(t, baseKey, count, lang) {
   let s = t(ruleKey);
   if (s === ruleKey) s = t(`${baseKey}Many`);
   if (s === `${baseKey}Many`) s = t(`${baseKey}Other`);
-  return s.replace("{n}", count);
+  let formatted = count;
+  try {
+    formatted = new Intl.NumberFormat(locale).format(count);
+  } catch { /* ignore */ }
+  return s.replace("{n}", formatted);
 }
 
 export function relTime(utcSeconds, lang) {
@@ -208,6 +212,74 @@ const en = {
   postCommentsTitle: "Comments",
   postNoComments: "No archived comments found for this post.",
   postCopyPost: "Copy post details",
+  itemUndisplayable: "This item couldn't be displayed.",
+  searchUser: "Search user",
+  clearSearch: "Clear search",
+  dismiss: "Dismiss",
+  dateFrom: "Date from",
+  dateTo: "Date to",
+  filterSubreddit: "Filter by subreddit",
+  externalLink: "External link",
+  externalLinkPlaceholder: "domain (e.g. youtube.com)",
+  sortOrder: "Sort order",
+  exportLabel: "Export",
+  clearKeyword: "Clear keyword filter",
+  loadMoreResults: "Load more results",
+  expandComment: "Expand comment",
+  collapseComment: "Collapse comment",
+  loadReplies: "Load replies",
+  changeLanguage: "Change language",
+  apStopCrawl: "Stop Crawl",
+  apStopCrawlTitle: "Stop background crawling and analyze now",
+  apPoliticalCompass: "Political Compass",
+  apCompassHint: "Multi-dimensional political compass evaluated from Reddit comments, topics, and community footprint via LLM semantic analysis.",
+  apCrawling: "Crawling...",
+  apAiProcessing: "AI processing...",
+  apNoFootprint: "No political footprint",
+  apRerunAi: "Re-run AI Analysis",
+  apCrawlingHistory: "Crawling Account History...",
+  apBackgroundItems: "+{n} background items",
+  apFetchingBatches: "fetching batches",
+  apCancelTitle: "Cancel AI analysis",
+  apCancel: "Cancel",
+  apAiProgress: "AI Political Analysis in Progress...",
+  apEvaluating: "Evaluating {n} items across subreddits & comments",
+  apAiError: "AI Analysis Error: {msg}",
+  apRetryAi: "Retry AI",
+  apNoFootprintTitle: "No Political Footprint Detected",
+  apNoFootprintBody: "This account's comment and post history consists of non-political discussions.",
+  apNoEngagement: "No political or ideological engagement detected in public posts and comments.",
+  apDimensions: "Ideological Dimensions",
+  apEconomy: "Economy",
+  apEconLeft: "Socialist / Planned",
+  apEconMid: "Mixed",
+  apEconRight: "Free Market",
+  apSocial: "Social",
+  apSocLeft: "Progressive / Secular",
+  apSocMid: "Moderate",
+  apSocRight: "Traditional",
+  apGovernance: "Governance",
+  apGovLeft: "Civil Libertarian",
+  apGovMid: "Balanced",
+  apGovRight: "Statist / Order",
+  apTracked: "Tracked Positions & Stances ({n})",
+  apSubFootprint: "Subreddit Footprint ({n} communities)",
+  apSubFilterHint: "Subreddits (click to filter feed):",
+  apExtractedFrom: "Extracted directly from comment assertions",
+  apShow: "Show ▼",
+  apHide: "Hide ▲",
+  apFilterFeed: "Filter feed strictly to r/{sub}",
+  apItems: "items",
+  apLikelyBot: "likely bot",
+  apActiveSince: "active since",
+  apSubs: "subs",
+  apKarma: "karma",
+  apBotBreakdown: "Click to view full bot detection signal breakdown",
+  apBotToggle: "Toggle bot detection details",
+  apBotBreakdownTitle: "Bot Analysis Breakdown",
+  apRiskFactors: "Detected Risk Factors:",
+  apApiKeyPlaceholder: "Own OpenRouter key (sk-or-...) — optional",
+  apApiKeySave: "Save key & retry",
 };
 
 const translations = {

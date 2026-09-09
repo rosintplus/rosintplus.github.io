@@ -40,7 +40,7 @@ const BOT_DISCLAIMER_PATTERNS = [
 // Classic LLM signature intros, transitions, and hedging patterns
 const LLM_PHRASES = [
   /as an ai language model/i,
-  /as an ai(?:,)?/i,
+  /as an ai\b/i,
   /as an artificial intelligence/i,
   /i don't have personal (?:opinions|feelings|experiences)/i,
   /certainly(?:!|,)\s+(?:here(?:'s| is)|below is)/i,
@@ -91,10 +91,23 @@ const HUMAN_CONVERSATIONAL_TOKENS = new Set([
   'bro', 'dude', 'mate', 'oof', 'smh', 'afaik', 'idk', 'omg', 'rip', 'congrats'
 ]);
 
-const AUTO_GEN_NAME_REGEX = /^[A-Za-z]{2,18}[-_]?[A-Za-z]{2,18}[-_]?[0-9]{2,6}$/i;
-const AUTO_GEN_NAME_REGEX_COMPACT = /^[A-Za-z]{2,18}[0-9]{4,7}$/;
-const BOT_NAME_REGEX = /(?:^auto_|_bot$|bot$|_automod|transcriber|helperbot|bot_)/i;
-const ZERO_WIDTH_REGEX = /[\u200B-\u200D\uFEFF\u00AD\u2060]/;
+const AUTO_GEN_NAME_REGEX = /^[A-Za-z]{2,18}[-_][A-Za-z]{2,18}[-_]?\d{2,6}$/;
+const AUTO_GEN_NAME_REGEX_COMPACT = /^[A-Za-z]{2,18}\d{4,7}$/;
+const BOT_NAME_REGEX = /(?:^auto_|[_-]bot$|^bot(?:[_-]|$)|_automod|transcriber|helperbot|bot_)/i;
+// Evasion chars: zero-width space / non-joiner / joiner anywhere, or a BOM
+// that is NOT leading (a lone leading BOM is usually a copy-paste artifact;
+// soft hyphen U+00AD and word joiner U+2060 occur in legitimate typography,
+// so they are not counted). Built via RegExp so the file stays plain ASCII.
+const ZWSP = String.fromCharCode(0x200B, 0x200C, 0x200D);
+const BOM = String.fromCharCode(0xFEFF);
+const ZERO_WIDTH_INNER_REGEX = new RegExp('[' + ZWSP + ']');
+const LEADING_BOM_REGEX = new RegExp(String.fromCharCode(0x5E) + BOM);
+function hasZeroWidthEvasion(title) {
+  if (!title) return false;
+  const stripped = String(title).replace(LEADING_BOM_REGEX, '');
+  if (ZERO_WIDTH_INNER_REGEX.test(stripped)) return true;
+  return stripped.indexOf(BOM) !== -1;
+}
 
 /**
  * 1. Diurnal Activity & Shannon Entropy Analysis
@@ -103,7 +116,7 @@ function analyzeCircadianEntropy(heatmap) {
   if (!heatmap || !Array.isArray(heatmap) || heatmap.length !== 7) {
     return {
       entropy: 3.5,
-      quietest6hRatio: 0.05,
+      quietest6hRatio: 5.0,
       is24x7: false,
       hasHumanSleepGap: true,
       totalItems: 0,
@@ -125,7 +138,7 @@ function analyzeCircadianEntropy(heatmap) {
   if (totalItems < 20) {
     return {
       entropy: 3.5,
-      quietest6hRatio: 0.05,
+      quietest6hRatio: 5.0,
       is24x7: false,
       hasHumanSleepGap: true,
       totalItems,
@@ -185,7 +198,7 @@ function analyzeTextRedundancy(posts = [], comments = []) {
 
   if (sampleTexts.length < 4) {
     return {
-      meanSimilarity: 0.02,
+      meanSimilarity: 2.0,
       exactDuplicates: 0,
       isHighRedundancy: false,
       detail: 'Original, non-repeating prose'
@@ -246,7 +259,10 @@ function analyzeTextRedundancy(posts = [], comments = []) {
  */
 function analyzeSubmissionDiversity(posts = [], totalComments = 0, postsPerDay = 1) {
   const titleMap = new Map();
-  let duplicateSameSub = 0;
+  // Worst case: extra copies beyond the first of one title in one subreddit.
+  // (Summed totals misfire — three separate double-posts are usually just
+  // Reddit's double-submit glitch, not a farm.)
+  let maxSameSubRepeats = 0;
   let maxCrossPostSubs = 0;
 
   for (const p of (posts || [])) {
@@ -259,7 +275,7 @@ function analyzeSubmissionDiversity(posts = [], totalComments = 0, postsPerDay =
       const subCounts = titleMap.get(title);
       const cur = subCounts.get(sub) || 0;
       subCounts.set(sub, cur + 1);
-      if (cur >= 2) duplicateSameSub++;
+      if (cur > maxSameSubRepeats) maxSameSubRepeats = cur;
     }
   }
 
@@ -270,17 +286,24 @@ function analyzeSubmissionDiversity(posts = [], totalComments = 0, postsPerDay =
 
   const isHighVolumeSubmissions = (posts?.length || 0) > 30;
   const isLowCommentRatio = totalComments < 5 && isHighVolumeSubmissions;
-  
-  const isCarpetSpam = (maxCrossPostSubs >= 8 && isLowCommentRatio) || (maxCrossPostSubs >= 6 && postsPerDay > 25) || duplicateSameSub >= 3;
+
+  // Cross-posting one submission to a few subs is normal (Reddit even has a
+  // button for it), so the cross-sub bar stays high. Same-sub repeats need
+  // 4+ copies of one title — or 3 copies with zero engagement.
+  const crossSubSpam = (maxCrossPostSubs >= 8 && isLowCommentRatio) || (maxCrossPostSubs >= 6 && postsPerDay > 25);
+  const sameSubSpam = maxSameSubRepeats >= 3 || (maxSameSubRepeats >= 2 && isLowCommentRatio);
+  const isCarpetSpam = crossSubSpam || sameSubSpam;
   const isLegitCrossPost = maxCrossPostSubs >= 2 && !isCarpetSpam;
 
   return {
     isCarpetSpam,
     isLegitCrossPost,
     maxCrossPostSubs,
-    duplicateSameSub,
+    duplicateSameSub: maxSameSubRepeats,
     detail: isCarpetSpam
-      ? `Automated carpet-bombing: identical submission pushed across ${maxCrossPostSubs} subreddits`
+      ? (!crossSubSpam
+        ? `Same title posted ${maxSameSubRepeats + 1} times in one subreddit${isLowCommentRatio ? ' with near-zero replies' : ''}`
+        : `Identical submission pushed across ${maxCrossPostSubs} subreddits${isLowCommentRatio ? ' with near-zero replies' : ''}`)
       : isLegitCrossPost
         ? `Cross-posting across ${maxCrossPostSubs} subreddits (Normal community sharing)`
         : 'Individual distinct submissions'
@@ -290,7 +313,7 @@ function analyzeSubmissionDiversity(posts = [], totalComments = 0, postsPerDay =
 /**
  * 4. Repost Karma-Farming Subreddit Concentration Analysis
  */
-function analyzeKarmaFarmPattern(stats = {}, posts = [], comments = []) {
+function analyzeKarmaFarmPattern(stats = {}, posts = [], comments = [], lifetime = {}) {
   const subCounts = stats?.subredditCounts || {};
   let karmaSubItems = 0;
   let totalTrackedItems = 0;
@@ -303,8 +326,10 @@ function analyzeKarmaFarmPattern(stats = {}, posts = [], comments = []) {
   }
 
   const karmaFarmRatio = totalTrackedItems > 0 ? (karmaSubItems / totalTrackedItems) : 0;
-  const postCount = posts.length || 0;
-  const commentCount = comments.length || 0;
+  // Prefer lifetime totals over the visible slice: a mid-crawl 6-item slice
+  // with 0 comments must not convict a 10k-comment human.
+  const postCount = lifetime.totalPosts ?? posts.length ?? 0;
+  const commentCount = lifetime.totalComments ?? comments.length ?? 0;
 
   // Stolen 1st-Person OC Titles Detection
   let stolenOcTitleCount = 0;
@@ -318,29 +343,40 @@ function analyzeKarmaFarmPattern(stats = {}, posts = [], comments = []) {
     }
   }
 
-  // Zero-width space evasion check
+  // Zero-width space evasion check (ignores paste-artifact BOMs and
+  // legitimate soft hyphens — see hasZeroWidthEvasion).
   let zeroWidthEvasion = false;
   for (const p of posts) {
-    if (ZERO_WIDTH_REGEX.test(p.title || '')) {
+    if (hasZeroWidthEvasion(p.title || '')) {
       zeroWidthEvasion = true;
       break;
     }
   }
 
-  // A classic repost bot: >80% viral karma subs, almost all posts, 0-2 comments, or multiple 1st-person OC titles
-  const isRepostFarmer = (
+  // Require a minimum visible sample before flagging: lifetime ratio alone
+  // with a truncated 6-item slice produces false positives mid-crawl.
+  const sampleSize = (posts.length || 0) + (comments.length || 0);
+  const hasEnoughSample = sampleSize >= 6 && totalTrackedItems >= 10;
+  // A classic repost bot needs corroboration on every branch: a viral-sub
+  // ratio alone, or a single odd character in one title, never suffices.
+  // Zero-width evasion only counts alongside viral concentration, near-zero
+  // replies, or a stolen-OC-style title.
+  const isRepostFarmer = hasEnoughSample && (
     (karmaFarmRatio >= 0.85 && postCount >= 6 && commentCount <= 2) ||
     (stolenOcTitleCount >= 2 && commentCount <= 2 && karmaFarmRatio >= 0.70) ||
-    (zeroWidthEvasion && postCount >= 3)
+    (zeroWidthEvasion && postCount >= 3 &&
+      (karmaFarmRatio >= 0.50 || commentCount <= 2 || stolenOcTitleCount >= 1))
   );
 
   return {
     karmaFarmRatio: Math.round(karmaFarmRatio * 100),
     stolenOcTitleCount,
     zeroWidthEvasion,
+    postCount,
+    commentCount,
     isRepostFarmer,
     detail: isRepostFarmer
-      ? `Karma-farming footprint: ${Math.round(karmaFarmRatio * 100)}% submissions in top viral repost hubs with near-zero comment replies`
+      ? `Karma-farm signals: ${Math.round(karmaFarmRatio * 100)}% in viral hubs, ${stolenOcTitleCount} stolen-OC-style titles, ${commentCount} replies on ${postCount} posts${zeroWidthEvasion ? ', zero-width evasion chars' : ''}`
       : `${Math.round(karmaFarmRatio * 100)}% viral hub activity (Standard mix)`
   };
 }
@@ -401,8 +437,17 @@ function analyzeConversationalNaturalness(comments = []) {
 /**
  * 6. Linguistic & LLM Pattern Recognition
  */
+// Near-certain LLM self-identifications: a single verbatim hit is evidence by
+// itself (humans only produce these when quoting, and the snippet is shown).
+const STRONG_LLM_PHRASES = [
+  /as an ai language model/i,
+  /as an artificial intelligence/i,
+  /i don't have personal (?:opinions|feelings|experiences)/i,
+];
+
 function analyzeLinguisticPatterns(posts = [], comments = [], wordFreqs = {}) {
   let llmPhraseMatches = 0;
+  let strongLlmHits = 0;
   let botDisclaimerMatches = 0;
   const detectedPhrases = [];
 
@@ -431,6 +476,9 @@ function analyzeLinguisticPatterns(posts = [], comments = [], wordFreqs = {}) {
         }
       }
     }
+    for (const pattern of STRONG_LLM_PHRASES) {
+      if (pattern.test(text)) strongLlmHits++;
+    }
   }
 
   let llmWordCount = 0;
@@ -445,11 +493,12 @@ function analyzeLinguisticPatterns(posts = [], comments = [], wordFreqs = {}) {
   }
 
   const llmWordDensity = totalWords > 50 ? (llmWordCount / totalWords) : 0;
-  const hasLlmMarkers = llmPhraseMatches >= 2 || (llmPhraseMatches >= 1 && llmWordDensity > 0.035);
+  const hasLlmMarkers = strongLlmHits >= 1 || llmPhraseMatches >= 2 || (llmPhraseMatches >= 1 && llmWordDensity > 0.035);
 
   return {
     botDisclaimerMatches,
     llmPhraseMatches,
+    strongLlmHits,
     llmWordDensity: Math.round(llmWordDensity * 1000) / 10,
     hasLlmMarkers,
     detectedPhrases,
@@ -554,7 +603,7 @@ export function evaluateBotLikelihood({
   const diversity = analyzeSubmissionDiversity(posts, totalComments, postsPerDay);
   if (diversity.isCarpetSpam) {
     logOdds += 2.6;
-    flags.push(`Carpet-bomb spamming: duplicate submissions across ${diversity.maxCrossPostSubs} subreddits`);
+    flags.push(`Submission spam: ${diversity.detail.charAt(0).toLowerCase() + diversity.detail.slice(1)}`);
     signals.push({
       id: 'diversity',
       label: 'Submission Pattern',
@@ -581,11 +630,11 @@ export function evaluateBotLikelihood({
   }
 
   // 4. Repost Karma-Farming & Stolen OC Pattern
-  const karmaFarm = analyzeKarmaFarmPattern(stats, posts, comments);
+  const karmaFarm = analyzeKarmaFarmPattern(stats, posts, comments, { totalPosts, totalComments });
   if (karmaFarm.isRepostFarmer) {
     const repostWeight = karmaFarm.zeroWidthEvasion ? 4.5 : (karmaFarm.stolenOcTitleCount >= 2 ? 3.8 : 3.0);
     logOdds += repostWeight;
-    flags.push(`Karma-farming repost bot: ${karmaFarm.karmaFarmRatio}% submissions targeting default viral hubs with zero community engagement`);
+    flags.push(`Karma-farming repost bot: ${karmaFarm.karmaFarmRatio}% in viral hubs, ${karmaFarm.stolenOcTitleCount} stolen-OC-style titles, ${karmaFarm.commentCount} replies on ${karmaFarm.postCount} posts${karmaFarm.zeroWidthEvasion ? ', zero-width evasion chars' : ''}`);
     if (karmaFarm.zeroWidthEvasion) {
       flags.push('Zero-width character evasion: hidden Unicode spaces in titles to bypass duplicate detection');
     }
@@ -637,14 +686,16 @@ export function evaluateBotLikelihood({
       detail: linguistic.detail,
     });
   } else if (linguistic.hasLlmMarkers) {
-    const llmWeight = linguistic.llmPhraseMatches >= 2 ? 3.6 : 2.2;
+    const strong = linguistic.strongLlmHits >= 1;
+    const multi = linguistic.llmPhraseMatches >= 2;
+    const llmWeight = multi ? 3.6 : strong ? 3.0 : 2.2;
     logOdds += llmWeight;
-    flags.push('Synthetic / LLM phrasing markers detected in responses');
+    flags.push(strong && !multi ? 'AI self-identification phrase in own prose' : 'Synthetic / LLM phrasing markers detected in responses');
     signals.push({
       id: 'linguistic',
       label: 'Linguistic Style',
-      value: linguistic.llmPhraseMatches >= 2 ? 'Synthetic AI Phrasing' : 'LLM Phrasing Markers',
-      status: linguistic.llmPhraseMatches >= 2 ? 'bot' : 'warning',
+      value: multi ? 'Synthetic AI Phrasing' : strong ? 'Strong AI Self-Identification' : 'LLM Phrasing Markers',
+      status: multi || strong ? 'bot' : 'warning',
       detail: linguistic.detail,
     });
   } else {
@@ -659,10 +710,19 @@ export function evaluateBotLikelihood({
   }
 
   // 7. Compound Auto-Generated Username Risk
+  // A machine-like handle alone means little (millions of humans have
+  // numbered names), so this needs at least TWO independent automation
+  // signals before it fires.
   const isAutoGenName = AUTO_GEN_NAME_REGEX.test(username) || AUTO_GEN_NAME_REGEX_COMPACT.test(username);
-  if (isAutoGenName && (karmaFarm.isRepostFarmer || circadian.is24x7)) {
-    logOdds += 2.0;
-    flags.push('Compound risk: Auto-generated Reddit handle operating in automated repost farm');
+  const autoSignalCount = [
+    karmaFarm.isRepostFarmer,
+    circadian.is24x7,
+    diversity.isCarpetSpam,
+    conversation.isCommentStealer,
+  ].filter(Boolean).length;
+  if (isAutoGenName && autoSignalCount >= 2) {
+    logOdds += 1.5;
+    flags.push(`Compound risk: machine-like handle plus ${autoSignalCount} automation signals — elevated risk, verify manually`);
   }
 
   // 8. Activity Velocity Cadence

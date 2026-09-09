@@ -357,24 +357,26 @@ function sanitizeTextForPoliticalAnalysis(rawText) {
   return text;
 }
 
-function getIdeologicalArchetype(econ, soc, { hasLeftSignals = false, hasRightSignals = false } = {}) {
+function getIdeologicalArchetype(econ, gov, { hasLeftSignals = false, hasRightSignals = false } = {}) {
+  // Quadrant is econ × gov to match the plotted grid (x=econ, y=gov) and the
+  // AI prompt contract. Thresholds ±2.2 shared with getQuadrantArchetype.
   const isEconCenter = Math.abs(econ) <= 2.2;
-  const isSocCenter = Math.abs(soc) <= 2.2;
+  const isGovCenter = Math.abs(gov) <= 2.2;
 
-  if (isEconCenter && isSocCenter) {
+  if (isEconCenter && isGovCenter) {
     if (hasLeftSignals && hasRightSignals) return 'Cross-Ideological / Mixed Discussion';
     return 'Centrist / Moderate';
   }
-  if (isEconCenter && soc > 2.2) return 'Authoritarian Center (Auth-Center)';
-  if (isEconCenter && soc < -2.2) return 'Libertarian Center (Lib-Center)';
+  if (isEconCenter && gov > 2.2) return 'Authoritarian Center (Auth-Center)';
+  if (isEconCenter && gov < -2.2) return 'Libertarian Center (Lib-Center)';
 
-  if (econ < -2.2 && isSocCenter) return 'Left-Center (Social Democrat / Left)';
-  if (econ > 2.2 && isSocCenter) return 'Right-Center (Fiscal Conservative / Center-Right)';
+  if (econ < -2.2 && isGovCenter) return 'Left-Center (Social Democrat / Left)';
+  if (econ > 2.2 && isGovCenter) return 'Right-Center (Fiscal Conservative / Center-Right)';
 
-  if (econ < -2.2 && soc > 2.2) return 'Authoritarian Left (Auth-Left)';
-  if (econ > 2.2 && soc > 2.2) return 'Authoritarian Right (Auth-Right)';
-  if (econ < -2.2 && soc < -2.2) return 'Libertarian Left (Lib-Left)';
-  if (econ > 2.2 && soc < -2.2) return 'Libertarian Right (Lib-Right)';
+  if (econ < -2.2 && gov > 2.2) return 'Authoritarian Left (Auth-Left)';
+  if (econ > 2.2 && gov > 2.2) return 'Authoritarian Right (Auth-Right)';
+  if (econ < -2.2 && gov < -2.2) return 'Libertarian Left (Lib-Left)';
+  if (econ > 2.2 && gov < -2.2) return 'Libertarian Right (Lib-Right)';
 
   return 'Centrist / Moderate';
 }
@@ -422,15 +424,25 @@ export function evaluatePoliticalCompass({ stats = {}, posts = [], comments = []
   // 1. Stance-Aware Subreddit Context & Interaction Tone
   // Group user comments by subreddit to check if they were in agreement or debating
   const subCommentMap = new Map();
+  const seenBodies = new Set();
+  const pushUnique = (sub, body) => {
+    const key = `${sub}::${(body || '').slice(0, 200)}`;
+    if (seenBodies.has(key)) return;
+    seenBodies.add(key);
+    if (!subCommentMap.has(sub)) subCommentMap.set(sub, []);
+    subCommentMap.get(sub).push(body || '');
+  };
   for (const c of (comments || [])) {
     const sub = (c.subreddit || '').toLowerCase();
-    if (!subCommentMap.has(sub)) subCommentMap.set(sub, []);
-    subCommentMap.get(sub).push(c.body || '');
+    pushUnique(sub, c.body || '');
+  }
+  for (const p of (posts || [])) {
+    const sub = (p.subreddit || '').toLowerCase();
+    pushUnique(sub, p.selftext || p.title || '');
   }
   for (const item of (stats?.sampleItems || [])) {
     const sub = (item.subreddit || '').toLowerCase();
-    if (!subCommentMap.has(sub)) subCommentMap.set(sub, []);
-    subCommentMap.get(sub).push(item.body || '');
+    pushUnique(sub, item.body || '');
   }
 
   let leftSignalWeight = 0;
@@ -467,7 +479,7 @@ export function evaluatePoliticalCompass({ stats = {}, posts = [], comments = []
       let effectiveGov = entry.gov ?? entry.soc;
       let interactionTag = null;
 
-      if (disagreeCount >= 2 || (disagreeCount >= 1 && count <= 2)) {
+      if (disagreeCount >= 2 && userSubTexts.length > 40) {
         // Invert polarity: user is debating against the subreddit's ideology
         if (entry.side === 'right') {
           effectiveEcon = -5.0;
@@ -504,12 +516,17 @@ export function evaluatePoliticalCompass({ stats = {}, posts = [], comments = []
   }
 
   // 2. Propositional Stance & Viewpoint Extraction from Comments & Posts
-  // Pool active items + all background crawled sample items (hundreds/thousands of historical items)
-  const sampleItems = [
-    ...(comments || []),
-    ...(posts || []),
-    ...(stats?.sampleItems || [])
-  ];
+  // Pool active items + all background crawled sample items, deduped by id/body
+  // (sampleItems already contains these bodies — naive concat double-counts).
+  const seenStanceKeys = new Set();
+  const sampleItems = [];
+  for (const item of [...(comments || []), ...(posts || []), ...(stats?.sampleItems || [])]) {
+    const raw = item.body || item.title || item.selftext || '';
+    const key = item.id ? `id:${item.id}` : `b:${(item.subreddit || '')}::${raw.slice(0, 200)}`;
+    if (seenStanceKeys.has(key)) continue;
+    seenStanceKeys.add(key);
+    sampleItems.push(item);
+  }
 
   for (const item of sampleItems) {
     const rawText = item.body || item.title || item.selftext || '';
@@ -527,22 +544,27 @@ export function evaluatePoliticalCompass({ stats = {}, posts = [], comments = []
         // Check Sarcasm
         const sarcastic = isSarcastic(rawText, snippet);
 
-        let effectiveEcon = prop.econ;
-        let effectiveSoc = prop.soc;
-        let effectiveGov = prop.gov;
+        let effectiveEcon = prop.econ ?? 0;
+        let effectiveSoc = prop.soc ?? 0;
+        let effectiveGov = prop.gov ?? prop.soc ?? 0;
         let effectiveStance = prop.stance;
         let effectivePolarity = prop.polarity;
 
         if (sarcastic) {
-          // Invert stance and polarity for sarcastic statements
-          effectiveEcon = -prop.econ;
-          effectiveSoc = -prop.soc;
-          effectiveGov = -prop.gov;
-          effectivePolarity = "Opposition";
-          effectiveStance = prop.stance.replace(/Supports\s+/i, "Critical of (Sarcastic) ").replace(/Strong\s+Support\s+for/i, "Critical of (Sarcastic)");
-          if (!effectiveStance.includes("Sarcastic")) {
-            effectiveStance += " (Sarcastic)";
-          }
+          // Invert coords AND label: "Opposes X (Sarcastic)" with flipped
+          // coords would otherwise read as far-right while saying Opposes.
+          effectiveEcon = -(prop.econ ?? 0);
+          effectiveSoc = -(prop.soc ?? 0);
+          effectiveGov = -((prop.gov ?? prop.soc) ?? 0);
+          let s = prop.stance;
+          if (/^\s*Opposes\b/i.test(s)) s = s.replace(/^\s*Opposes\b/i, "Supports");
+          else if (/^\s*Critical of\b/i.test(s)) s = s.replace(/^\s*Critical of\b/i, "Supports");
+          else if (/^\s*Supports\b/i.test(s)) s = s.replace(/^\s*Supports\b/i, "Critical of");
+          else if (/Pro-Choice/i.test(s)) s = s.replace(/Pro-Choice/i, "Pro-Life");
+          else if (/Pro-Life/i.test(s)) s = s.replace(/Pro-Life/i, "Pro-Choice");
+          else if (/Strong\s+Support/i.test(s)) s = s.replace(/Strong\s+Support.*?for/i, "Critical of");
+          effectivePolarity = "Opposition (Sarcastic)";
+          effectiveStance = `${s} (Sarcastic — interpreted as opposite)`;
         }
 
         const w = 4.0; // High confidence propositional assertion
@@ -590,7 +612,7 @@ export function evaluatePoliticalCompass({ stats = {}, posts = [], comments = []
     else if (totalWeight >= 10) confidence = 'Moderate (Community participation footprint)';
     else confidence = 'Low (Emerging community activity)';
 
-    archetype = getIdeologicalArchetype(econ, soc, {
+    archetype = getIdeologicalArchetype(econ, gov, {
       hasLeftSignals: leftSignalWeight >= 2.0,
       hasRightSignals: rightSignalWeight >= 2.0,
     });

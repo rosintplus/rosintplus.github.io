@@ -4,7 +4,7 @@ import { REDDIT_BASE, fetchSubredditInteractions } from './api.js';
 import { useI18n, LOCALES } from './i18n.js';
 import { toggleProfileSaved, getSavedUsernames } from './profileData.js';
 import { evaluateBotLikelihood } from './botDetector.js';
-import { analyzeProfileWithAI } from './openrouter.js';
+import { analyzeProfileWithAI, setUserApiKey } from './openrouter.js';
 
 function getDays(locale) {
   const fmt = new Intl.DateTimeFormat(locale, { weekday: "long" });
@@ -13,10 +13,19 @@ function getDays(locale) {
 const levels = [0.4, 0.6, 0.8, 1.0];
 const weightedCache = new Map();
 
-function fmtNum(n) {
+function fmtNum(n, locale) {
   if (n == null) return null;
+  try {
+    if (locale) {
+      const nf = new Intl.NumberFormat(locale, { notation: "compact", maximumFractionDigits: 1 });
+      return nf.format(n);
+    }
+  } catch { /* fall through */ }
   if (Math.abs(n) >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
   if (Math.abs(n) >= 10000) return `${(n / 1000).toFixed(1)}k`;
+  try {
+    if (Math.abs(n) >= 1000) return n.toLocaleString(locale);
+  } catch { /* ignore */ }
   if (Math.abs(n) >= 1000) return n.toLocaleString();
   return String(n);
 }
@@ -27,49 +36,50 @@ function getArchetypeColorClass(archetype = '') {
     return "bg-[color:var(--bg)] text-[color:var(--text-muted)] border border-[color:var(--border)]";
   }
   if (a.includes('auth-left') || a.includes('socialist') || a.includes('communist')) {
-    return "bg-rose-500/15 text-rose-400 border border-rose-500/30 font-medium";
+    return "bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-500/30 font-medium";
   }
   if (a.includes('auth-right') || a.includes('conservative') || a.includes('traditional')) {
-    return "bg-blue-500/15 text-blue-400 border border-blue-500/30 font-medium";
+    return "bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-500/30 font-medium";
   }
   if (a.includes('lib-left') || a.includes('progressive') || a.includes('social democrat')) {
-    return "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-medium";
+    return "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 font-medium";
   }
   if (a.includes('lib-right') || a.includes('libertarian right') || a.includes('capitalist')) {
-    return "bg-amber-500/15 text-amber-400 border border-amber-500/30 font-medium";
+    return "bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 font-medium";
   }
   if (a.includes('libertarian') || a.includes('lib-center')) {
-    return "bg-teal-500/15 text-teal-400 border border-teal-500/30 font-medium";
+    return "bg-teal-500/15 text-teal-700 dark:text-teal-300 border border-teal-500/30 font-medium";
   }
   if (a.includes('auth-center') || a.includes('statist')) {
-    return "bg-purple-500/15 text-purple-400 border border-purple-500/30 font-medium";
+    return "bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/30 font-medium";
   }
-  return "bg-slate-500/15 text-slate-300 border border-slate-500/30 font-medium";
+  return "bg-slate-500/15 text-slate-700 dark:text-slate-300 border border-slate-500/30 font-medium";
 }
 
 function getPolarityColorClass(polarity = '') {
   const p = polarity.toLowerCase();
   if (p.includes('left') || p.includes('prog')) {
-    return "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30";
+    return "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30";
   }
   if (p.includes('right') || p.includes('trad')) {
-    return "bg-blue-500/15 text-blue-400 border border-blue-500/30";
+    return "bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-500/30";
   }
   if (p.includes('libertarian') || p.includes('lib')) {
-    return "bg-amber-500/15 text-amber-400 border border-amber-500/30";
+    return "bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30";
   }
   if (p.includes('statist') || p.includes('auth') || p.includes('order')) {
-    return "bg-purple-500/15 text-purple-400 border border-purple-500/30";
+    return "bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/30";
   }
   return "bg-[color:var(--bg)] text-[color:var(--text-muted)] border border-[color:var(--border)]";
 }
 
 function getQuadrantArchetype(econ = 0, gov = 0, rawArchetype = '') {
   const a = (rawArchetype || '').trim();
-  const isLeft = econ < -1.0;
-  const isRight = econ > 1.0;
-  const isAuth = gov > 1.0;
-  const isLib = gov < -1.0;
+  // Thresholds ±2.2 to match getIdeologicalArchetype (econ × gov quadrant).
+  const isLeft = econ < -2.2;
+  const isRight = econ > 2.2;
+  const isAuth = gov > 2.2;
+  const isLib = gov < -2.2;
 
   if (isAuth && isLeft) {
     if (a && (a.toLowerCase().includes('auth-left') || a.toLowerCase().includes('socialist') || a.toLowerCase().includes('communist') || (a.toLowerCase().includes('left') && !a.toLowerCase().includes('lib')))) return a;
@@ -204,11 +214,13 @@ const AccountProfile = memo(function AccountProfile({
         .filter(([name, c]) => name && c > 0)
         .slice(0, 8);
       const val = list.length ? list : null;
-      weightedCache.set(key, val);
+      if (val) weightedCache.set(key, val);
+      else weightedCache.delete(key);
       setWeightedSubs(val);
     }).catch(() => {
       if (!cancelled) {
-        weightedCache.set(key, null);
+        // Don't poison cache with permanent null — allow retry on next mount.
+        weightedCache.delete(key);
         setWeightedSubs(null);
       }
     }).finally(() => clearTimeout(t));
@@ -468,15 +480,15 @@ const AccountProfile = memo(function AccountProfile({
   if (!stats && (!posts || posts.length === 0) && (!comments || comments.length === 0)) {
     return (
       <div className="bg-[color:var(--bg-elevated)] border border-[color:var(--border)] rounded-lg p-6 text-center text-xs text-[color:var(--text-muted)] mt-4">
-        Loading profile data...
+        {t("apLoadingProfile")}
       </div>
     );
   }
 
   const botColorClass = botAnalysis.score >= 65
-    ? "text-rose-400 font-bold"
+    ? "text-rose-700 dark:text-rose-300 font-bold"
     : botAnalysis.score >= 35
-      ? "text-amber-400 font-semibold"
+      ? "text-amber-700 dark:text-amber-300 font-semibold"
       : "text-[color:var(--text)]";
 
   return (
@@ -487,7 +499,7 @@ const AccountProfile = memo(function AccountProfile({
             <div className="min-w-0 text-center px-1">
               <div className="text-[15px] sm:text-[18px] font-bold leading-none text-[color:var(--text)] truncate">{kpiData.total}</div>
               <div className="text-[9.5px] sm:text-[11px] leading-none mt-1 truncate">
-                <span className="text-[color:var(--text-muted)]">items</span>
+                <span className="text-[color:var(--text-muted)]">{t("apItems")}</span>
               </div>
             </div>
 
@@ -495,8 +507,10 @@ const AccountProfile = memo(function AccountProfile({
               onClick={() => setShowBotDrawer(prev => !prev)}
               role="button"
               tabIndex={0}
+              aria-expanded={showBotDrawer}
+              aria-label={t("apBotToggle")}
               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowBotDrawer(p => !p); } }}
-              title="Click to view full bot detection signal breakdown"
+              title={t("apBotBreakdown")}
               className="min-w-0 text-center px-1 cursor-pointer hover:bg-[color:var(--border)]/20 transition-colors rounded py-0.5"
             >
               <div className={`text-[15px] sm:text-[18px] leading-none flex items-center justify-center gap-0.5 ${botColorClass}`}>
@@ -504,28 +518,28 @@ const AccountProfile = memo(function AccountProfile({
                 <span className="text-[8px] opacity-70">▾</span>
               </div>
               <div className="text-[9.5px] sm:text-[11px] leading-none mt-1 flex items-center justify-center gap-0.5 truncate">
-                <span className="text-[color:var(--text-muted)]">likely bot</span>
+                <span className="text-[color:var(--text-muted)]">{t("apLikelyBot")}</span>
               </div>
             </div>
 
             <div className="min-w-0 text-center px-1">
               <div className="text-[14px] sm:text-[18px] font-bold leading-none text-[color:var(--text)] truncate">{kpiData.activeSince}</div>
               <div className="text-[9.5px] sm:text-[11px] leading-none mt-1 truncate">
-                <span className="text-[color:var(--text-muted)]">active since</span>
+                <span className="text-[color:var(--text-muted)]">{t("apActiveSince")}</span>
               </div>
             </div>
 
             <div className="min-w-0 text-center px-1">
               <div className="text-[15px] sm:text-[18px] font-bold leading-none text-[color:var(--text)] truncate">{kpiData.subs}</div>
               <div className="text-[9.5px] sm:text-[11px] leading-none mt-1 truncate">
-                <span className="text-[color:var(--text-muted)]">subs</span>
+                <span className="text-[color:var(--text-muted)]">{t("apSubs")}</span>
               </div>
             </div>
 
             <div className="min-w-0 text-center px-1">
               <div className="text-[15px] sm:text-[18px] font-bold leading-none text-[color:var(--text)] truncate">{kpiData.karma}</div>
               <div className="text-[9.5px] sm:text-[11px] leading-none mt-1 truncate">
-                <span className="text-[color:var(--text-muted)]">karma</span>
+                <span className="text-[color:var(--text-muted)]">{t("apKarma")}</span>
               </div>
             </div>
           </div>
@@ -535,13 +549,13 @@ const AccountProfile = memo(function AccountProfile({
             <div className="bg-[color:var(--bg-elevated)] border border-[color:var(--border)] rounded-lg p-3 text-xs flex flex-col gap-2.5 shadow-sm">
               <div className="flex items-center justify-between border-b border-[color:var(--border)] pb-2">
                 <div className="flex items-center gap-2">
-                  <span className="font-semibold text-sm">Bot Analysis Breakdown</span>
+                  <span className="font-semibold text-sm">{t("apBotBreakdownTitle")}</span>
                   <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold tracking-wider ${
                     botAnalysis.riskLevel === 'high'
-                      ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                      ? 'bg-rose-500/20 text-rose-700 dark:text-rose-300 border border-rose-500/30'
                       : botAnalysis.riskLevel === 'medium'
-                        ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                        : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                        ? 'bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30'
+                        : 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30'
                   }`}>
                     {botAnalysis.verdict}
                   </span>
@@ -556,8 +570,8 @@ const AccountProfile = memo(function AccountProfile({
               </div>
 
               {botAnalysis.flags.length > 0 && botAnalysis.score >= 25 && (
-                <div className="flex flex-col gap-1 bg-amber-500/10 border border-amber-500/20 rounded p-2 text-[11px] text-amber-300">
-                  <span className="font-bold text-[10px] uppercase tracking-wider text-amber-400">Detected Risk Factors:</span>
+                <div className="flex flex-col gap-1 bg-amber-500/10 border border-amber-500/20 rounded p-2 text-[11px] text-amber-700 dark:text-amber-300">
+                  <span className="font-bold text-[10px] uppercase tracking-wider text-amber-700 dark:text-amber-400">{t("apRiskFactors")}</span>
                   <ul className="list-disc list-inside space-y-0.5 text-[11px]">
                     {botAnalysis.flags.map((flag, idx) => (
                       <li key={idx}>{flag}</li>
@@ -592,7 +606,7 @@ const AccountProfile = memo(function AccountProfile({
 
       {/* Metadata & Actions Header Bar */}
       <div className="text-[11px] sm:text-xs text-[color:var(--text-muted)] font-medium px-1 flex flex-wrap items-center gap-1.5 sm:gap-2">
-        <span>{t("apBasedOnTotal", { loaded: loadedCount.toLocaleString(), total: Math.max(loadedCount, totalItems || 0).toLocaleString() })}</span>
+        <span>{t("apBasedOnTotal", { loaded: (() => { try { return loadedCount.toLocaleString(LOCALES[lang] || "en"); } catch { return String(loadedCount); } })(), total: (() => { try { return Math.max(loadedCount, totalItems || 0).toLocaleString(LOCALES[lang] || "en"); } catch { return String(Math.max(loadedCount, totalItems || 0)); } })() })}</span>
         {isCrawling && (
           <span className="text-[color:var(--accent-text)] italic flex items-center gap-1">
             <span>· {t("apUpdating")}</span>
@@ -600,10 +614,10 @@ const AccountProfile = memo(function AccountProfile({
               <button
                 type="button"
                 onClick={onStopCrawl}
-                className="text-[10px] text-rose-400 hover:text-rose-300 font-semibold px-1.5 py-0.5 rounded bg-rose-500/10 border border-rose-500/20 hover:bg-rose-500/20 transition-colors cursor-pointer not-italic ml-1"
-                title="Stop background crawling and analyze now"
+                className="text-[10px] text-rose-700 dark:text-rose-300 hover:text-rose-800 dark:hover:text-rose-200 font-semibold px-1.5 py-0.5 rounded bg-rose-500/10 border border-rose-500/20 hover:bg-rose-500/20 transition-colors cursor-pointer not-italic ml-1"
+                title={t("apStopCrawlTitle")}
               >
-                Stop Crawl
+                {t("apStopCrawl")}
               </button>
             )}
           </span>
@@ -612,6 +626,7 @@ const AccountProfile = memo(function AccountProfile({
         <button
           onClick={onRefresh}
           disabled={isCrawling}
+          aria-label={isCrawling ? t("apUpdating") : t("apRefreshTitle")}
           className={`text-[color:var(--text-muted)] hover:text-[color:var(--accent)] transition-colors p-1 -m-1 cursor-pointer ${isCrawling ? 'animate-spin cursor-default opacity-50' : ''}`}
           title={isCrawling ? t("apUpdating") : t("apRefreshTitle")}
         >
@@ -674,7 +689,7 @@ const AccountProfile = memo(function AccountProfile({
                 </div>
                 {tzHint && <span className="text-[10px] text-[color:var(--text-muted)] italic">{tzHint}</span>}
             </div>
-            <div className="min-w-[400px]">
+            <div className="min-w-0 w-full overflow-x-auto">
                 <div className="grid grid-cols-[30px_repeat(24,_1fr)] gap-0.5 mb-1 text-[9px] text-[color:var(--text-muted)] text-center">
                     <div></div>
                     {[...Array(24)].map((_, i) => <div key={i}>{i % 4 === 0 ? i : ''}</div>)}
@@ -736,8 +751,8 @@ const AccountProfile = memo(function AccountProfile({
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[color:var(--border)]/60 pb-2.5">
           <div className="flex items-center gap-1.5 flex-wrap min-w-0">
             <div className="flex items-center gap-1 shrink-0">
-              <h3 className="text-sm font-semibold tracking-wide text-[color:var(--text)]">Political Compass</h3>
-              <HoverHint hint="Multi-dimensional political compass evaluated from Reddit comments, topics, and community footprint via LLM semantic analysis.">
+              <h3 className="text-sm font-semibold tracking-wide text-[color:var(--text)]">{t("apPoliticalCompass")}</h3>
+              <HoverHint hint={t("apCompassHint")}>
                 <div className="text-[color:var(--text-muted)] hover:text-[color:var(--text)] transition-colors cursor-help flex items-center justify-center">
                   <IconInfo />
                 </div>
@@ -758,7 +773,7 @@ const AccountProfile = memo(function AccountProfile({
               </span>
             ) : (
               <span className="text-[10px] sm:text-[10.5px] text-[color:var(--text-muted)] italic">
-                {isCrawling ? "Crawling..." : aiLoading ? "AI processing..." : "No political footprint"}
+                {isCrawling ? t("apCrawling") : aiLoading ? t("apAiProcessing") : t("apNoFootprint")}
               </span>
             )}
 
@@ -770,7 +785,8 @@ const AccountProfile = memo(function AccountProfile({
               }}
               disabled={aiLoading || isCrawling}
               className="p-1 rounded border border-[color:var(--border)] bg-[color:var(--bg)] hover:bg-[color:var(--bg-elevated)] text-[color:var(--text-muted)] hover:text-[color:var(--text)] transition-colors cursor-pointer flex items-center justify-center shrink-0"
-              title="Re-run AI Analysis"
+              title={t("apRerunAi")}
+              aria-label={t("apRerunAi")}
             >
               <svg
                 className={`w-3.5 h-3.5 ${aiLoading ? 'animate-spin text-[color:var(--accent)]' : ''}`}
@@ -795,9 +811,9 @@ const AccountProfile = memo(function AccountProfile({
             <div className="flex items-center gap-2.5 min-w-0">
               <span className="w-2 h-2 rounded-full bg-[color:var(--accent)] animate-ping shrink-0"></span>
               <div className="flex flex-col gap-0.5 min-w-0">
-                <span className="font-semibold text-[color:var(--text)] truncate">Crawling Account History...</span>
+                <span className="font-semibold text-[color:var(--text)] truncate">{t("apCrawlingHistory")}</span>
                 <span className="text-[10.5px] text-[color:var(--text-faint)] truncate">
-                  Loaded <strong className="text-[color:var(--text)] font-semibold">{(loadedCount || 0).toLocaleString()}</strong> items ({crawledCount > 0 ? `+${crawledCount.toLocaleString()} background items` : 'fetching batches'})
+                  {t("apLoaded", { n: (() => { try { return (loadedCount || 0).toLocaleString(LOCALES[lang] || "en"); } catch { return String(loadedCount || 0); } })() })} ({crawledCount > 0 ? t("apBackgroundItems", { n: (() => { try { return crawledCount.toLocaleString(LOCALES[lang] || "en"); } catch { return String(crawledCount); } })() }) : t("apFetchingBatches")})
                 </span>
               </div>
             </div>
@@ -805,10 +821,10 @@ const AccountProfile = memo(function AccountProfile({
               <button
                 type="button"
                 onClick={onStopCrawl}
-                className="px-2 py-1 rounded bg-[color:var(--bg-elevated)] hover:bg-rose-500/15 border border-[color:var(--border)] hover:border-rose-500/30 text-[11px] font-semibold text-rose-400 transition-colors cursor-pointer shrink-0 ml-2"
-                title="Stop background crawling and analyze collected items now"
+                className="px-2 py-1 rounded bg-[color:var(--bg-elevated)] hover:bg-rose-500/15 border border-[color:var(--border)] hover:border-rose-500/30 text-[11px] font-semibold text-rose-700 dark:text-rose-300 transition-colors cursor-pointer shrink-0 ml-2"
+                title={t("apStopCrawlTitle")}
               >
-                ✕ Stop Crawl
+                ✕ {t("apStopCrawl")}
               </button>
             )}
           </div>
@@ -823,46 +839,74 @@ const AccountProfile = memo(function AccountProfile({
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
               </svg>
               <div className="flex flex-col gap-0.5 min-w-0">
-                <span className="font-semibold text-[color:var(--text)] truncate">AI Political Analysis in Progress...</span>
+                <span className="font-semibold text-[color:var(--text)] truncate">{t("apAiProgress")}</span>
                 <span className="text-[10.5px] text-[color:var(--text-faint)] truncate">
-                  Evaluating {(loadedCount || 0).toLocaleString()} items across subreddits & comments
+                  {t("apEvaluating", { n: (() => { try { return (loadedCount || 0).toLocaleString(LOCALES[lang] || "en"); } catch { return String(loadedCount || 0); } })() })}
                 </span>
               </div>
             </div>
             <button
               type="button"
               onClick={handleCancelAi}
-              className="px-2 py-1 rounded bg-[color:var(--bg-elevated)] hover:bg-rose-500/15 border border-[color:var(--border)] hover:border-rose-500/30 text-[11px] font-semibold text-rose-400 transition-colors cursor-pointer shrink-0 ml-2 not-italic"
-              title="Cancel AI analysis"
+              className="px-2 py-1 rounded bg-[color:var(--bg-elevated)] hover:bg-rose-500/15 border border-[color:var(--border)] hover:border-rose-500/30 text-[11px] font-semibold text-rose-700 dark:text-rose-300 transition-colors cursor-pointer shrink-0 ml-2 not-italic"
+              title={t("apCancelTitle")}
             >
-              ✕ Cancel
+              ✕ {t("apCancel")}
             </button>
           </div>
         )}
 
         {aiError && !compassAnalysis.isAiPowered && !aiLoading && (
-          <div className="flex items-center justify-between bg-[color:var(--bg)] border border-[color:var(--border)] rounded-md p-2.5 text-xs text-[color:var(--text-muted)]">
-            <div className="flex items-center gap-2">
-              <span className="font-bold text-rose-400">✕</span>
-              <span>AI Analysis Error: {aiError}</span>
+          <div className="flex flex-col gap-2 bg-[color:var(--bg)] border border-[color:var(--border)] rounded-md p-2.5 text-xs text-[color:var(--text-muted)]">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="font-bold text-rose-700 dark:text-rose-300 shrink-0">✕</span>
+                <span className="break-words">{t("apAiError", { msg: aiError })}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setAiResult(null);
+                  setAiTriggerCount(c => c + 1);
+                }}
+                className="px-2.5 py-1 rounded bg-[color:var(--bg-elevated)] hover:bg-[color:var(--accent)]/15 border border-[color:var(--border)] hover:border-[color:var(--accent)] text-[11px] font-semibold text-[color:var(--text)] transition-colors cursor-pointer shrink-0"
+              >
+                {t("apRetryAi")}
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={() => {
+            <form
+              className="flex items-center gap-1.5"
+              onSubmit={e => {
+                e.preventDefault();
+                const input = e.currentTarget.querySelector("input");
+                setUserApiKey(input?.value || "");
                 setAiResult(null);
                 setAiTriggerCount(c => c + 1);
               }}
-              className="px-2.5 py-1 rounded bg-[color:var(--bg-elevated)] hover:bg-[color:var(--accent)]/15 border border-[color:var(--border)] hover:border-[color:var(--accent)] text-[11px] font-semibold text-[color:var(--text)] transition-colors cursor-pointer"
             >
-              Retry AI
-            </button>
+              <input
+                type="password"
+                name="openrouter-key"
+                autoComplete="off"
+                placeholder={t("apApiKeyPlaceholder")}
+                defaultValue=""
+                aria-label={t("apApiKeyPlaceholder")}
+                className="flex-1 min-w-0 bg-[color:var(--bg-elevated)] border border-[color:var(--border)] rounded px-2 py-1 text-[11px] text-[color:var(--text)] placeholder-[color:var(--text-faint)] focus:outline-none focus:border-[color:var(--accent)] transition-colors"
+              />
+              <button
+                type="submit"
+                className="px-2.5 py-1 rounded bg-[color:var(--bg-elevated)] hover:bg-[color:var(--accent)]/15 border border-[color:var(--border)] hover:border-[color:var(--accent)] text-[11px] font-semibold text-[color:var(--text)] transition-colors cursor-pointer shrink-0"
+              >
+                {t("apApiKeySave")}
+              </button>
+            </form>
           </div>
         )}
 
         {!compassAnalysis.hasSignal && !aiLoading && !isCrawling && (
           <div className="bg-[color:var(--bg)] border border-[color:var(--border)] rounded-md p-4 text-center text-xs text-[color:var(--text-muted)] flex flex-col items-center justify-center gap-1">
-            <span className="font-medium text-[color:var(--text)]">No Political Footprint Detected</span>
-            <span className="text-[11px] text-[color:var(--text-faint)]">This account's comment and post history consists of non-political discussions.</span>
+            <span className="font-medium text-[color:var(--text)]">{t("apNoFootprintTitle")}</span>
+            <span className="text-[11px] text-[color:var(--text-faint)]">{t("apNoFootprintBody")}</span>
           </div>
         )}
 
@@ -881,16 +925,16 @@ const AccountProfile = memo(function AccountProfile({
                 {/* 4 Quadrants with Authentic Compass Colors */}
                 <div className="absolute inset-0 grid grid-cols-2 grid-rows-2 pointer-events-none">
                   <div className="border-r border-b border-[color:var(--border)] bg-rose-500/15 relative p-2 sm:p-2.5 flex items-start justify-start">
-                    <span className="text-[9px] sm:text-[9.5px] font-bold text-rose-400 uppercase tracking-wider">Auth-Left</span>
+                    <span className="text-[9px] sm:text-[9.5px] font-bold text-rose-700 dark:text-rose-300 uppercase tracking-wider">Auth-Left</span>
                   </div>
                   <div className="border-b border-[color:var(--border)] bg-blue-500/15 relative p-2 sm:p-2.5 flex items-start justify-end">
-                    <span className="text-[9px] sm:text-[9.5px] font-bold text-blue-400 uppercase tracking-wider">Auth-Right</span>
+                    <span className="text-[9px] sm:text-[9.5px] font-bold text-blue-700 dark:text-blue-300 uppercase tracking-wider">Auth-Right</span>
                   </div>
                   <div className="border-r border-[color:var(--border)] bg-emerald-500/15 relative p-2 sm:p-2.5 flex items-end justify-start">
-                    <span className="text-[9px] sm:text-[9.5px] font-bold text-emerald-400 uppercase tracking-wider">Lib-Left</span>
+                    <span className="text-[9px] sm:text-[9.5px] font-bold text-emerald-700 dark:text-emerald-300 uppercase tracking-wider">Lib-Left</span>
                   </div>
                   <div className="bg-amber-500/15 relative p-2 sm:p-2.5 flex items-end justify-end">
-                    <span className="text-[9px] sm:text-[9.5px] font-bold text-amber-400 uppercase tracking-wider">Lib-Right</span>
+                    <span className="text-[9px] sm:text-[9.5px] font-bold text-amber-700 dark:text-amber-300 uppercase tracking-wider">Lib-Right</span>
                   </div>
                 </div>
 
@@ -911,14 +955,14 @@ const AccountProfile = memo(function AccountProfile({
               {/* Right Column: Multi-Axis Dimension Spectrums stretched to full height */}
               <div className="flex flex-col justify-between gap-3 sm:gap-3.5 bg-[color:var(--bg)] border border-[color:var(--border)] rounded-lg p-3 sm:p-3.5 h-full">
                 <span className="text-[11px] font-semibold text-[color:var(--text)] uppercase tracking-wider">
-                  Ideological Dimensions
+                  {t("apDimensions")}
                 </span>
 
                 {/* 1. Economic Spectrum */}
                 <div className="flex flex-col gap-1.5">
                   <div className="flex items-center justify-between gap-2 text-[11px] sm:text-[11.5px]">
-                    <span className="text-[color:var(--text-muted)] font-medium shrink-0">Economy</span>
-                    <span className="font-semibold text-blue-400 text-right">{cleanDimensionLabel(compassAnalysis.dimensions?.econ?.label)}</span>
+                    <span className="text-[color:var(--text-muted)] font-medium shrink-0">{t("apEconomy")}</span>
+                    <span className="font-semibold text-blue-700 dark:text-blue-300 text-right">{cleanDimensionLabel(compassAnalysis.dimensions?.econ?.label)}</span>
                   </div>
                   <div className="relative h-2 bg-[color:var(--bg-elevated)] border border-[color:var(--border)] rounded-full overflow-hidden">
                     <div
@@ -930,17 +974,17 @@ const AccountProfile = memo(function AccountProfile({
                     />
                   </div>
                   <div className="flex justify-between text-[8.5px] sm:text-[9.5px] text-[color:var(--text-faint)]">
-                    <span>Socialist / Planned</span>
-                    <span>Mixed</span>
-                    <span>Free Market</span>
+                    <span>{t("apEconLeft")}</span>
+                    <span>{t("apEconMid")}</span>
+                    <span>{t("apEconRight")}</span>
                   </div>
                 </div>
 
                 {/* 2. Social & Cultural Spectrum */}
                 <div className="flex flex-col gap-1.5">
                   <div className="flex items-center justify-between gap-2 text-[11px] sm:text-[11.5px]">
-                    <span className="text-[color:var(--text-muted)] font-medium shrink-0">Social</span>
-                    <span className="font-semibold text-emerald-400 text-right">{cleanDimensionLabel(compassAnalysis.dimensions?.soc?.label)}</span>
+                    <span className="text-[color:var(--text-muted)] font-medium shrink-0">{t("apSocial")}</span>
+                    <span className="font-semibold text-emerald-700 dark:text-emerald-300 text-right">{cleanDimensionLabel(compassAnalysis.dimensions?.soc?.label)}</span>
                   </div>
                   <div className="relative h-2 bg-[color:var(--bg-elevated)] border border-[color:var(--border)] rounded-full overflow-hidden">
                     <div
@@ -952,17 +996,17 @@ const AccountProfile = memo(function AccountProfile({
                     />
                   </div>
                   <div className="flex justify-between text-[8.5px] sm:text-[9.5px] text-[color:var(--text-faint)]">
-                    <span>Progressive / Secular</span>
-                    <span>Moderate</span>
-                    <span>Traditional</span>
+                    <span>{t("apSocLeft")}</span>
+                    <span>{t("apSocMid")}</span>
+                    <span>{t("apSocRight")}</span>
                   </div>
                 </div>
 
                 {/* 3. Governance & Authority Spectrum */}
                 <div className="flex flex-col gap-1.5">
                   <div className="flex items-center justify-between gap-2 text-[11px] sm:text-[11.5px]">
-                    <span className="text-[color:var(--text-muted)] font-medium shrink-0">Governance</span>
-                    <span className="font-semibold text-purple-400 text-right">{cleanDimensionLabel(compassAnalysis.dimensions?.gov?.label)}</span>
+                    <span className="text-[color:var(--text-muted)] font-medium shrink-0">{t("apGovernance")}</span>
+                    <span className="font-semibold text-purple-700 dark:text-purple-300 text-right">{cleanDimensionLabel(compassAnalysis.dimensions?.gov?.label)}</span>
                   </div>
                   <div className="relative h-2 bg-[color:var(--bg-elevated)] border border-[color:var(--border)] rounded-full overflow-hidden">
                     <div
@@ -974,9 +1018,9 @@ const AccountProfile = memo(function AccountProfile({
                     />
                   </div>
                   <div className="flex justify-between text-[8.5px] sm:text-[9.5px] text-[color:var(--text-faint)]">
-                    <span>Civil Libertarian</span>
-                    <span>Balanced</span>
-                    <span>Statist / Order</span>
+                    <span>{t("apGovLeft")}</span>
+                    <span>{t("apGovMid")}</span>
+                    <span>{t("apGovRight")}</span>
                   </div>
                 </div>
               </div>
@@ -990,13 +1034,13 @@ const AccountProfile = memo(function AccountProfile({
                   onClick={() => setShowStancesDrawer(p => !p)}
                   className="text-[11px] text-[color:var(--text-muted)] hover:text-[color:var(--text)] flex items-center justify-between w-full font-medium cursor-pointer"
                 >
-                  <span>Tracked Positions & Stances ({compassAnalysis.detectedPositions.length})</span>
-                  <span className="text-[10px] text-[color:var(--accent-text)]">{showStancesDrawer ? 'Hide ▲' : 'Show ▼'}</span>
+                  <span>{t("apTracked", { n: compassAnalysis.detectedPositions.length })}</span>
+                  <span className="text-[10px] text-[color:var(--accent-text)]">{showStancesDrawer ? t("apHide") : t("apShow")}</span>
                 </button>
 
                 {showStancesDrawer && (
                   <div className="mt-2 flex flex-col gap-2.5 bg-[color:var(--bg)] border border-[color:var(--border)] rounded-lg p-3">
-                    <div className="text-[10px] text-[color:var(--text-faint)]">Extracted directly from comment assertions</div>
+                    <div className="text-[10px] text-[color:var(--text-faint)]">{t("apExtractedFrom")}</div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
                       {compassAnalysis.detectedPositions.map((pos, idx) => (
                         <div key={idx} className="flex flex-col gap-1.5 bg-[color:var(--bg-elevated)] border border-[color:var(--border)] rounded-md p-3">
@@ -1028,20 +1072,20 @@ const AccountProfile = memo(function AccountProfile({
                   onClick={() => setShowCompassSignals(p => !p)}
                   className="text-[11px] text-[color:var(--text-muted)] hover:text-[color:var(--text)] flex items-center justify-between w-full font-medium"
                 >
-                  <span>Subreddit Footprint ({compassAnalysis.topSubSignals.length} communities)</span>
-                  <span className="text-[10px] text-[color:var(--accent-text)]">{showCompassSignals ? 'Hide ▲' : 'Show ▼'}</span>
+                  <span>{t("apSubFootprint", { n: compassAnalysis.topSubSignals.length })}</span>
+                  <span className="text-[10px] text-[color:var(--accent-text)]">{showCompassSignals ? t("apHide") : t("apShow")}</span>
                 </button>
 
                 {showCompassSignals && (
                   <div className="mt-2 flex flex-col gap-2 text-[11px] bg-[color:var(--bg)] border border-[color:var(--border)] rounded p-2.5">
-                    <div className="text-[10px] uppercase font-bold text-[color:var(--text-faint)] mb-1">Subreddits (click to filter feed):</div>
+                    <div className="text-[10px] uppercase font-bold text-[color:var(--text-faint)] mb-1">{t("apSubFilterHint")}</div>
                     <div className="flex flex-wrap gap-1.5">
                       {compassAnalysis.topSubSignals.map(s => (
                         <button
                           key={s.sub}
                           type="button"
                           onClick={() => onWordClick?.(`r/${s.sub}`)}
-                          title={`Filter feed strictly to r/${s.sub}`}
+                          title={t("apFilterFeed", { sub: s.sub })}
                           className="px-2 py-1 rounded bg-[color:var(--bg-elevated)] border border-[color:var(--border)] hover:border-[color:var(--accent)] hover:text-[color:var(--accent-text)] text-[10px] transition-colors cursor-pointer flex items-center gap-1.5"
                         >
                           <span className="font-medium">r/{s.sub}</span>
@@ -1061,7 +1105,7 @@ const AccountProfile = memo(function AccountProfile({
           </div>
         ) : (
           <div className="bg-[color:var(--bg)] border border-[color:var(--border)] rounded p-3 text-center text-xs text-[color:var(--text-muted)]">
-            No political or ideological engagement detected in public posts and comments.
+            {t("apNoEngagement")}
           </div>
         )}
       </div>

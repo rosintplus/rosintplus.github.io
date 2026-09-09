@@ -171,11 +171,23 @@ function openDB() {
   return dbPromise;
 }
 
+function cloneProfile(p) {
+  if (!p) return p;
+  try {
+    if (typeof structuredClone === "function") return migrateIfNeeded(structuredClone(p));
+  } catch { /* fall through */ }
+  try {
+    return migrateIfNeeded(JSON.parse(JSON.stringify(p)));
+  } catch {
+    return migrateIfNeeded(p);
+  }
+}
+
 export async function getCachedProfile(username) {
   if (!username) return null;
   const normalized = username.toLowerCase();
   if (memoryCache.has(normalized)) {
-    return migrateIfNeeded(memoryCache.get(normalized));
+    return cloneProfile(memoryCache.get(normalized));
   }
   try {
     const db = await openDB();
@@ -186,7 +198,7 @@ export async function getCachedProfile(username) {
       request.onerror = () => reject(request.error);
       request.onsuccess = () => {
         const result = request.result;
-        resolve(result ? migrateIfNeeded(result) : null);
+        resolve(result ? cloneProfile(result) : null);
       };
     });
   } catch (e) {
@@ -264,9 +276,13 @@ export async function getProfileData(username, onProgress, forceUpdate = false) 
         if (cached && !cached.partial) {
           const age = Date.now() - cached.fetchedAt;
           if (age < 7 * 24 * 60 * 60 * 1000) {
-            cacheSet(normalized, cached);
-            return cached;
+            cacheSet(normalized, cloneProfile(cached));
+            return cloneProfile(cached);
           }
+          // Stale cache: full refresh below with maxCreatedUtc=0, so drop the
+          // old snapshot for merge purposes (else old+new double-count).
+          // Keep cachedProfile for error fallback.
+          cached = null;
         }
       } else {
         cached = await getCachedProfile(normalized);
@@ -306,9 +322,9 @@ export async function getProfileData(username, onProgress, forceUpdate = false) 
       async function fetchAndProcess(type) {
         const isComment = type === "comments";
         const localStats = emptyStats();
+        const seenIds = new Set();
         let itemCount = 0;
         let before = null;
-        let beforeId = null;
         let hitMaxUtc = false;
         let latestUtc = 0;
 
@@ -317,8 +333,8 @@ export async function getProfileData(username, onProgress, forceUpdate = false) 
 
           const endpoint = type === "posts" ? "posts" : "comments";
           let url = `${ARCTIC}/api/${endpoint}/search?author=${encodeURIComponent(normalized)}&limit=100`;
+          // Timestamp-only cursor: Arctic rejects before_id with HTTP 400.
           if (before != null) url += `&before=${before}`;
-          if (beforeId) url += `&before_id=${encodeURIComponent(beforeId)}`;
 
           const res = await safeFetch(url, { signal });
           if (signal?.aborted || res.aborted) throw new DOMException("Aborted", "AbortError");
@@ -330,10 +346,13 @@ export async function getProfileData(username, onProgress, forceUpdate = false) 
           }
 
           for (const item of res.data) {
+            if (!item || !item.id) continue;
             if (item.created_utc <= maxCreatedUtc) {
               hitMaxUtc = true;
               break;
             }
+            if (seenIds.has(item.id)) continue;
+            seenIds.add(item.id);
             processItem(localStats, item, isComment);
             itemCount++;
             loadedTotal++;
@@ -346,8 +365,9 @@ export async function getProfileData(username, onProgress, forceUpdate = false) 
 
           if (res.data.length < 100) break;
           const last = res.data[res.data.length - 1];
-          before = last.created_utc;
-          beforeId = last.id;
+          // Stall guard: if the cursor didn't advance (repeated page), step the
+          // timestamp back 1s to force progress instead of looping forever.
+          before = (last.created_utc === before) ? before - 1 : last.created_utc;
           await new Promise(r => setTimeout(r, 500));
         }
 
