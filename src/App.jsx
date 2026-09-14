@@ -890,7 +890,7 @@ const TabBtn = memo(function TabBtn({
   const handleClick = useCallback(() => onSelect(tab), [onSelect, tab]);
   return <button onClick={handleClick} role="tab" aria-selected={active} className={`group/tab relative flex-1 flex items-center justify-center px-2.5 py-2.5 text-[15px] sm:px-4 sm:py-2.5 sm:text-sm font-medium transition-colors ${active ? "text-[color:var(--text)]" : "text-[color:var(--text-muted)] hover:text-[color:var(--text)]"}`}>
             {label}
-            {(count != null && count !== 0) && <span className={`ml-1.5 text-[13px] px-2 py-0.5 sm:text-[11px] sm:px-1.5 rounded-full transition-colors ${active ? "bg-[color:var(--accent)] text-[color:var(--bg)] font-bold" : "bg-[color:var(--border)] text-[color:var(--text-muted)] group-hover/tab:bg-[color:var(--accent)]/20 group-hover/tab:text-[color:var(--accent)]"}`}>
+            {(count != null && count !== 0) && <span className={`ml-1.5 text-[13px] px-2 py-0.5 sm:text-[13px] sm:px-2 rounded-full transition-colors ${active ? "bg-[color:var(--accent)] text-white font-bold" : "bg-[color:var(--border)] text-[color:var(--text-muted)] group-hover/tab:bg-[color:var(--border-hover)] group-hover/tab:text-[color:var(--text)]"}`}>
                     {countIsPlus ? `${count}+` : count}
                 </span>}
             {active && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[color:var(--accent)] rounded-t" />}
@@ -1254,7 +1254,7 @@ const ModeSelector = memo(function ModeSelector({
             )}
             <span aria-hidden="true" className="absolute top-0.5 bottom-0.5 left-0.5 rounded border border-[color:var(--border-hover)] bg-[color:var(--bg-elevated)] transition-transform duration-200 ease-out will-change-transform" style={{ width: w ?? 0, transform: `translate3d(${w ? activeIndex * w : 0}px,0,0)` }} />
             {modes.map(m => (
-                <button key={m} ref={el => { btnRefs.current[m] = el; }} type="button" role="tab" aria-selected={mode === m} onClick={() => onModeChange(m)} className={`relative z-10 flex items-center justify-center px-3 h-6 whitespace-nowrap text-[11px] font-medium rounded transition-colors ${mode === m ? "text-[color:var(--text)]" : "text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)]"}`} style={w ? { width: w } : undefined}>
+                <button key={m} ref={el => { btnRefs.current[m] = el; }} type="button" role="tab" aria-selected={mode === m} onClick={() => onModeChange(m)} className={`relative z-10 flex items-center justify-center px-3 h-6 whitespace-nowrap text-[11px] font-medium rounded transition-colors ${mode === m ? "text-[color:var(--text)]" : "text-[color:var(--text-muted)] hover:text-[color:var(--text)]"}`} style={w ? { width: w } : undefined}>
                     {m === "post" ? t("modePost") : m === "subreddit" ? t("modeSubreddit") : t("modeUsername")}
                 </button>
             ))}
@@ -1364,7 +1364,7 @@ const SearchBar = memo(function SearchBar({
   return <form onSubmit={handleSubmit} className="flex gap-2">
             <div className="relative" style={FLEX_1} onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) setFocused(false); }}>
                 {mode !== "post" && <span className="absolute left-[14px] top-1/2 -translate-y-1/2 text-[color:var(--text-muted)] text-sm font-medium">{mode === "subreddit" ? "r/" : "u/"}</span>}
-                <input ref={inputRef} aria-label="Search user" type="text" value={username} onChange={e => setUsername(e.target.value)} onFocus={() => setFocused(true)} placeholder={mode === "subreddit" ? t("subredditPlaceholder") : mode === "post" ? t("searchPlaceholderPost") : t("searchPlaceholder")} name="search_query_osint" id="search_query_osint" autoComplete="off" data-bwignore="true" data-lpignore="true" data-1p-ignore="true" spellCheck="false" className={`w-full bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded py-2.5 text-sm text-[color:var(--text)] placeholder-[color:var(--text-muted)] focus:outline-none focus:border-[color:var(--accent)] transition-colors ${mode === "post" ? "pl-4 pr-10" : "pl-[32px] pr-10"}`} onClick={() => setFocused(true)} onKeyDown={e => { if (e.key === "Escape") { setFocused(false); inputRef.current?.blur(); } }} />
+                <input ref={inputRef} aria-label="Search user" type="text" value={username} onChange={e => setUsername(e.target.value)} onFocus={() => setFocused(true)} placeholder={mode === "subreddit" ? t("subredditPlaceholder") : mode === "post" ? t("searchPlaceholderPost") : t("searchPlaceholder")} name="search_query_osint" id="search_query_osint" autoComplete="off" data-bwignore="true" data-lpignore="true" data-1p-ignore="true" spellCheck="false" className={`w-full bg-[color-mix(in_srgb,var(--bg-elevated)_50%,var(--bg))] border border-[color:var(--border-hover)] rounded py-2.5 text-sm text-[color:var(--text)] placeholder-[color:var(--text-muted)] focus:outline-none focus:border-[color:var(--accent)] transition-colors ${mode === "post" ? "pl-4 pr-10" : "pl-[32px] pr-10"}`} onClick={() => setFocused(true)} onKeyDown={e => { if (e.key === "Escape") { setFocused(false); inputRef.current?.blur(); } }} />
                 {username && (
                     <button type="button" onMouseDown={e => e.preventDefault()} onClick={() => { setUsername(""); inputRef.current?.focus(); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-[color:var(--text-muted)] hover:text-[color:var(--accent-text)] transition-colors p-1" aria-label="Clear search">
                         <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
@@ -1414,6 +1414,7 @@ const SearchBar = memo(function SearchBar({
 const TABS = ["all", "posts", "comments"];
 
 const AccountProfile = lazy(() => import('./AccountProfile.jsx'));
+const ProfileSummary = lazy(() => import('./ProfileSummary.jsx'));
 
 export default function App() {
   const [initialParams] = useState(() => Object.fromEntries(new URLSearchParams(window.location.search)));
@@ -2225,7 +2226,7 @@ export default function App() {
                         <SearchBar defaultQuery={query} onSearch={searchUser} initialLoading={initialLoading} mode={mode} />
                     </div>
 
-                    {!searched && <div className="flex flex-col gap-2 mt-3 mx-auto w-full flex-shrink-0" style={{
+                    {!searched && <div className="relative flex flex-col gap-2 mt-3 mx-auto w-full flex-shrink-0" style={{
           maxWidth: '690px'
         }}>
                             <div className="flex items-center justify-between gap-2 w-full min-w-0">
@@ -2237,12 +2238,12 @@ export default function App() {
                             </button>
                             <div className="ml-auto flex-shrink-0"><ModeSelector mode={mode} onModeChange={handleModeChange} /></div>
                             </div>
-                            {showAdvancedFilters && <div className="w-full flex flex-col gap-2">
+                            {showAdvancedFilters && <div className="absolute left-0 right-0 top-full mt-2 z-30 bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded-md shadow-xl shadow-black/40 px-3 py-2.5 flex flex-col gap-2.5">
                                     <div className="flex flex-wrap items-center gap-2 w-full">
                                         <span className="text-[11px] text-[color:var(--text-muted)]">{t("from")}</span>
-                                        <input aria-label="Date from" type="date" max={dateTo || undefined} value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-2 h-7 text-[12px] text-[color:var(--text)] focus:outline-none focus:border-[color:var(--accent)] transition-colors" />
+                                        <input aria-label="Date from" type="date" max={dateTo || undefined} value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-2 h-8 text-[12px] text-[color:var(--text)] focus:outline-none focus:border-[color:var(--accent)] transition-colors" />
                                         <span className="text-[11px] text-[color:var(--text-muted)]">{t("to")}</span>
-                                        <input aria-label="Date to" type="date" min={dateFrom || undefined} value={dateTo} onChange={e => setDateTo(e.target.value)} className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-2 h-7 text-[12px] text-[color:var(--text)] focus:outline-none focus:border-[color:var(--accent)] transition-colors" />
+                                        <input aria-label="Date to" type="date" min={dateFrom || undefined} value={dateTo} onChange={e => setDateTo(e.target.value)} className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-2 h-8 text-[12px] text-[color:var(--text)] focus:outline-none focus:border-[color:var(--accent)] transition-colors" />
                                         {mode === "username" && <><span className="text-[11px] text-[color:var(--text-muted)]">{t("in")}</span>
                                         <div className="relative">
                                             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[color:var(--text-muted)] text-sm font-medium select-none">r/</span>
@@ -2258,22 +2259,22 @@ export default function App() {
                         push: false
                       });
                     }
-                  }} placeholder={t("subredditPlaceholder")} className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded pl-8 pr-3 py-1 text-[12px] text-[color:var(--text)] placeholder-[color:var(--text-muted)] focus:outline-none focus:border-[color:var(--accent)] transition-colors min-w-[120px] flex-1" />
+                  }} placeholder={t("subredditPlaceholder")} className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded pl-8 pr-3 h-8 text-[12px] text-[color:var(--text)] placeholder-[color:var(--text-muted)] focus:outline-none focus:border-[color:var(--accent)] transition-colors min-w-[120px] max-w-[240px] flex-1" />
                                         </div></>}
-                                        <div className="flex items-center gap-2 flex-shrink-0">
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-2 w-full">
+                                        <span className="text-[11px] text-[color:var(--text-muted)] whitespace-nowrap">{t("externalLink")}</span>
+                                        <input aria-label="External link URL contains" type="text" value={urlQuery} onChange={e => setUrlQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && searched && query && !initialLoading) searchUser(query, { push: false }); }} onBlur={() => { if (searched && query && !initialLoading && urlQuery.trim()) searchUser(query, { push: false }); }} placeholder={t("externalLinkPlaceholder")} className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-2 h-8 text-[12px] text-[color:var(--text)] placeholder-[color:var(--text-muted)] focus:outline-none focus:border-[color:var(--accent)] transition-colors min-w-[160px] flex-1" />
+                                        <div className="ml-auto flex items-center gap-3 flex-shrink-0">
                                             <label className="flex items-center gap-1.5 cursor-pointer select-none">
                                                 <input type="checkbox" checked={deletedOnly} onChange={e => setDeletedOnly(e.target.checked)} className="w-3.5 h-3.5 accent-[color:var(--accent)] cursor-pointer" />
-                                                <span className="text-[11px] leading-none flex flex-col text-[color:var(--text-muted)]"><span>Deleted</span><span>only</span></span>
+                                                <span className="text-[11px] text-[color:var(--text-muted)] whitespace-nowrap">{t("deletedOnly")}</span>
                                             </label>
                                             <label className="flex items-center gap-1.5 cursor-pointer select-none">
                                                 <input type="checkbox" checked={showNsfw} onChange={e => setShowNsfw(e.target.checked)} className="w-3.5 h-3.5 accent-[color:var(--accent)] cursor-pointer" />
-                                                <span className="text-[11px] leading-none flex flex-col text-[color:var(--text-muted)]"><span>Show</span><span>NSFW</span></span>
+                                                <span className="text-[11px] text-[color:var(--text-muted)] whitespace-nowrap">{t("showNsfw")}</span>
                                             </label>
                                         </div>
-                                    </div>
-                                    <div className="flex flex-wrap items-center gap-2 w-full">
-                                        <span className="text-[11px] text-[color:var(--text-muted)] whitespace-nowrap">External link</span>
-                                        <input aria-label="External link URL contains" type="text" value={urlQuery} onChange={e => setUrlQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && searched && query && !initialLoading) searchUser(query, { push: false }); }} onBlur={() => { if (searched && query && !initialLoading && urlQuery.trim()) searchUser(query, { push: false }); }} placeholder="domain (e.g. youtube.com)" className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-2 py-1 text-[11px] text-[color:var(--text)] placeholder-[color:var(--text-muted)] focus:outline-none focus:border-[color:var(--accent)] transition-colors min-w-[160px] flex-1" />
                                     </div>
                                 </div>}
                         </div>}
@@ -2291,6 +2292,16 @@ export default function App() {
                     </div>}
 
                 {searched && !isOutageTakeover && <div className="w-full max-w-3xl mx-auto px-3 sm:px-4 mt-6 pb-16">
+
+                        {/* KPI summary + bot check live outside the Stats panel so they are always visible */}
+                        {mode === "username" && !initialLoading && <Suspense fallback={null}>
+                            <ProfileSummary
+                              username={query}
+                              posts={allPosts}
+                              comments={allComments}
+                              userMeta={userMeta}
+                            />
+                        </Suspense>}
 
                         {/* key remounts the card per user so stale stats never flash */}
                         {!initialLoading && showProfile && mode === "username" && <Suspense fallback={
@@ -2489,8 +2500,8 @@ export default function App() {
                             </label>
                             {mode === "username" && <button onClick={() => setShowProfile(value => !value)} className={`flex items-center gap-1.5 flex-shrink-0 px-2.5 h-8 border rounded text-[11px] cursor-pointer transition-colors ${showProfile ? "bg-[color:var(--bg-elevated)] text-[color:var(--text)] border-[color:var(--text-muted)]" : "border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)]"}`}><IconActivity />{t("stats")}</button>}
                             <div className="relative flex flex-shrink-0 items-stretch rounded border border-[color:var(--border-hover)] bg-[color:var(--bg)] p-0.5 select-none" role="radiogroup" aria-label="Sort order">
-                                <button onClick={() => setSortOrder("desc")} role="radio" aria-checked={sortOrder === "desc"} className={`px-3 h-7 text-[11px] rounded transition-colors cursor-pointer ${sortOrder === "desc" ? "border border-[color:var(--border-hover)] bg-[color:var(--bg-elevated)] text-[color:var(--text)]" : "text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)]"}`}>{t("newest")}</button>
-                                <button onClick={() => setSortOrder("asc")} role="radio" aria-checked={sortOrder === "asc"} className={`px-3 h-7 text-[11px] rounded transition-colors cursor-pointer ${sortOrder === "asc" ? "border border-[color:var(--border-hover)] bg-[color:var(--bg-elevated)] text-[color:var(--text)]" : "text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)]"}`}>{t("oldest")}</button>
+                                <button onClick={() => setSortOrder("desc")} role="radio" aria-checked={sortOrder === "desc"} className={`px-3 h-7 text-[11px] rounded transition-colors cursor-pointer ${sortOrder === "desc" ? "border border-[color:var(--border-hover)] bg-[color:var(--bg-elevated)] text-[color:var(--text)]" : "text-[color:var(--text-muted)] hover:text-[color:var(--text)]"}`}>{t("newest")}</button>
+                                <button onClick={() => setSortOrder("asc")} role="radio" aria-checked={sortOrder === "asc"} className={`px-3 h-7 text-[11px] rounded transition-colors cursor-pointer ${sortOrder === "asc" ? "border border-[color:var(--border-hover)] bg-[color:var(--bg-elevated)] text-[color:var(--text)]" : "text-[color:var(--text-muted)] hover:text-[color:var(--text)]"}`}>{t("oldest")}</button>
                             </div>
                             <div className="flex flex-shrink-0 items-stretch rounded border border-[color:var(--border-hover)] bg-[color:var(--bg)] overflow-hidden select-none">
                             <button onClick={() => {

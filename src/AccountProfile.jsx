@@ -3,7 +3,6 @@ import { HoverHint, IconInfo } from './App.jsx';
 import { REDDIT_BASE, fetchSubredditInteractions } from './api.js';
 import { useI18n, LOCALES } from './i18n.js';
 import { toggleProfileSaved, getSavedUsernames } from './profileData.js';
-import { evaluateBotLikelihood } from './botDetector.js';
 import { analyzeProfileWithAI, setUserApiKey } from './openrouter.js';
 
 function getDays(locale) {
@@ -12,23 +11,6 @@ function getDays(locale) {
 }
 const levels = [0.4, 0.6, 0.8, 1.0];
 const weightedCache = new Map();
-
-function fmtNum(n, locale) {
-  if (n == null) return null;
-  try {
-    if (locale) {
-      const nf = new Intl.NumberFormat(locale, { notation: "compact", maximumFractionDigits: 1 });
-      return nf.format(n);
-    }
-  } catch { /* fall through */ }
-  if (Math.abs(n) >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
-  if (Math.abs(n) >= 10000) return `${(n / 1000).toFixed(1)}k`;
-  try {
-    if (Math.abs(n) >= 1000) return n.toLocaleString(locale);
-  } catch { /* ignore */ }
-  if (Math.abs(n) >= 1000) return n.toLocaleString();
-  return String(n);
-}
 
 function getArchetypeColorClass(archetype = '') {
   const a = archetype.toLowerCase();
@@ -130,7 +112,6 @@ const AccountProfile = memo(function AccountProfile({
   const { t, lang } = useI18n();
   const days = useMemo(() => getDays(LOCALES[lang] || "en"), [lang]);
   const [isSaved, setIsSaved] = useState(false);
-  const [showBotDrawer, setShowBotDrawer] = useState(false);
   const [showCompassSignals, setShowCompassSignals] = useState(false);
   const [showStancesDrawer, setShowStancesDrawer] = useState(false);
   const aiControllerRef = useRef(null);
@@ -444,39 +425,6 @@ const AccountProfile = memo(function AccountProfile({
     };
   }, [aiResult, stats, isCrawling, aiLoading]);
 
-  // Robust, algorithmic bot evaluation (Bayesian, Circadian, Karma-farm & Copycat detection)
-  const botAnalysis = useMemo(() => {
-    return evaluateBotLikelihood({
-      username: query,
-      userMeta: effectiveUserMeta,
-      stats,
-      posts,
-      comments,
-    });
-  }, [query, effectiveUserMeta, stats, posts, comments]);
-
-  const kpiData = useMemo(() => {
-    const total = totalItems || 0;
-    const upvotes = effectiveUserMeta?.total_karma ?? 0;
-
-    const activeSince = (() => {
-      const earliest = effectiveUserMeta?.earliest_post_at || effectiveUserMeta?.earliest_comment_at;
-      if (!earliest) return "—";
-      const d = new Date(earliest * 1000);
-      return d.toLocaleDateString(LOCALES[lang] || "en", { month: "short", year: "numeric" });
-    })();
-
-    return {
-      total: fmtNum(total),
-      karma: fmtNum(upvotes),
-      subs: fmtNum(Object.keys(stats?.subredditCounts || {}).length),
-      botScore: botAnalysis.score,
-      botVerdict: botAnalysis.verdict,
-      botRisk: botAnalysis.riskLevel,
-      activeSince,
-    };
-  }, [stats, effectiveUserMeta, totalItems, botAnalysis, lang]);
-
   if (!stats && (!posts || posts.length === 0) && (!comments || comments.length === 0)) {
     return (
       <div className="bg-[color:var(--bg-elevated)] border border-[color:var(--border)] rounded-lg p-6 text-center text-xs text-[color:var(--text-muted)] mt-4">
@@ -485,125 +433,8 @@ const AccountProfile = memo(function AccountProfile({
     );
   }
 
-  const botColorClass = botAnalysis.score >= 65
-    ? "text-rose-700 dark:text-rose-300 font-bold"
-    : botAnalysis.score >= 35
-      ? "text-amber-700 dark:text-amber-300 font-semibold"
-      : "text-[color:var(--text)]";
-
   return (
     <div className="flex flex-col gap-4 mb-4 mt-4 text-[color:var(--text)]">
-      {kpiData && (
-        <div className="flex flex-col gap-2">
-          <div className="bg-[color:var(--bg-elevated)] border border-[color:var(--border)] rounded-lg px-2 sm:px-3 py-2.5 sm:py-3 grid grid-cols-5 divide-x divide-[color:var(--border)]">
-            <div className="min-w-0 text-center px-1">
-              <div className="text-[15px] sm:text-[18px] font-bold leading-none text-[color:var(--text)] truncate">{kpiData.total}</div>
-              <div className="text-[9.5px] sm:text-[11px] leading-none mt-1 truncate">
-                <span className="text-[color:var(--text-muted)]">{t("apItems")}</span>
-              </div>
-            </div>
-
-            <div
-              onClick={() => setShowBotDrawer(prev => !prev)}
-              role="button"
-              tabIndex={0}
-              aria-expanded={showBotDrawer}
-              aria-label={t("apBotToggle")}
-              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowBotDrawer(p => !p); } }}
-              title={t("apBotBreakdown")}
-              className="min-w-0 text-center px-1 cursor-pointer hover:bg-[color:var(--border)]/20 transition-colors rounded py-0.5"
-            >
-              <div className={`text-[15px] sm:text-[18px] leading-none flex items-center justify-center gap-0.5 ${botColorClass}`}>
-                <span>{kpiData.botScore}%</span>
-                <span className="text-[8px] opacity-70">▾</span>
-              </div>
-              <div className="text-[9.5px] sm:text-[11px] leading-none mt-1 flex items-center justify-center gap-0.5 truncate">
-                <span className="text-[color:var(--text-muted)]">{t("apLikelyBot")}</span>
-              </div>
-            </div>
-
-            <div className="min-w-0 text-center px-1">
-              <div className="text-[14px] sm:text-[18px] font-bold leading-none text-[color:var(--text)] truncate">{kpiData.activeSince}</div>
-              <div className="text-[9.5px] sm:text-[11px] leading-none mt-1 truncate">
-                <span className="text-[color:var(--text-muted)]">{t("apActiveSince")}</span>
-              </div>
-            </div>
-
-            <div className="min-w-0 text-center px-1">
-              <div className="text-[15px] sm:text-[18px] font-bold leading-none text-[color:var(--text)] truncate">{kpiData.subs}</div>
-              <div className="text-[9.5px] sm:text-[11px] leading-none mt-1 truncate">
-                <span className="text-[color:var(--text-muted)]">{t("apSubs")}</span>
-              </div>
-            </div>
-
-            <div className="min-w-0 text-center px-1">
-              <div className="text-[15px] sm:text-[18px] font-bold leading-none text-[color:var(--text)] truncate">{kpiData.karma}</div>
-              <div className="text-[9.5px] sm:text-[11px] leading-none mt-1 truncate">
-                <span className="text-[color:var(--text-muted)]">{t("apKarma")}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Bot Signals Diagnostic Card */}
-          {showBotDrawer && (
-            <div className="bg-[color:var(--bg-elevated)] border border-[color:var(--border)] rounded-lg p-3 text-xs flex flex-col gap-2.5 shadow-sm">
-              <div className="flex items-center justify-between border-b border-[color:var(--border)] pb-2">
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold text-sm">{t("apBotBreakdownTitle")}</span>
-                  <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold tracking-wider ${
-                    botAnalysis.riskLevel === 'high'
-                      ? 'bg-rose-500/20 text-rose-700 dark:text-rose-300 border border-rose-500/30'
-                      : botAnalysis.riskLevel === 'medium'
-                        ? 'bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30'
-                        : 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30'
-                  }`}>
-                    {botAnalysis.verdict}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowBotDrawer(false)}
-                  className="text-[color:var(--text-muted)] hover:text-[color:var(--text)] text-xs px-1 cursor-pointer"
-                >
-                  ✕
-                </button>
-              </div>
-
-              {botAnalysis.flags.length > 0 && botAnalysis.score >= 25 && (
-                <div className="flex flex-col gap-1 bg-amber-500/10 border border-amber-500/20 rounded p-2 text-[11px] text-amber-700 dark:text-amber-300">
-                  <span className="font-bold text-[10px] uppercase tracking-wider text-amber-700 dark:text-amber-400">{t("apRiskFactors")}</span>
-                  <ul className="list-disc list-inside space-y-0.5 text-[11px]">
-                    {botAnalysis.flags.map((flag, idx) => (
-                      <li key={idx}>{flag}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
-                {botAnalysis.signals.map((sig, i) => (
-                  <div key={i} className="flex flex-col gap-0.5 bg-[color:var(--bg)] border border-[color:var(--border)] rounded p-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[color:var(--text-muted)] font-medium">{sig.label}</span>
-                      <span className={`font-semibold ${
-                        sig.status === 'bot'
-                          ? 'text-rose-400'
-                          : sig.status === 'warning'
-                            ? 'text-amber-400'
-                            : 'text-[color:var(--text)]'
-                      }`}>
-                        {sig.value}
-                      </span>
-                    </div>
-                    <span className="text-[10px] text-[color:var(--text-faint)] leading-tight">{sig.detail}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Metadata & Actions Header Bar */}
       <div className="text-[11px] sm:text-xs text-[color:var(--text-muted)] font-medium px-1 flex flex-wrap items-center gap-1.5 sm:gap-2">
         <span>{t("apBasedOnTotal", { loaded: (() => { try { return loadedCount.toLocaleString(LOCALES[lang] || "en"); } catch { return String(loadedCount); } })(), total: (() => { try { return Math.max(loadedCount, totalItems || 0).toLocaleString(LOCALES[lang] || "en"); } catch { return String(Math.max(loadedCount, totalItems || 0)); } })() })}</span>
@@ -1103,11 +934,7 @@ const AccountProfile = memo(function AccountProfile({
               </div>
             )}
           </div>
-        ) : (
-          <div className="bg-[color:var(--bg)] border border-[color:var(--border)] rounded p-3 text-center text-xs text-[color:var(--text-muted)]">
-            {t("apNoEngagement")}
-          </div>
-        )}
+        ) : null}
       </div>
     </div>
   );
