@@ -1403,7 +1403,7 @@ const SearchBar = memo(function SearchBar({
                   </div>
                 )}
             </div>
-            <button type="submit" disabled={!username.trim() || initialLoading} className="flex items-center justify-center bg-[color:var(--accent)] text-[color:var(--bg)] border border-[color:var(--accent)] [&:not(:disabled)]:hover:bg-[color-mix(in_srgb,var(--accent)_88%,var(--text-base))] disabled:opacity-50 disabled:cursor-not-allowed font-bold text-sm px-5 py-2.5 rounded transition-all flex-shrink-0 leading-none">
+                <button type="submit" disabled={!username.trim() || initialLoading} className="flex items-center justify-center bg-[color:var(--accent)] text-white border border-[color:var(--accent)] [&:not(:disabled)]:hover:bg-[color-mix(in_srgb,var(--accent)_88%,var(--text-base))] disabled:opacity-50 disabled:cursor-not-allowed font-bold text-sm px-5 py-2.5 rounded transition-all flex-shrink-0 leading-none">
                 <span className="inline-flex items-center justify-center w-5 h-5 -mt-[1px]">
                     {initialLoading ? <span className="w-5 h-5 inline-block flex-shrink-0 rounded-full border-[3px] border-[color:color-mix(in_srgb,var(--bg)_35%,transparent)] border-t-[color:var(--bg)] animate-spin" aria-hidden="true"></span> : <IconSearch />}
                 </span>
