@@ -15,6 +15,8 @@ const STROKE_TRANSITION = { transition: "stroke 150ms" };
 const LINK_PILL = "rounded px-1 -mx-1 transition-colors hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)]";
 const FLEX_1 = { flex: "1 1 0" };
 const closeOnEscape = e => { if (e.key === "Escape") e.currentTarget.removeAttribute("open"); };
+const closeAllMenus = () => { document.querySelectorAll('details[open]').forEach(d => d.removeAttribute('open')); };
+const closeOtherMenus = (self) => { document.querySelectorAll('details[open]').forEach(d => { if (d !== self) d.removeAttribute('open'); }); };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 function readStoredList(key) {
@@ -1163,14 +1165,14 @@ const ThemeSwitcher = memo(() => {
 
   return <div className="flex gap-1.5 sm:gap-2 flex-shrink-0">
             <details className="relative group/lang" onKeyDown={closeOnEscape}>
-                <summary aria-label="Change language" className="flex items-center gap-1.5 bg-[color:var(--bg)] border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] rounded h-9 px-3 sm:h-8 sm:px-2.5 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)] cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                <summary aria-label="Change language" onClick={e => closeOtherMenus(e.currentTarget.closest('details'))} className="flex items-center gap-1.5 bg-[color:var(--bg)] border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] relative z-50 rounded h-9 px-3 sm:h-8 sm:px-2.5 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)] cursor-pointer list-none [&::-webkit-details-marker]:hidden">
                     <IconGlobe className="w-3.5 h-3.5 text-[color:var(--text-muted)] pointer-events-none" />
                     <span className="hidden sm:inline text-xs text-[color:var(--text-muted)] font-medium pointer-events-none">{LANGS[lang]}</span>
                 </summary>
-                <div className="fixed inset-0 z-40 hidden group-open/lang:block" onClick={e => e.currentTarget.closest('details').removeAttribute('open')} aria-hidden="true" />
+                <div className="fixed inset-0 z-40 hidden group-open/lang:block" onClick={closeAllMenus} aria-hidden="true" />
                 <div className="absolute right-0 top-full mt-2 bg-[color:var(--bg-elevated)] border border-[color:var(--border-hover)] rounded-md shadow-xl overflow-hidden z-50 min-w-[110px] hidden group-open/lang:block">
                     {Object.entries(LANGS).map(([code, name]) => (
-                        <button key={code} onClick={e => { setLang(code); e.currentTarget.closest('details').removeAttribute('open'); }} className="w-full text-left px-3 py-1.5 text-[11px] flex items-center gap-2 hover:bg-[color:var(--border-hover)] transition-colors">
+                        <button key={code} onClick={e => { setLang(code); e.currentTarget.closest('details').removeAttribute('open'); }} className="w-full text-left px-3 py-1.5 text-[11px] flex items-center gap-2 hover:bg-[color:var(--border)] transition-colors">
                             <span className="text-[10px] font-bold uppercase text-[color:var(--text-faint)] w-5">{code}</span>
                             <span className={lang === code ? "text-[color:var(--text)] font-medium" : "text-[color:var(--text-muted)]"}>{name}</span>
                         </button>
@@ -1179,14 +1181,14 @@ const ThemeSwitcher = memo(() => {
             </details>
 
             <details className="relative group/mode" onKeyDown={closeOnEscape}>
-                <summary aria-label={t("modeAuto")} className="flex items-center gap-1.5 bg-[color:var(--bg)] border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] rounded h-9 px-3 sm:h-8 sm:px-2.5 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)] cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                <summary aria-label={t("modeAuto")} onClick={e => closeOtherMenus(e.currentTarget.closest('details'))} className="flex items-center gap-1.5 bg-[color:var(--bg)] border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] relative z-50 rounded h-9 px-3 sm:h-8 sm:px-2.5 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)] cursor-pointer list-none [&::-webkit-details-marker]:hidden">
                     {colorMode === "dark" ? <IconMoon className="w-3.5 h-3.5 text-[color:var(--text-muted)] pointer-events-none" /> : colorMode === "light" ? <IconSun className="w-3.5 h-3.5 text-[color:var(--text-muted)] pointer-events-none" /> : <IconMonitor className="w-3.5 h-3.5 text-[color:var(--text-muted)] pointer-events-none" />}
                     <span className="hidden sm:inline text-xs text-[color:var(--text-muted)] font-medium pointer-events-none">{colorMode === "auto" ? t("modeAuto") : colorMode === "dark" ? t("modeDark") : t("modeLight")}</span>
                 </summary>
-                <div className="fixed inset-0 z-40 hidden group-open/mode:block" onClick={e => e.currentTarget.closest('details').removeAttribute('open')} aria-hidden="true" />
+                <div className="fixed inset-0 z-40 hidden group-open/mode:block" onClick={closeAllMenus} aria-hidden="true" />
                 <div className="absolute right-0 top-full mt-2 bg-[color:var(--bg-elevated)] border border-[color:var(--border-hover)] rounded-md shadow-xl overflow-hidden z-50 min-w-[100px] hidden group-open/mode:block">
                     {["auto", "dark", "light"].map(mode => (
-                        <button key={mode} onClick={e => { setColorMode(mode); e.currentTarget.closest('details').removeAttribute('open'); }} className="w-full text-left px-3 py-1.5 text-[11px] flex items-center gap-2 hover:bg-[color:var(--border-hover)] transition-colors">
+                        <button key={mode} onClick={e => { setColorMode(mode); e.currentTarget.closest('details').removeAttribute('open'); }} className="w-full text-left px-3 py-1.5 text-[11px] flex items-center gap-2 hover:bg-[color:var(--border)] transition-colors">
                             {mode === "dark" ? <IconMoon className="w-3 h-3 text-[color:var(--text-muted)]" /> : mode === "light" ? <IconSun className="w-3 h-3 text-[color:var(--text-muted)]" /> : <IconMonitor className="w-3 h-3 text-[color:var(--text-muted)]" />}
                             <span className={colorMode === mode ? "text-[color:var(--text)] font-medium" : "text-[color:var(--text-muted)]"}>{mode === "auto" ? t("modeAuto") : mode === "dark" ? t("modeDark") : t("modeLight")}</span>
                         </button>
@@ -1195,15 +1197,15 @@ const ThemeSwitcher = memo(() => {
             </details>
             
             <details className="relative group/theme" onKeyDown={closeOnEscape}>
-                <summary aria-label={t("themeDefault")} className="flex items-center gap-1.5 bg-[color:var(--bg)] border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] rounded h-9 px-3 sm:h-8 sm:px-2.5 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)] cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                <summary aria-label={t("themeDefault")} onClick={e => closeOtherMenus(e.currentTarget.closest('details'))} className="flex items-center gap-1.5 bg-[color:var(--bg)] border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] relative z-50 rounded h-9 px-3 sm:h-8 sm:px-2.5 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)] cursor-pointer list-none [&::-webkit-details-marker]:hidden">
                     <IconPalette className="w-3.5 h-3.5 text-[color:var(--text-muted)] pointer-events-none" />
                     <span className="w-2.5 h-2.5 rounded-full border border-[color:var(--border-hover)] pointer-events-none" style={{ background: "var(--accent)" }} />
                     <span className="hidden sm:inline text-xs text-[color:var(--text-muted)] font-medium pointer-events-none">{theme === "default" ? t("themeDefault") : theme.charAt(0).toUpperCase() + theme.slice(1)}</span>
                 </summary>
-                <div className="fixed inset-0 z-40 hidden group-open/theme:block" onClick={e => e.currentTarget.closest('details').removeAttribute('open')} aria-hidden="true" />
+                <div className="fixed inset-0 z-40 hidden group-open/theme:block" onClick={closeAllMenus} aria-hidden="true" />
                 <div className="absolute right-0 top-full mt-2 bg-[color:var(--bg-elevated)] border border-[color:var(--border-hover)] rounded-md shadow-xl overflow-hidden z-50 min-w-[130px] hidden group-open/theme:block max-h-[60vh] overflow-y-auto">
                     {Object.keys(THEMES).map(th => (
-                        <button key={th} onClick={e => { setTheme(th); e.currentTarget.closest('details').removeAttribute('open'); }} className="w-full text-left px-3 py-2 text-[11px] flex items-center gap-2 hover:bg-[color:var(--border-hover)] transition-colors">
+                        <button key={th} onClick={e => { setTheme(th); e.currentTarget.closest('details').removeAttribute('open'); }} className="w-full text-left px-3 py-2 text-[11px] flex items-center gap-2 hover:bg-[color:var(--border)] transition-colors">
                             <span className="w-2.5 h-2.5 rounded-full border border-[color:var(--border-hover)] shrink-0" style={{ background: THEMES[th][isDarkResolved ? "dark" : "light"].accent }} />
                             <span className={theme === th ? "text-[color:var(--text)] font-medium" : "text-[color:var(--text-muted)]"}>{th === "default" ? t("themeDefault") : th.charAt(0).toUpperCase() + th.slice(1)}</span>
                         </button>
@@ -1225,7 +1227,15 @@ const ModeSelector = memo(function ModeSelector({
   const [w, setW] = useState(null);
   useLayoutEffect(() => {
     const measure = () => {
-      const widths = Object.values(btnRefs.current).map(el => el?.offsetWidth || 0);
+      const els = Object.values(btnRefs.current).filter(Boolean);
+      // Tabs are pinned to the current uniform width, so offsetWidth would
+      // just echo that width back and freeze it at whatever language was
+      // active when it was set. Unpin for one measuring pass to read each
+      // label's natural width, then restore.
+      const prev = els.map(el => el.style.width);
+      els.forEach(el => { el.style.width = "auto"; });
+      const widths = els.map(el => el.offsetWidth || 0);
+      els.forEach((el, i) => { el.style.width = prev[i]; });
       const max = Math.max(...widths, 0);
       if (max > 0) setW(max);
     };
@@ -2194,11 +2204,11 @@ export default function App() {
                             ×
                         </button>
                     </div>}
-                <div className={`w-full max-w-3xl mx-auto px-3 sm:px-4 ${mounted ? "transition-all duration-300" : ""} ${searched ? "pt-6" : "flex-1 flex flex-col pt-[10vh] sm:pt-[14vh] pb-[10vh] sm:pb-[15vh]"}`}>
+                <div className={`w-full max-w-3xl mx-auto px-3 sm:px-4 ${mounted ? "transition-all duration-300" : ""} ${searched ? "pt-6" : "flex-1 flex flex-col justify-center"}`}>
                     {!searched && (
                         <div className="text-center mb-8">
-                            <h1 className="font-bold text-[color:var(--text)] tracking-tight leading-none select-none text-[clamp(4rem,28vw,11rem)] sm:text-[clamp(6rem,30vw,18rem)]" style={{ WebkitFontSmoothing: 'antialiased', MozOsxFontSmoothing: 'grayscale' }}>
-                                <svg className="inline-block align-middle overflow-visible w-auto h-[1em]" viewBox="0 0 180 120" fill="none" aria-hidden="true">
+                            <h1 className="font-bold text-[color:var(--text)] tracking-tight leading-none select-none text-[clamp(2rem,14vw,5.5rem)] sm:text-[clamp(3rem,15vw,9rem)]" style={{ WebkitFontSmoothing: 'antialiased', MozOsxFontSmoothing: 'grayscale' }}>
+                                <svg className="inline-block align-middle overflow-visible w-auto h-[1em]" viewBox="8 41.3 129.1 61.7" fill="none" aria-hidden="true">
                                     <path fill="currentColor" d="M36.6533203125 76.1796875 33.6865234375 58.7138671875H38.041015625Q38.806640625 46.3203125 51.0087890625 46.3203125Q58.234375 46.3203125 62.08642578125 51.6318359375Q65.9384765625 56.943359375 65.9384765625 66.9443359375H53.0185546875Q53.0185546875 62.4462890625 51.36767578125 60.484375Q49.716796875 58.5224609375 46.080078125 58.5224609375Q41.3427734375 58.5224609375 38.998046875 63.1162109375Q36.6533203125 67.7099609375 36.6533203125 76.1796875ZM13.0146484375 98.0V86.8984375H48.5205078125V98.0ZM23.7333984375 98.0V47.27734375H34.7392578125L36.6533203125 61.82421875V98.0ZM14.9287109375 58.37890625V47.27734375H34.0693359375L35.0263671875 58.37890625Z" />
                                     <path fill="var(--accent)" d="M101.720703125 97.908203125V48.23828125H114.544921875V97.908203125ZM84.20703125 79.0546875V67.091796875H132.05859375V79.0546875Z" />
                                 </svg>
@@ -2527,10 +2537,10 @@ export default function App() {
                                         </summary>
                                         <div className="fixed inset-0 z-40 hidden group-open/sort:block" onClick={e => e.currentTarget.closest('details').removeAttribute('open')} aria-hidden="true" />
                                         <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 bg-[color:var(--bg-elevated)] border border-[color:var(--border-hover)] rounded-md shadow-xl overflow-hidden z-50 min-w-[90px] hidden group-open/sort:block">
-                                            <button onClick={e => { setSortOrder("desc"); e.currentTarget.closest('details').removeAttribute('open'); }} className="w-full text-left px-3 py-1.5 text-[11px] hover:bg-[color:var(--border-hover)] transition-colors">
+                                            <button onClick={e => { setSortOrder("desc"); e.currentTarget.closest('details').removeAttribute('open'); }} className="w-full text-left px-3 py-1.5 text-[11px] hover:bg-[color:var(--border)] transition-colors">
                                                 <span className={sortOrder === "desc" ? "text-[color:var(--text)] font-medium" : "text-[color:var(--text-muted)] hover:text-[color:var(--text)]"}>{t("newest")}</span>
                                             </button>
-                                            <button onClick={e => { setSortOrder("asc"); e.currentTarget.closest('details').removeAttribute('open'); }} className="w-full text-left px-3 py-1.5 text-[11px] hover:bg-[color:var(--border-hover)] transition-colors">
+                                            <button onClick={e => { setSortOrder("asc"); e.currentTarget.closest('details').removeAttribute('open'); }} className="w-full text-left px-3 py-1.5 text-[11px] hover:bg-[color:var(--border)] transition-colors">
                                                 <span className={sortOrder === "asc" ? "text-[color:var(--text)] font-medium" : "text-[color:var(--text-muted)] hover:text-[color:var(--text)]"}>{t("oldest")}</span>
                                             </button>
                                         </div>
@@ -2557,14 +2567,14 @@ export default function App() {
                                                 })).join("\n");
                                                 downloadFile(`rosint_${query}_${activeTab}.csv`, csv, "text/csv");
                                                 e.currentTarget.closest('details').removeAttribute('open');
-                                            }} className="w-full text-left px-3 py-1.5 text-[11px] flex items-center gap-2 hover:bg-[color:var(--border-hover)] transition-colors">
+                                            }} className="w-full text-left px-3 py-1.5 text-[11px] flex items-center gap-2 hover:bg-[color:var(--border)] transition-colors">
                                                 <IconDownload />
                                                 CSV
                                             </button>
                                             <button onClick={e => {
                                                 downloadFile(`rosint_${query}_${activeTab}.json`, JSON.stringify(filteredItems, null, 2), "application/json");
                                                 e.currentTarget.closest('details').removeAttribute('open');
-                                            }} className="w-full text-left px-3 py-1.5 text-[11px] flex items-center gap-2 hover:bg-[color:var(--border-hover)] transition-colors">
+                                            }} className="w-full text-left px-3 py-1.5 text-[11px] flex items-center gap-2 hover:bg-[color:var(--border)] transition-colors">
                                                 <IconDownload />
                                                 JSON
                                             </button>
@@ -2594,10 +2604,10 @@ export default function App() {
                                             </summary>
                                             <div className="fixed inset-0 z-40 hidden group-open/sort:block" onClick={e => e.currentTarget.closest('details').removeAttribute('open')} aria-hidden="true" />
                                             <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 bg-[color:var(--bg-elevated)] border border-[color:var(--border-hover)] rounded-md shadow-xl overflow-hidden z-50 min-w-[90px] hidden group-open/sort:block">
-                                                <button onClick={e => { setSortOrder("desc"); e.currentTarget.closest('details').removeAttribute('open'); }} className="w-full text-left px-3 py-1.5 text-[11px] hover:bg-[color:var(--border-hover)] transition-colors">
+                                                <button onClick={e => { setSortOrder("desc"); e.currentTarget.closest('details').removeAttribute('open'); }} className="w-full text-left px-3 py-1.5 text-[11px] hover:bg-[color:var(--border)] transition-colors">
                                                     <span className={sortOrder === "desc" ? "text-[color:var(--text)] font-medium" : "text-[color:var(--text-muted)] hover:text-[color:var(--text)]"}>{t("newest")}</span>
                                                 </button>
-                                                <button onClick={e => { setSortOrder("asc"); e.currentTarget.closest('details').removeAttribute('open'); }} className="w-full text-left px-3 py-1.5 text-[11px] hover:bg-[color:var(--border-hover)] transition-colors">
+                                                <button onClick={e => { setSortOrder("asc"); e.currentTarget.closest('details').removeAttribute('open'); }} className="w-full text-left px-3 py-1.5 text-[11px] hover:bg-[color:var(--border)] transition-colors">
                                                     <span className={sortOrder === "asc" ? "text-[color:var(--text)] font-medium" : "text-[color:var(--text-muted)] hover:text-[color:var(--text)]"}>{t("oldest")}</span>
                                                 </button>
                                             </div>
@@ -2624,14 +2634,14 @@ export default function App() {
                                                     })).join("\n");
                                                     downloadFile(`rosint_${query}_${activeTab}.csv`, csv, "text/csv");
                                                     e.currentTarget.closest('details').removeAttribute('open');
-                                                }} className="w-full text-left px-3 py-1.5 text-[11px] flex items-center gap-2 hover:bg-[color:var(--border-hover)] transition-colors">
+                                                }} className="w-full text-left px-3 py-1.5 text-[11px] flex items-center gap-2 hover:bg-[color:var(--border)] transition-colors">
                                                     <IconDownload />
                                                     CSV
                                                 </button>
                                                 <button onClick={e => {
                                                     downloadFile(`rosint_${query}_${activeTab}.json`, JSON.stringify(filteredItems, null, 2), "application/json");
                                                     e.currentTarget.closest('details').removeAttribute('open');
-                                                }} className="w-full text-left px-3 py-1.5 text-[11px] flex items-center gap-2 hover:bg-[color:var(--border-hover)] transition-colors">
+                                                }} className="w-full text-left px-3 py-1.5 text-[11px] flex items-center gap-2 hover:bg-[color:var(--border)] transition-colors">
                                                     <IconDownload />
                                                     JSON
                                                 </button>

@@ -24,7 +24,7 @@
 }
 
   html, body {
-    font-family: ui-monospace, 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+    font-family: ui-monospace, 'JetBrains Mono', 'Cascadia Code', Consolas, monospace, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', 'Yu Gothic UI', 'Yu Gothic', Meiryo, 'MS PGothic', 'Noto Sans JP', 'Noto Sans CJK JP', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
     background-color: var(--bg);
     color: var(--text);
     color-scheme: var(--color-scheme, dark);
