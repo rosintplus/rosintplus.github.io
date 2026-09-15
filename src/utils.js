@@ -1,3 +1,9 @@
+/**
+ * Trigger a client-side file download.
+ * @param {string} filename - Suggested download name.
+ * @param {string} text - File contents.
+ * @param {string} mime - MIME type for the blob.
+ */
 export function downloadFile(filename, text, mime) {
   const blob = new Blob([text], {
     type: mime
@@ -12,11 +18,13 @@ export function downloadFile(filename, text, mime) {
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
-// ─── API Config ───────────────────────────────────────────────────────────────
-
-export // Strip anything users paste around a username: @, leading slashes, full
-// reddit URLs, and u/ /u/ user/ prefixes. Returns the bare username.
-function normalizeUsername(input) {
+/**
+ * Strip anything users paste around a username: @, leading slashes, full
+ * reddit URLs, and u/ /u/ user/ prefixes. Returns the bare username.
+ * @param {unknown} input - Raw user input.
+ * @returns {string} Bare username.
+ */
+export function normalizeUsername(input) {
   let s = String(input || "").trim();
   // Full URL → keep only the path after the domain
   s = s.replace(/^https?:\/\/(www\.|old\.|new\.)?reddit\.com/i, "");
@@ -29,6 +37,11 @@ function normalizeUsername(input) {
 
 // Strip anything users paste around a subreddit name: r/ /r/ prefixes, full
 // reddit URLs, and trailing paths. Returns the bare subreddit name.
+/**
+ * Normalize a subreddit input to its bare name.
+ * @param {unknown} input - Raw user input.
+ * @returns {string} Bare subreddit name.
+ */
 export function normalizeSubreddit(input) {
   let s = String(input || "").trim();
   s = s.replace(/^https?:\/\/(www\.|old\.|new\.)?reddit\.com/i, "");
@@ -42,6 +55,11 @@ export function normalizeSubreddit(input) {
 // base36 ID (and optional comment ID) or null if the input looks like a
 // plain username/subreddit. Bare 5-10 char IDs are intentionally NOT
 // treated as posts — only explicit URLs / t3_ / redd.it forms are.
+/**
+ * Detect a Reddit post/comment reference in free-form input.
+ * @param {unknown} input - Raw user input.
+ * @returns {{ postId: string, commentId: string|null, kind: string }|null} Parsed IDs or null.
+ */
 export function parsePostInput(input) {
   const raw = String(input || "").trim();
   if (!raw) return null;
@@ -61,6 +79,30 @@ export function parsePostInput(input) {
   return null;
 }
 
+/**
+ * Check whether free-form input references a Reddit post/comment.
+ * @param {unknown} input - Raw user input.
+ * @returns {boolean} True when input parses as a post/comment reference.
+ */
 export function isPostInput(input) {
   return parsePostInput(input) != null;
+}
+
+/**
+ * Format a count compactly (1.2k / 3.4M), locale-aware when possible.
+ * @param {number|null|undefined} n - Number to format.
+ * @param {string} [locale] - Optional BCP-47 locale.
+ * @returns {string|null} Formatted number.
+ */
+export function fmtNum(n, locale) {
+  if (n == null) return null;
+  try {
+    if (locale) {
+      const nf = new Intl.NumberFormat(locale, { notation: "compact", maximumFractionDigits: 1 });
+      return nf.format(n);
+    }
+  } catch { /* fall through to manual */ }
+  if (Math.abs(n) >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (Math.abs(n) >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
 }

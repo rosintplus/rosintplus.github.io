@@ -3,6 +3,10 @@
  * Powered by high-capability free-tier LLMs with automatic fallback.
  */
 
+/**
+ * Resolve the OpenRouter API key (build env first, then user override).
+ * @returns {string} API key or empty string when unconfigured.
+ */
 function getApiKey() {
   if (typeof import.meta !== "undefined" && import.meta.env?.VITE_OPENROUTER_KEY) {
     return import.meta.env.VITE_OPENROUTER_KEY;
@@ -23,6 +27,13 @@ function getApiKey() {
   return "";
 }
 
+/**
+ * Hash a small prefix of item IDs for cache-key purposes.
+ * @param {Array} items - Items with ID-ish keys.
+ * @param {string} [key="id"] - Key to hash.
+ * @param {number} [limit=12] - Max items to include.
+ * @returns {string} Base-36 hash.
+ */
 function hashIds(items, key = "id", limit = 12) {
   let h = 0;
   const n = Math.min(items?.length || 0, limit);
@@ -43,6 +54,10 @@ const OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
 // were dropped — Google rate-limits them upstream (HTTP 429 on every call).
 // IDs not present in https://openrouter.ai/api/v1/models return HTTP 404,
 // so keep this list in sync or every model fails.
+/**
+ * Ordered free-tier models with automatic fallback.
+ * Keep in sync with https://openrouter.ai/api/v1/models (unknown IDs 404).
+ */
 export const FREE_MODELS = [
   "openrouter/free",
   "nvidia/nemotron-3-super-120b-a12b:free",
@@ -51,7 +66,22 @@ export const FREE_MODELS = [
   "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
 ];
 
+/** In-memory AI response cache keyed by profile fingerprint. */
 const aiResponseCache = new Map();
+
+/**
+ * Build a stable cache key for a profile's AI analysis inputs.
+ * Deduplicates the fingerprint logic used for cache lookup/invalidation.
+ * @param {string} username - Reddit username.
+ * @param {object} [stats={}] - Aggregated profile stats.
+ * @param {Array} [posts=[]] - Loaded posts.
+ * @param {Array} [comments=[]] - Loaded comments.
+ * @returns {string} Cache key.
+ */
+function buildCacheKey(username, stats = {}, posts = [], comments = []) {
+  const subKeys = Object.keys(stats?.subredditCounts || {}).sort().slice(0, 8).map(s => ({ id: s }));
+  return `${username.toLowerCase()}_${(posts?.length || 0)}_${(comments?.length || 0)}_${hashIds(posts)}_${hashIds(comments)}_${hashIds(subKeys, "id", 8)}`;
+}
 
 /**
  * Format profile context for the LLM
@@ -164,7 +194,9 @@ function parseCleanJson(rawText) {
 }
 
 /**
- * Analyze a Reddit profile using OpenRouter's free models with fallback
+ * Analyze a Reddit profile using OpenRouter's free models with fallback.
+ * @param {{ username?: string, stats?: object, posts?: Array, comments?: Array, signal?: AbortSignal|null, bypassCache?: boolean }} args - Analysis inputs.
+ * @returns {Promise<object>} Parsed AI analysis result.
  */
 export async function analyzeProfileWithAI({
   username = '',
@@ -176,7 +208,7 @@ export async function analyzeProfileWithAI({
 } = {}) {
   if (!username) throw new Error("Username required for AI analysis");
 
-  const cacheKey = `${username.toLowerCase()}_${(posts?.length || 0)}_${(comments?.length || 0)}_${hashIds(posts)}_${hashIds(comments)}_${hashIds(Object.keys(stats?.subredditCounts || {}).sort().slice(0, 8).map(s => ({ id: s })), "id", 8)}`;
+  const cacheKey = buildCacheKey(username, stats, posts, comments);
   if (!bypassCache && aiResponseCache.has(cacheKey)) {
     return aiResponseCache.get(cacheKey);
   }
@@ -283,6 +315,10 @@ export async function analyzeProfileWithAI({
   throw lastError || new Error("All OpenRouter models failed to respond");
 }
 
+/**
+ * Persist or clear the user-supplied OpenRouter API key.
+ * @param {string} key - Raw key input; empty clears the override.
+ */
 export function setUserApiKey(key) {
   try {
     const clean = String(key || "").trim();

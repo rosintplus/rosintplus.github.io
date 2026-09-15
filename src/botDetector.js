@@ -54,27 +54,30 @@ function dedupeById(items) {
   return out;
 }
 
+/**
+ * Find the first bot-disclosure match inside a text blob.
+ * @param {string} text - Text to scan.
+ * @returns {{ kind: string, detail: string }|null} Disclosure finding or null.
+ */
+function matchDisclaimer(text) {
+  if (!text || text === '[deleted]' || text === '[removed]') return null;
+  const pattern = BOT_DISCLAIMER_PATTERNS.find(p => p.test(text));
+  if (!pattern) return null;
+  const match = text.match(pattern)?.[0];
+  return { kind: 'text', detail: `Discloses automation in its own content${match ? `: "${match}"` : ''}` };
+}
+
 function findDisclosure(username, posts, comments) {
   if (BOT_NAME_REGEX.test(username)) {
     return { kind: 'handle', detail: `Handle follows the bot naming convention ("${username}")` };
   }
   for (const c of comments.slice(0, 50)) {
-    const body = c?.body;
-    if (!body || body === '[deleted]' || body === '[removed]') continue;
-    const pattern = BOT_DISCLAIMER_PATTERNS.find(p => p.test(body));
-    if (pattern) {
-      const match = body.match(pattern)?.[0];
-      return { kind: 'text', detail: `Discloses automation in its own content${match ? `: "${match}"` : ''}` };
-    }
+    const hit = matchDisclaimer(c?.body);
+    if (hit) return hit;
   }
   for (const p of posts.slice(0, 30)) {
-    const text = `${p?.title || ''}\n${p?.selftext || ''}`.trim();
-    if (!text) continue;
-    const pattern = BOT_DISCLAIMER_PATTERNS.find(pt => pt.test(text));
-    if (pattern) {
-      const match = text.match(pattern)?.[0];
-      return { kind: 'text', detail: `Discloses automation in its own content${match ? `: "${match}"` : ''}` };
-    }
+    const hit = matchDisclaimer(`${p?.title || ''}\n${p?.selftext || ''}`.trim());
+    if (hit) return hit;
   }
   return null;
 }
@@ -117,7 +120,53 @@ function toEvidence(label, kind, groups) {
   }));
 }
 
+/**
+ * Assess bot likelihood from already-loaded profile history (no network).
+ * @param {{ username?: string, posts?: Array, comments?: Array }} args - Profile history.
+ * @returns {{ verdict: string, riskLevel: string, flags: string[], evidence: Array, metrics: object }} Bot assessment.
+ */
 export function evaluateBotLikelihood({
+  username = '',
+  posts = [],
+  comments = [],
+} = {}) {
+  const cacheKey = buildBotCacheKey(username, posts, comments);
+  const hit = botCache.get(cacheKey);
+  if (hit) return hit;
+  const result = evaluateBotLikelihoodUncached({ username, posts, comments });
+  botCache.set(cacheKey, result);
+  if (botCache.size > 30) {
+    const oldest = botCache.keys().next().value;
+    botCache.delete(oldest);
+  }
+  return result;
+}
+
+// Per-profile result cache keyed by item identity. ProfileSummary memoizes
+// on array identity, but the crawl creates new array wrappers on every batch
+// (and keyword typing re-renders parents), so without this the O(n) duplicate
+// grouping would rerun far more often than the data actually changes.
+const botCache = new Map();
+
+function hashItemIds(items) {
+  let h = 0;
+  const n = items?.length || 0;
+  h = (Math.imul(h, 31) + n) | 0;
+  for (let i = 0; i < n; i++) {
+    const s = items[i]?.id || "";
+    for (let j = 0; j < s.length; j++) {
+      h = (Math.imul(h, 31) + s.charCodeAt(j)) | 0;
+    }
+    h = (Math.imul(h, 31) + 0x9e3779b9) | 0;
+  }
+  return (h >>> 0).toString(36);
+}
+
+function buildBotCacheKey(username, posts, comments) {
+  return `${String(username || "").toLowerCase()}|p${posts?.length || 0}:${hashItemIds(posts)}|c${comments?.length || 0}:${hashItemIds(comments)}`;
+}
+
+function evaluateBotLikelihoodUncached({
   username = '',
   posts = [],
   comments = [],
