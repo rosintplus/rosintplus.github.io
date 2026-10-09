@@ -5,6 +5,8 @@ const zh = {
   modeUsername: "用户名",
   modeSubreddit: "版块",
   modePost: "帖子",
+  modeLink: "链接",
+  showSpoilers: "显示剧透",
   searchPlaceholderPost: "帖子链接或ID",
   searchMode: "搜索模式",
   emptyNoneSub: "未在该版块中找到{tab}。",
@@ -125,6 +127,21 @@ const zh = {
   removedText: "该评论已被版主移除——存档中未捕获到文本。",
   deletedText: "该评论已被作者删除——存档中未捕获到文本。",
   noContent: "（无内容）",
+  // Political compass (local statistical engine)
+  apCompassHint: "政治罗盘完全在您的浏览器本地计算，依据是该账号自己的文字和社区足迹。立场采用 Laver & Garry（2000）针对政治词典的赞成／反对相对平衡，并与基于子版块参与的 Poole-Rosenthal 理想点合并，同时给出标准误。只有当某维度的 95% 置信区间不包含零时才给出标签，因此证据薄弱或自相矛盾时读作「中间／不确定」，而不会落到极端。",
+  apCompassProvisional: "暂定",
+  apCompassUncertain: "中间／不确定",
+  apCompassSe: "经济 ±{e} · 社会 ±{s} · 政府 ±{g}（标准误）",
+  apCompassMethodNote: "Laver & Garry（2000）赞成／反对平衡 + Poole-Rosenthal 理想点，按逆方差合并",
+  apCompassMethod: "统计文本标度",
+  apCompassEvidence: "证据：{topics} 个主题、{subs} 个社区，共 {weight} 个单位（可靠性 {reliability}）。",
+  // Progress / scope labels
+  apBasedOnSample: "{loaded} / {total} 条 · 抽样",
+  apCrawlSampleHint: "后台抓取在读取完整历史之前已达到页面上限。点击「刷新」可进行更深入的抓取。",
+  apBotScanned: "已检查 {posts} 帖子 · {comments} 评论",
+  apBotScannedOf: "已检查 {total} 条中的 {scanned} 条（抽样）",
+  apCompassNoReading: "无判定",
+  apCompassNoSignalWhy: "已检查 {items} 条 · 命中 {topics} 个政治类别 · {subs} 个已收录社区",
 };
 
 export default zh;

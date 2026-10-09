@@ -121,4 +121,32 @@ export const SUBREDDIT_POLITICAL_MAP = {
   ukpolitics: { econ: -1.5, soc: -2.0, gov: -1.5, weight: 0.5, side: 'center' },
   canadapolitics: { econ: -2.0, soc: -2.5, gov: -1.5, weight: 0.5, side: 'center' },
   australianpolitics: { econ: -2.0, soc: -2.5, gov: -1.5, weight: 0.5, side: 'center' },
+
+  // ── High-volume issue subs ──
+  // These carry a lot of the political signal in practice. Without them the
+  // compass had to lean entirely on stance phrases, which is why a user with
+  // a clear community footprint used to read as "no signal".
+  socialdemocracy: { econ: -6.0, soc: -5.5, gov: -4.5, weight: 0.85, side: 'left' },
+  socialjustice: { econ: -6.0, soc: -8.0, gov: -5.5, weight: 0.75, side: 'left' },
+  climateaction: { econ: -6.5, soc: -5.5, gov: -3.0, weight: 0.8, side: 'left' },
+  climatecrisis: { econ: -6.5, soc: -5.0, gov: -2.5, weight: 0.75, side: 'left' },
+  zerocarbon: { econ: -6.5, soc: -4.5, gov: -2.5, weight: 0.7, side: 'left' },
+  sustainability: { econ: -5.5, soc: -4.5, gov: -2.0, weight: 0.6, side: 'left' },
+  environmentalism: { econ: -6.0, soc: -5.0, gov: -2.5, weight: 0.7, side: 'left' },
+  prochoice: { econ: -3.0, soc: -7.5, gov: -5.0, weight: 0.7, side: 'left' },
+  plannedparenthood: { econ: -3.0, soc: -7.0, gov: -5.0, weight: 0.65, side: 'left' },
+  abortiondebate: { econ: -1.5, soc: -1.0, gov: -0.5, weight: 0.5, side: 'center' },
+  prolife: { econ: 3.0, soc: 7.5, gov: 6.0, weight: 0.75, side: 'right' },
+  prolife_advocate: { econ: 3.0, soc: 7.5, gov: 6.0, weight: 0.7, side: 'right' },
+  prolife_talk: { econ: 2.5, soc: 7.0, gov: 5.5, weight: 0.65, side: 'right' },
+  socialisthistory: { econ: -8.0, soc: -4.5, gov: -4.0, weight: 0.7, side: 'left' },
+  breadtubehub: { econ: -6.5, soc: -6.0, gov: -5.5, weight: 0.7, side: 'left' },
+  nordic: { econ: -4.5, soc: -4.0, gov: -4.0, weight: 0.65, side: 'left' },
+  gundebates: { econ: 5.5, soc: -1.0, gov: -7.0, weight: 0.7, side: 'right' },
+  guns: { econ: 4.5, soc: -0.5, gov: -6.0, weight: 0.65, side: 'right' },
+  cc: { econ: 5.5, soc: -1.0, gov: -7.0, weight: 0.7, side: 'right' },
+  concealedcarry: { econ: 5.5, soc: -1.0, gov: -7.0, weight: 0.7, side: 'right' },
+  nzpolitics: { econ: -2.0, soc: -2.0, gov: -1.5, weight: 0.5, side: 'center' },
+  worldnews: { econ: -1.0, soc: -1.5, gov: -0.5, weight: 0.45, side: 'center' },
+  geopolitics: { econ: 1.0, soc: -0.5, gov: 1.0, weight: 0.45, side: 'center' },
 };

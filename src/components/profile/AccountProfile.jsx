@@ -4,9 +4,9 @@ import { IconInfo } from '../icons.jsx';
 import { REDDIT_BASE, fetchSubredditInteractions } from '../../api.js';
 import { useI18n, LOCALES } from '../../i18n.js';
 import { toggleProfileSaved, getSavedUsernames } from '../../profileData.js';
-import { analyzeProfileWithAI, setUserApiKey } from '../../openrouter.js';
+import { evaluatePoliticalCompass, classifyQuadrant } from '../../politicalCompass.js';
 import { getDays, levels, cleanDimensionLabel } from './helpers.js';
-import { getArchetypeColorClass, getPolarityColorClass, getQuadrantArchetype, weightedCache } from './archetype.js';
+import { getArchetypeColorClass, getPolarityColorClass, weightedCache } from './archetype.js';
 
 // Memoized heatmap cell: the 7×24 grid mounts 168 HoverHint instances. Without
 // memo, every parent render (crawl progress, AI status) re-renders all 168
@@ -49,6 +49,7 @@ const AccountProfile = memo(function AccountProfile({
   userMeta,
   loadedCount,
   crawledCount = 0,
+  crawlCapped = false,
   isCrawling,
   onRefresh,
   onStopCrawl,
@@ -60,15 +61,6 @@ const AccountProfile = memo(function AccountProfile({
   const [isSaved, setIsSaved] = useState(false);
   const [showCompassSignals, setShowCompassSignals] = useState(false);
   const [showStancesDrawer, setShowStancesDrawer] = useState(false);
-  const aiControllerRef = useRef(null);
-
-  const handleCancelAi = useCallback(() => {
-    if (aiControllerRef.current) {
-      aiControllerRef.current.abort();
-    }
-    setAiLoading(false);
-    setAiError("Analysis cancelled by user");
-  }, []);
 
   useEffect(() => {
     if (!query) return;
@@ -82,11 +74,11 @@ const AccountProfile = memo(function AccountProfile({
     return () => window.removeEventListener('savedUsersChanged', checkSaved);
   }, [query]);
 
-  const totalItems = Math.max(
-    loadedCount || 0,
-    (posts?.length || 0) + (comments?.length || 0),
-    (typeof userMeta?.num_posts === 'number' && typeof userMeta?.num_comments === 'number' ? userMeta.num_posts + userMeta.num_comments : 0)
-  );
+  // Archive-wide total, or null when the users endpoint has not answered (or
+  // failed). null means "unknown" — never treat it as equal to what is loaded.
+  const archiveTotal = (typeof userMeta?.num_posts === 'number' && typeof userMeta?.num_comments === 'number')
+    ? (userMeta.num_posts + userMeta.num_comments)
+    : null;
 
   const effectiveUserMeta = useMemo(() => {
     if (userMeta) return userMeta;
@@ -237,139 +229,94 @@ const AccountProfile = memo(function AccountProfile({
     return { list: sorted.map(([word, counts]) => [word, counts[key]]), maxN };
   }, [stats, activeTab]);
 
-  // AI Analysis (OpenRouter) state
-  const [aiResult, setAiResult] = useState(null);
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiError, setAiError] = useState(null);
-  const [aiTriggerCount, setAiTriggerCount] = useState(0);
-
-  const postsRef = useRef(posts);
-  const commentsRef = useRef(comments);
-  const statsRef = useRef(stats);
-
-  useEffect(() => {
-    setAiResult(null);
-    setAiError(null);
-  }, [query]);
-
-  useEffect(() => {
-    postsRef.current = posts;
-    commentsRef.current = comments;
-    statsRef.current = stats;
-  }, [posts, comments, stats]);
-
   const hasItems = (posts?.length || 0) > 0 || (comments?.length || 0) > 0 || Object.keys(stats?.subredditCounts || {}).length > 0;
 
-  useEffect(() => {
-    // Only run AI analysis AFTER fetching/crawling completely stops
-    if (!query || isCrawling || !hasItems) {
-      if (!isCrawling && !hasItems) {
-        setAiResult(null);
-        setAiLoading(false);
-      }
-      return;
+  // The compass is computed by a deterministic local engine (see
+  // politicalCompass.js): Laver & Garry (2000) pro/con balance over a
+  // content-analysis dictionary, pooled meta-analytically with a
+  // Poole-Rosenthal ideal point from the community footprint. No model, no
+  // API, no key — it runs entirely in this browser.
+  const compassResult = useMemo(() => {
+    if (!query || !hasItems) return null;
+    try {
+      return evaluatePoliticalCompass({ stats: stats || {}, posts: posts || [], comments: comments || [] });
+    } catch {
+      return null;
     }
+  }, [query, hasItems, stats, posts, comments]);
 
-    let cancelled = false;
-    const ctrl = new AbortController();
-    aiControllerRef.current = ctrl;
-    setAiLoading(true);
-    setAiError(null);
-
-    // Debounce to allow all final items to settle after crawling stops
-    const timer = setTimeout(() => {
-      analyzeProfileWithAI({
-        username: query,
-        stats: statsRef.current,
-        posts: postsRef.current,
-        comments: commentsRef.current,
-        signal: ctrl.signal,
-        bypassCache: aiTriggerCount > 0,
-      }).then(res => {
-        if (cancelled) return;
-        setAiResult(res);
-        setAiLoading(false);
-      }).catch(err => {
-        if (cancelled) return;
-        if (err.name === "AbortError" || err.message?.includes("Abort")) {
-          setAiLoading(false);
-          return;
-        }
-        console.warn("AI analysis error:", err);
-        setAiError(err.message || "Failed to analyze with AI");
-        setAiLoading(false);
-      });
-    }, 600);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-      ctrl.abort();
-    };
-  }, [query, isCrawling, hasItems, aiTriggerCount]);
-
-  // Context & Stance-aware Political Compass evaluation (AI-Driven)
+  // Quadrant hysteresis. The reading legitimately moves while the background
+  // crawl is adding items; holding the previous quadrant (until the reading
+  // clearly leaves it) stops the badge flip-flopping between two labels.
+  //
+  // The held value lives in a ref that is updated in an effect, never during
+  // render: mutating a ref inside useMemo is a side effect, and React may
+  // re-run or discard memo factories (StrictMode double-invokes them).
+  const lastQuadrantRef = useRef(null);
   const compassAnalysis = useMemo(() => {
-    if (aiResult && typeof aiResult.econ === 'number') {
-      const econ = Math.round(aiResult.econ * 10) / 10;
-      const gov = Math.round((typeof aiResult.gov === 'number' ? aiResult.gov : 0) * 10) / 10;
-      const soc = Math.round((typeof aiResult.soc === 'number' ? aiResult.soc : 0) * 10) / 10;
-      const archetype = getQuadrantArchetype(econ, gov, aiResult.archetype);
+    const subFootprint = () => Object.entries(stats?.subredditCounts || {})
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([sub, count]) => ({ sub, count, econ: 0, soc: 0, gov: 0, weight: count }));
+
+    if (compassResult) {
+      // Hysteresis: hold the previous quadrant unless the reading has clearly
+      // left it. The ref is only *read* here; it is written by the effect
+      // below, so this factory stays pure.
+      const classified = classifyQuadrant(compassResult.econ, compassResult.gov, {
+        prevQuadrant: lastQuadrantRef.current
+      });
 
       return {
-        hasSignal: true,
-        econ,
-        soc,
-        gov,
-        x: Math.max(-1, Math.min(1, econ / 10)),
-        y: Math.max(-1, Math.min(1, gov / 10)),
-        archetype,
-        confidence: aiResult.confidence || "High (AI Model Analysis)",
-        summary: aiResult.summary,
-        dimensions: aiResult.dimensions || {
-          econ: { score: econ, label: "Economic Stance" },
-          soc: { score: soc, label: "Social Stance" },
-          gov: { score: gov, label: "Civil Authority" }
-        },
-        detectedPositions: (aiResult.stances || []).map(s => ({
-          topic: s.topic,
-          stance: s.stance,
-          polarity: s.polarity,
-          keyword: s.topic,
-          snippet: s.quote ? (s.quote.startsWith('"') ? s.quote : `"${s.quote}"`) : "",
-          reasoning: s.reasoning,
-          econ,
-          soc,
-          gov
-        })),
-        topSubSignals: Object.entries(stats?.subredditCounts || {})
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, 10)
-          .map(([sub, count]) => ({ sub, count, econ: 0, soc: 0, weight: count })),
-        isAiPowered: true,
-        modelUsed: aiResult.modelUsed
+        hasSignal: compassResult.hasSignal,
+        econ: compassResult.econ,
+        soc: compassResult.soc,
+        gov: compassResult.gov,
+        x: Math.max(-1, Math.min(1, compassResult.econ / 10)),
+        y: Math.max(-1, Math.min(1, compassResult.gov / 10)),
+        archetype: compassResult.hasSignal
+          ? classified.label
+          : (isCrawling ? "Crawling items..." : "Insufficient signal"),
+        quadrant: classified.quadrant,
+        heldQuadrant: classified.held,
+        confidence: compassResult.confidence,
+        summary: null,
+        evidence: compassResult.evidence,
+        dimensions: compassResult.dimensions,
+        detectedPositions: compassResult.detectedPositions,
+        topSubSignals: compassResult.topSubSignals?.length ? compassResult.topSubSignals : subFootprint(),
+        // While crawling the evidence base is still growing, so the reading
+        // is marked provisional rather than silently changing underfoot.
+        provisional: isCrawling
       };
     }
 
     return {
       hasSignal: false,
-      econ: 0,
-      soc: 0,
-      gov: 0,
-      x: 0,
-      y: 0,
-      archetype: isCrawling ? "Crawling items..." : aiLoading ? "AI Analyzing..." : "Waiting for analysis",
-      confidence: isCrawling ? "Collecting user history" : aiLoading ? "Evaluating worldview" : "Ready to analyze",
+      econ: 0, soc: 0, gov: 0, x: 0, y: 0,
+      archetype: isCrawling ? "Crawling items..." : "Gathering evidence",
+      quadrant: 'center',
+      heldQuadrant: false,
+      confidence: isCrawling ? "Collecting user history" : "Gathering evidence",
       summary: null,
+      evidence: null,
       dimensions: null,
       detectedPositions: [],
-      topSubSignals: Object.entries(stats?.subredditCounts || {})
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 10)
-        .map(([sub, count]) => ({ sub, count, econ: 0, soc: 0, weight: count })),
-      isAiPowered: false
+      topSubSignals: subFootprint(),
+      provisional: isCrawling
     };
-  }, [aiResult, stats, isCrawling, aiLoading]);
+  }, [compassResult, stats, isCrawling]);
+
+  // Record the quadrant actually displayed so the next render can hold it.
+  // Runs after commit, not during render.
+  useEffect(() => {
+    if (compassAnalysis.heldQuadrant !== undefined && compassAnalysis.quadrant && compassAnalysis.quadrant !== 'center') {
+      lastQuadrantRef.current = compassAnalysis.quadrant;
+    }
+  }, [compassAnalysis.quadrant, compassAnalysis.heldQuadrant]);
+
+  // Reset hysteresis when the subject changes.
+  useEffect(() => { lastQuadrantRef.current = null; }, [query]);
 
   if (!stats && (!posts || posts.length === 0) && (!comments || comments.length === 0)) {
     return (
@@ -383,7 +330,17 @@ const AccountProfile = memo(function AccountProfile({
     <div className="flex flex-col gap-4 mb-4 mt-4 text-[color:var(--text)]">
       {/* Metadata & Actions Header Bar */}
       <div className="text-[11px] sm:text-xs text-[color:var(--text-muted)] font-medium px-1 flex flex-wrap items-center gap-1.5 sm:gap-2">
-        <span>{t("apBasedOnTotal", { loaded: (() => { try { return loadedCount.toLocaleString(LOCALES[lang] || "en"); } catch { return String(loadedCount); } })(), total: (() => { try { return Math.max(loadedCount, totalItems || 0).toLocaleString(LOCALES[lang] || "en"); } catch { return String(Math.max(loadedCount, totalItems || 0)); } })() })}</span>
+        <span title={crawlCapped ? t("apCrawlSampleHint") : undefined}>
+          {(() => {
+            const fmt = n => { try { return Number(n).toLocaleString(LOCALES[lang] || "en"); } catch { return String(n); } };
+            // Always show a denominator: the archive total when it is known,
+            // otherwise the largest count we have actually seen.
+            const total = Math.max(loadedCount, archiveTotal || 0, (posts?.length || 0) + (comments?.length || 0));
+            const complete = total > 0 && loadedCount >= total;
+            if (crawlCapped && !complete && !isCrawling) return t("apBasedOnSample", { loaded: fmt(loadedCount), total: fmt(total) });
+            return t("apBasedOnTotal", { loaded: fmt(loadedCount), total: fmt(total) });
+          })()}
+        </span>
         {isCrawling && (
           <span className="text-[color:var(--accent-text)] italic flex items-center gap-1">
             <span>· {t("apUpdating")}</span>
@@ -528,40 +485,22 @@ const AccountProfile = memo(function AccountProfile({
 
           <div className="flex items-center gap-2 shrink-0 ml-auto">
             {compassAnalysis.hasSignal && (compassAnalysis.econ !== 0 || compassAnalysis.gov !== 0) ? (
-              <span className="text-[10px] sm:text-[10.5px] font-mono text-[color:var(--text-muted)]">
-                Econ: {compassAnalysis.econ > 0 ? `+${compassAnalysis.econ}` : compassAnalysis.econ} · Gov: {compassAnalysis.gov > 0 ? `+${compassAnalysis.gov}` : compassAnalysis.gov}
-              </span>
+              <>
+                <span className="text-[10px] sm:text-[10.5px] font-mono text-[color:var(--text-muted)]">
+                  Econ: {compassAnalysis.econ > 0 ? `+${compassAnalysis.econ}` : compassAnalysis.econ} · Gov: {compassAnalysis.gov > 0 ? `+${compassAnalysis.gov}` : compassAnalysis.gov}
+                </span>
+                {compassAnalysis.provisional && (
+                  <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-[color:var(--bg)] text-[color:var(--text-faint)] border border-[color:var(--border)]">
+                    {t("apCompassProvisional")}
+                  </span>
+                )}
+              </>
             ) : (
               <span className="text-[10px] sm:text-[10.5px] text-[color:var(--text-muted)] italic">
-                {isCrawling ? t("apCrawling") : aiLoading ? t("apAiProcessing") : t("apNoFootprint")}
+                {isCrawling ? t("apCrawling") : t("apCompassNoReading")}
               </span>
             )}
 
-            <button
-              type="button"
-              onClick={() => {
-                setAiResult(null);
-                setAiTriggerCount(c => c + 1);
-              }}
-              disabled={aiLoading || isCrawling}
-              className="p-1 rounded border border-[color:var(--border)] bg-[color:var(--bg)] hover:bg-[color:var(--bg-elevated)] text-[color:var(--text-muted)] hover:text-[color:var(--text)] transition-colors cursor-pointer flex items-center justify-center shrink-0"
-              title={t("apRerunAi")}
-              aria-label={t("apRerunAi")}
-            >
-              <svg
-                className={`w-3.5 h-3.5 ${aiLoading ? 'animate-spin text-[color:var(--accent)]' : ''}`}
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                />
-              </svg>
-            </button>
           </div>
         </div>
 
@@ -590,89 +529,52 @@ const AccountProfile = memo(function AccountProfile({
           </div>
         )}
 
-        {/* Clear AI Status / Loading / Cancel Banner */}
-        {aiLoading && (
-          <div className="flex items-center justify-between bg-[color:var(--bg)] border border-[color:var(--border)] rounded-md p-2.5 text-xs text-[color:var(--text-muted)] animate-pulse">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <svg className="w-4 h-4 animate-spin text-[color:var(--accent)] shrink-0" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
-              </svg>
-              <div className="flex flex-col gap-0.5 min-w-0">
-                <span className="font-semibold text-[color:var(--text)] truncate">{t("apAiProgress")}</span>
-                <span className="text-[10.5px] text-[color:var(--text-faint)] truncate">
-                  {t("apEvaluating", { n: (() => { try { return (loadedCount || 0).toLocaleString(LOCALES[lang] || "en"); } catch { return String(loadedCount || 0); } })() })}
-                </span>
-              </div>
+
+
+
+        {!compassAnalysis.hasSignal && !isCrawling && (
+          <div className="flex flex-col gap-1.5 py-0.5">
+            <div className="text-[11.5px] text-[color:var(--text-muted)] leading-relaxed">
+              {t("apNoFootprintBody")}
             </div>
-            <button
-              type="button"
-              onClick={handleCancelAi}
-              className="px-2 py-1 rounded bg-[color:var(--bg-elevated)] hover:bg-rose-500/15 border border-[color:var(--border)] hover:border-rose-500/30 text-[11px] font-semibold text-rose-700 dark:text-rose-300 transition-colors cursor-pointer shrink-0 ml-2 not-italic"
-              title={t("apCancelTitle")}
-            >
-              ✕ {t("apCancel")}
-            </button>
-          </div>
-        )}
-
-        {aiError && !compassAnalysis.isAiPowered && !aiLoading && (
-          <div className="flex flex-col gap-2 bg-[color:var(--bg)] border border-[color:var(--border)] rounded-md p-2.5 text-xs text-[color:var(--text-muted)]">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="font-bold text-rose-700 dark:text-rose-300 shrink-0">✕</span>
-                <span className="break-words">{t("apAiError", { msg: aiError })}</span>
+            {compassAnalysis.evidence && (
+              <div className="font-mono text-[10.5px] text-[color:var(--text-faint)]">
+                {t("apCompassNoSignalWhy", {
+                  items: (() => { try { return (loadedCount || 0).toLocaleString(LOCALES[lang] || "en"); } catch { return String(loadedCount || 0); } })(),
+                  topics: compassAnalysis.evidence.distinctTopics || 0,
+                  subs: (compassAnalysis.topSubSignals || []).length,
+                })}
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setAiResult(null);
-                  setAiTriggerCount(c => c + 1);
-                }}
-                className="px-2.5 py-1 rounded bg-[color:var(--bg-elevated)] hover:bg-[color:var(--accent)]/15 border border-[color:var(--border)] hover:border-[color:var(--accent)] text-[11px] font-semibold text-[color:var(--text)] transition-colors cursor-pointer shrink-0"
-              >
-                {t("apRetryAi")}
-              </button>
-            </div>
-            <form
-              className="flex items-center gap-1.5"
-              onSubmit={e => {
-                e.preventDefault();
-                const input = e.currentTarget.querySelector("input");
-                setUserApiKey(input?.value || "");
-                setAiResult(null);
-                setAiTriggerCount(c => c + 1);
-              }}
-            >
-              <input
-                type="password"
-                name="openrouter-key"
-                autoComplete="off"
-                placeholder={t("apApiKeyPlaceholder")}
-                defaultValue=""
-                aria-label={t("apApiKeyPlaceholder")}
-                className="flex-1 min-w-0 bg-[color:var(--bg-elevated)] border border-[color:var(--border)] rounded px-2 py-1 text-[11px] text-[color:var(--text)] placeholder-[color:var(--text-faint)] focus:outline-none focus:border-[color:var(--accent)] transition-colors"
-              />
-              <button
-                type="submit"
-                className="px-2.5 py-1 rounded bg-[color:var(--bg-elevated)] hover:bg-[color:var(--accent)]/15 border border-[color:var(--border)] hover:border-[color:var(--accent)] text-[11px] font-semibold text-[color:var(--text)] transition-colors cursor-pointer shrink-0"
-              >
-                {t("apApiKeySave")}
-              </button>
-            </form>
+            )}
           </div>
         )}
 
-        {!compassAnalysis.hasSignal && !aiLoading && !isCrawling && (
-          <div className="bg-[color:var(--bg)] border border-[color:var(--border)] rounded-md p-4 text-center text-xs text-[color:var(--text-muted)] flex flex-col items-center justify-center gap-1">
-            <span className="font-medium text-[color:var(--text)]">{t("apNoFootprintTitle")}</span>
-            <span className="text-[11px] text-[color:var(--text-faint)]">{t("apNoFootprintBody")}</span>
-          </div>
-        )}
 
-        {compassAnalysis.summary && (
-          <div className="bg-[color:var(--bg)] border border-[color:var(--border)] rounded-md p-3 sm:p-3.5 text-[13px] sm:text-[14px] text-[color:var(--text)] leading-relaxed shadow-sm">
-            {compassAnalysis.summary}
+        {/* Method + evidence basis. Shown for the local engine so the reading
+            is never presented without how much evidence stands behind it. */}
+        {compassAnalysis.hasSignal && compassAnalysis.evidence && (
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10.5px] text-[color:var(--text-faint)] px-0.5">
+            <span className="font-semibold uppercase tracking-wider">{t("apCompassMethod")}</span>
+            <span aria-hidden="true">·</span>
+            <span>{compassAnalysis.confidence}</span>
+            <span aria-hidden="true">·</span>
+            <span className="font-mono">
+              {t("apCompassEvidence", {
+                weight: compassAnalysis.evidence.totalWeight,
+                topics: compassAnalysis.evidence.distinctTopics,
+                subs: compassAnalysis.evidence.communityWeight > 0 ? Math.max(1, (compassAnalysis.topSubSignals || []).length) : 0,
+                reliability: compassAnalysis.evidence.reliability,
+              })}
+            </span>
+            {compassAnalysis.evidence.se && (
+              <span className="font-mono" title={t("apCompassMethodNote")}>
+                {t("apCompassSe", {
+                  e: compassAnalysis.evidence.se.econ ?? 0,
+                  s: compassAnalysis.evidence.se.soc ?? 0,
+                  g: compassAnalysis.evidence.se.gov ?? 0,
+                })}
+              </span>
+            )}
           </div>
         )}
 

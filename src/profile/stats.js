@@ -40,8 +40,11 @@ export function processItem(stats, item, isComment) {
     if (!stats.sampleItems) stats.sampleItems = [];
     if (stats.sampleItems.length < 1000) {
       stats.sampleItems.push({
+        id: item.id,
+        kind: isComment ? "t1" : "t3",
         subreddit: sub,
-        body: isComment ? item.body : (item.selftext || item.title || ""),
+        body: isComment ? item.body : undefined,
+        selftext: isComment ? undefined : item.selftext,
         title: item.title || "",
         score: item.score || 0
       });

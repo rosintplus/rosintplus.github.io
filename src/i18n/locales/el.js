@@ -5,6 +5,8 @@ const el = {
   modeUsername: "Όνομα χρήστη",
   modeSubreddit: "Subreddit",
   modePost: "Ανάρτηση",
+  modeLink: "Σύνδεσμος",
+  showSpoilers: "Εμφάνιση spoilers",
   searchPlaceholderPost: "σύνδεσμος ή ID ανάρτησης",
   searchMode: "Τρόπος αναζήτησης",
   emptyNoneSub: "Δεν βρέθηκαν {tab} σε αυτό το subreddit.",
@@ -125,6 +127,21 @@ const el = {
   removedText: "Αυτό το σχόλιο αφαιρέθηκε από έναν συντονιστή — το αρχείο δεν κατέγραψε κείμενο.",
   deletedText: "Αυτό το σχόλιο διαγράφηκε από τον συντάκτη του — το αρχείο δεν κατέγραψε κείμενο.",
   noContent: "(χωρίς περιεχόμενο)",
+  // Political compass (local statistical engine)
+  apCompassHint: "Πολιτική πυξίδα που υπολογίζεται τοπικά στον περιηγητή σας από τα γραπτά του λογαριασμού και το αποτύπωμα κοινότητας. Οι θέσεις χρησιμοποιούν την ισορροπία υπέρ/κατά των Laver και Garry (2000) σε ένα πολιτικό λεξικό, συνδυασμένη με ιδανικό σημείο Poole-Rosenthal από τη συμμετοχή στα subreddits, και αναφέρονται με τυπικό σφάλμα. Μια διάσταση ονομάζεται μόνο όταν το διάστημα εμπιστοσύνης 95% αποκλείει το μηδέν, ώστε αραιά ή αντιφατικά στοιχεία να διαβάζονται ως κέντρο / αβέβαιο αντί να καταλήξουν σε άκρο.",
+  apCompassProvisional: "Προσωρινό",
+  apCompassUncertain: "Κέντρο / αβέβαιο",
+  apCompassSe: "οικον ±{e} · κοιν ±{s} · κράτ ±{g} (τυπικό σφάλμα)",
+  apCompassMethodNote: "Ισορροπία υπέρ/κατά Laver & Garry (2000) + ιδανικό σημείο Poole-Rosenthal, συνδυασμένα με αντίστροφη διακύμανση",
+  apCompassMethod: "Στατιστική κλιμάκωση κειμένου",
+  apCompassEvidence: "Στοιχεία: {weight} μονάδες σε {topics} θέματα και {subs} κοινότητες (αξιοπιστία {reliability}).",
+  // Progress / scope labels
+  apBasedOnSample: "{loaded} / {total} στοιχεία · δείγμα",
+  apCrawlSampleHint: "Η σάρωση στο παρασκήνιο σταμάτησε στο όριο σελίδων πριν ολοκληρωθεί το ιστορικό. Χρησιμοποιήστε Ανανέωση για βαθύτερη σάρωση.",
+  apBotScanned: "{posts} αναρτήσεις · {comments} σχόλια ελέγχθηκαν",
+  apBotScannedOf: "{scanned} από {total} στοιχεία ελέγχθηκαν (δείγμα)",
+  apCompassNoReading: "Χωρίς ανάγνωση",
+  apCompassNoSignalWhy: "Εξετάστηκαν {items} στοιχεία · {topics} πολιτικές κατηγορίες · {subs} χαρτογραφημένες κοινότητες",
 };
 
 export default el;

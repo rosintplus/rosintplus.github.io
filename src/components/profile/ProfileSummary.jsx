@@ -70,6 +70,11 @@ const ProfileSummary = memo(function ProfileSummary({
       posts: fmtNum(postsCount, LOCALES[lang] || "en"),
       comments: fmtNum(commentsCount, LOCALES[lang] || "en"),
       karma: fmtNum(karma ?? 0, LOCALES[lang] || "en"),
+      // Raw archive totals, for the "scanned X of Y" scope label. The bot
+      // analysis runs on a bounded sample of the history, and the label has
+      // to say so — otherwise it reads the same for every large account.
+      totalPosts: postsCount,
+      totalComments: commentsCount,
       activeSince: earliest ? new Date(earliest * 1000).toLocaleDateString(LOCALES[lang] || "en", { month: "short", year: "numeric" }) : "—",
     };
   }, [posts, comments, userMeta, lang]);
@@ -135,7 +140,18 @@ const ProfileSummary = memo(function ProfileSummary({
                                 {analysis.verdict}
                             </span>
                             <span className="text-[10px] text-[color:var(--text-faint)]">
-                                {analysis.metrics.loadedPosts} posts · {analysis.metrics.loadedComments} comments scanned
+                            <span className="text-[10px] text-[color:var(--text-faint)]">
+                                {(() => {
+                                    const scanned = analysis.metrics.loadedPosts + analysis.metrics.loadedComments;
+                                    const total = (kpi.totalPosts || 0) + (kpi.totalComments || 0);
+                                    const fmt = n => { try { return Number(n).toLocaleString(LOCALES[lang] || "en"); } catch { return String(n); } };
+                                    // The scan runs on a bounded sample. When the archive holds
+                                    // more than that, say "of N" so the figure is not mistaken
+                                    // for the whole history.
+                                    if (total > scanned) return t("apBotScannedOf", { scanned: fmt(scanned), total: fmt(total) });
+                                    return t("apBotScanned", { posts: analysis.metrics.loadedPosts, comments: analysis.metrics.loadedComments });
+                                })()}
+                            </span>
                             </span>
                         </div>
                         <button

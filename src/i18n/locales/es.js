@@ -5,6 +5,8 @@ const es = {
   modeUsername: "Usuario",
   modeSubreddit: "Subreddit",
   modePost: "Publicación",
+  modeLink: "Enlace",
+  showSpoilers: "Mostrar spoilers",
   searchPlaceholderPost: "enlace o ID de publicación",
   searchMode: "Modo de búsqueda",
   emptyNoneSub: "No se encontraron {tab} en este subreddit.",
@@ -125,6 +127,21 @@ const es = {
   removedText: "Este comentario fue removido por un moderador — el archivo no capturó texto.",
   deletedText: "Este comentario fue eliminado por su autor — el archivo no capturó texto.",
   noContent: "(sin contenido)",
+  // Political compass (local statistical engine)
+  apCompassHint: "Brújula política calculada localmente en tu navegador a partir de la propia escritura de esta cuenta y su huella comunitaria. Las posiciones usan el equilibrio pro/contra de Laver y Garry (2000) sobre un diccionario político, combinado con un punto ideal de Poole-Rosenthal a partir de la participación en subreddits, y se informan con un error estándar. Una dimensión solo se etiqueta cuando su intervalo de confianza del 95% excluye el cero, para que la evidencia escasa o contradictoria se lea como centro / incierto en lugar de caer en un extremo.",
+  apCompassProvisional: "Provisional",
+  apCompassUncertain: "Centro / incierto",
+  apCompassSe: "econ ±{e} · soc ±{s} · gov ±{g} (error estándar)",
+  apCompassMethodNote: "Equilibrio pro/contra de Laver y Garry (2000) + punto ideal de Poole-Rosenthal, combinados por varianza inversa",
+  apCompassMethod: "Escalado estadístico de texto",
+  apCompassEvidence: "Evidencia: {weight} unidades en {topics} temas y {subs} comunidades (fiabilidad {reliability}).",
+  // Progress / scope labels
+  apBasedOnSample: "{loaded} / {total} elementos · muestra",
+  apCrawlSampleHint: "El rastreo en segundo plano se detuvo al alcanzar su límite de páginas antes de completar el historial. Usa Actualizar para un rastreo más profundo.",
+  apBotScanned: "{posts} publicaciones · {comments} comentarios analizados",
+  apBotScannedOf: "{scanned} de {total} elementos analizados (muestra)",
+  apCompassNoReading: "Sin lectura",
+  apCompassNoSignalWhy: "Examinados {items} elementos · {topics} categorías políticas · {subs} comunidades mapeadas",
 };
 
 export default es;

@@ -41,7 +41,7 @@ export const ModeSelector = memo(function ModeSelector({
             <span aria-hidden="true" className="absolute top-0.5 bottom-0.5 left-0.5 rounded border border-[color:var(--border-hover)] bg-[color:var(--bg-elevated)] transition-transform duration-200 ease-out will-change-transform" style={{ width: w ?? 0, transform: `translate3d(${w ? activeIndex * w : 0}px,0,0)` }} />
             {modes.map(m => (
                 <button key={m} ref={el => { btnRefs.current[m] = el; }} type="button" role="tab" aria-selected={mode === m} onClick={() => onModeChange(m)} className={`relative z-10 flex items-center justify-center px-3 h-6 whitespace-nowrap text-[11px] font-medium rounded transition-colors ${mode === m ? "text-[color:var(--text)]" : "text-[color:var(--text-muted)] hover:text-[color:var(--text)]"}`} style={w ? { width: w } : undefined}>
-                    {m === "post" ? t("modePost") : m === "subreddit" ? t("modeSubreddit") : t("modeUsername")}
+                    {m === "post" ? t("modeLink") : m === "subreddit" ? t("modeSubreddit") : t("modeUsername")}
                 </button>
             ))}
         </div>;

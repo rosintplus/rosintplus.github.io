@@ -5,6 +5,8 @@ const fr = {
   modeUsername: "Nom d'utilisateur",
   modeSubreddit: "Subreddit",
   modePost: "Publication",
+  modeLink: "Lien",
+  showSpoilers: "Afficher les spoilers",
   searchPlaceholderPost: "lien ou ID de publication",
   searchMode: "Mode de recherche",
   emptyNoneSub: "Aucun {tab} trouvé dans ce subreddit.",
@@ -125,6 +127,21 @@ const fr = {
   removedText: "Ce commentaire a été retiré par un modérateur — l'archive n'a capturé aucun texte.",
   deletedText: "Ce commentaire a été supprimé par son auteur — l'archive n'a capturé aucun texte.",
   noContent: "(aucun contenu)",
+  // Political compass (local statistical engine)
+  apCompassHint: "Boussole politique calculée localement dans votre navigateur à partir des écrits de ce compte et de son empreinte communautaire. Les positions utilisent l'équilibre pro/contre de Laver et Garry (2000) sur un dictionnaire politique, agrégé avec un point idéal de Poole-Rosenthal tiré de la participation aux subreddits, et sont données avec une erreur standard. Une dimension n'est libellée que lorsque son intervalle de confiance à 95 % exclut zéro, afin qu'une preuve mince ou contradictoire se lise comme centre / incertain plutôt que d'atterrir à un extrême.",
+  apCompassProvisional: "Provisoire",
+  apCompassUncertain: "Centre / incertain",
+  apCompassSe: "écon ±{e} · soc ±{s} · gov ±{g} (erreur standard)",
+  apCompassMethodNote: "Équilibre pro/contre de Laver et Garry (2000) + point idéal de Poole-Rosenthal, agrégés par variance inverse",
+  apCompassMethod: "Mise à l'échelle statistique du texte",
+  apCompassEvidence: "Preuves : {weight} unités sur {topics} sujets et {subs} communautés (fiabilité {reliability}).",
+  // Progress / scope labels
+  apBasedOnSample: "{loaded} / {total} éléments · échantillon",
+  apCrawlSampleHint: "L'exploration en arrière-plan s'est arrêtée à sa limite de pages avant d'atteindre tout l'historique. Utilisez Actualiser pour une exploration plus profonde.",
+  apBotScanned: "{posts} publications · {comments} commentaires analysés",
+  apBotScannedOf: "{scanned} sur {total} éléments analysés (échantillon)",
+  apCompassNoReading: "Aucune lecture",
+  apCompassNoSignalWhy: "{items} éléments examinés · {topics} catégories politiques · {subs} communautés cartographiées",
 };
 
 export default fr;

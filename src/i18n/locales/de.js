@@ -5,6 +5,8 @@ const de = {
   modeUsername: "Benutzername",
   modeSubreddit: "Subreddit",
   modePost: "Beitrag",
+  modeLink: "Link",
+  showSpoilers: "Spoiler anzeigen",
   searchPlaceholderPost: "Post-Link oder ID",
   searchMode: "Suchmodus",
   emptyNoneSub: "Keine {tab} in diesem Subreddit gefunden.",
@@ -125,6 +127,21 @@ const de = {
   removedText: "Dieser Kommentar wurde von einem Moderator entfernt — das Archiv hat keinen Text erfasst.",
   deletedText: "Dieser Kommentar wurde von seinem Autor gelöscht — das Archiv hat keinen Text erfasst.",
   noContent: "(kein Inhalt)",
+  // Political compass (local statistical engine)
+  apCompassHint: "Politischer Kompass, lokal in Ihrem Browser berechnet aus den eigenen Beiträgen dieses Kontos und dem Community-Fußabdruck. Die Positionen verwenden die Pro-/Contra-Bilanz nach Laver und Garry (2000) über ein politisches Wörterbuch, gepoolt mit einem Poole-Rosenthal-Idealpunkt aus der Subreddit-Beteiligung, und werden mit einem Standardfehler angegeben. Eine Dimension wird nur beschriftet, wenn ihr 95%-Konfidenzintervall die Null ausschließt, damit spärliche oder widersprüchliche Belege als Mitte / unsicher gelesen werden statt in ein Extrem zu fallen.",
+  apCompassProvisional: "Vorläufig",
+  apCompassUncertain: "Mitte / unsicher",
+  apCompassSe: "Wirtschaft ±{e} · Soziales ±{s} · Staat ±{g} (Standardfehler)",
+  apCompassMethodNote: "Pro-/Contra-Bilanz nach Laver und Garry (2000) + Poole-Rosenthal-Idealpunkt, invers varianzgewichtet gepoolt",
+  apCompassMethod: "Statistische Textskalierung",
+  apCompassEvidence: "Belege: {weight} Einheiten in {topics} Themen und {subs} Communities (Zuverlässigkeit {reliability}).",
+  // Progress / scope labels
+  apBasedOnSample: "{loaded} / {total} Einheiten · Stichprobe",
+  apCrawlSampleHint: "Der Hintergrund-Crawl hat sein Seitenbudget erreicht, bevor die vollständige Historie geladen war. Für einen tieferen Crawl auf Aktualisieren klicken.",
+  apBotScanned: "{posts} Beiträge · {comments} Kommentare geprüft",
+  apBotScannedOf: "{scanned} von {total} Einheiten geprüft (Stichprobe)",
+  apCompassNoReading: "Keine Einordnung",
+  apCompassNoSignalWhy: "{items} Einheiten geprüft · {topics} politische Kategorien · {subs} erfasste Communities",
 };
 
 export default de;

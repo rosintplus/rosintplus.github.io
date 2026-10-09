@@ -97,7 +97,7 @@ export const SearchBar = memo(function SearchBar({
     onSearch(normalized);
   };
 
-  const filteredSaved = useMemo(() => savedUsers.filter(r => r.toLowerCase().includes(username.trim().toLowerCase())), [savedUsers, username]);
+  const filteredSaved = useMemo(() => mode === "username" ? savedUsers.filter(r => r.toLowerCase().includes(username.trim().toLowerCase())) : [], [mode, savedUsers, username]);
   const maxDropdown = MAX_DROPDOWN;
   const filteredRecent = useMemo(() => {
     const room = Math.max(0, maxDropdown - filteredSaved.length);

@@ -1,21 +1,22 @@
-import { safeFetch, fetchBoth, REDDIT_BASE, ARCTIC, LIMIT, fetchPostById, fetchCommentsForPost } from "./api";
+import { safeFetch, fetchBoth, REDDIT_BASE, ARCTIC, LIMIT, fetchPostById, fetchCommentById, fetchCommentsForPost } from "./api";
 import { downloadFile, normalizeUsername, normalizeSubreddit, parsePostInput, fmtNum } from "./utils";
 import { emptyStats, processItem } from "./profileData.js";
 import { useI18n } from "./i18n.js";
 
-import { useState, useCallback, useEffect, useMemo, useRef, lazy, Suspense, useDeferredValue } from "react";
+import { useState, useCallback, useEffect, useLayoutEffect, useMemo, useRef, lazy, Suspense, useDeferredValue } from "react";
 
 import { Logo } from "./components/Logo.jsx";
 import { HoverHint, HoverTime } from "./components/HoverHint.jsx";
-import { IconExternal, IconSpinner, IconDownload, IconActivity, IconCalendar, IconGitHub } from "./components/icons.jsx";
+import { IconExternal, IconSpinner, IconDownload, IconActivity, IconGitHub } from "./components/icons.jsx";
 import { CopyButton } from "./components/CopyButton.jsx";
 import { CardBoundary, PostCard, CommentCard, isPost, itemType, getStatus, getPostThumbnail } from "./components/cards.jsx";
 import { EmptyState, ErrorState, TabBtn } from "./components/states.jsx";
 import { ThemeSwitcher } from "./components/ThemeSwitcher.jsx";
 import { ModeSelector } from "./components/ModeSelector.jsx";
 import { SearchBar } from "./components/SearchBar.jsx";
+import { SearchFilters } from "./components/SearchFilters.jsx";
 import { usePaginatedFetch } from "./hooks/usePaginatedFetch.js";
-import { NO_DECORATION, closeOnEscape, sleep, tJsx, matchKeyword } from "./constants.js";
+import { NO_DECORATION, sleep, tJsx, matchKeyword } from "./constants.js";
 
 // Preserved public exports (previously defined in App.jsx).
 export { HoverHint } from "./components/HoverHint.jsx";
@@ -45,12 +46,14 @@ export default function App() {
     return null;
   })();
   const [initialPostId] = useState(() => _initialPostParsed?.postId || null);
+  const [selectedCommentId, setSelectedCommentId] = useState(() => _initialPostParsed?.commentId || null);
+  const [selectedComment, setSelectedComment] = useState(null);
   const [initialMode] = useState(() => {
     if (_initialPostParsed) return "post";
     return initialParams.mode === "subreddit" || (!initialParams.u && initialParams.sub) ? "subreddit" : "username";
   });
   const [initialUser] = useState(() => {
-    if (initialMode === "post") return _initialPostRaw || "";
+    if (initialMode === "post") return _initialPostRaw || initialParams.u || "";
     return initialMode === "subreddit" ? normalizeSubreddit(initialParams.sub) : normalizeUsername(initialParams.u) || "";
   });
   const initialPostRaw = _initialPostRaw;
@@ -62,21 +65,46 @@ export default function App() {
   const handleTabSelect = useCallback((tab) => setActiveTab(tab), []);
   const handleSwitchTab = useCallback(() => setActiveTab(prev => prev === "posts" ? "comments" : "posts"), []);
   const [searched, setSearched] = useState(!!initialUser || !!initialPostId);
+  const searchBarRef = useRef(null);
+  const searchLayoutRef = useRef(null);
+  const searchOriginRef = useRef(null);
+  const captureSearchOrigin = useCallback(() => {
+    if (!searched && searchBarRef.current) {
+      searchOriginRef.current = searchBarRef.current.getBoundingClientRect().top;
+    }
+  }, [searched]);
+  useLayoutEffect(() => {
+    if (!searched || searchOriginRef.current == null) return;
+    const origin = searchOriginRef.current;
+    searchOriginRef.current = null;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const layout = searchLayoutRef.current;
+    const bar = searchBarRef.current;
+    if (!layout?.animate || !bar) return;
+    const offset = origin - bar.getBoundingClientRect().top;
+    // Translate the entire search area together. The input begins exactly
+    // where it was on home; every element beneath it shares the same motion.
+    const animation = layout.animate([
+      { transform: `translateY(${offset}px)` },
+      { transform: "translateY(0)" },
+    ], { duration: 360, easing: "cubic-bezier(0.22, 1, 0.36, 1)" });
+    return () => animation.cancel();
+  }, [searched]);
   const [initialLoading, setInitialLoading] = useState(!!initialUser || !!initialPostId);
   const [postId, setPostId] = useState(initialPostId);
-  const [postMode, setPostMode] = useState(!!initialPostId);
+  const [postMode, setPostMode] = useState(!!_initialPostParsed);
   const [postData, setPostData] = useState(null);
   const [postComments, setPostComments] = useState([]);
   const [postSources, setPostSources] = useState([]);
-  const [postLoading, setPostLoading] = useState(!!initialPostId);
+  const [postLoading, setPostLoading] = useState(!!_initialPostParsed);
   const [postError, setPostError] = useState(null);
   const postIdRef = useRef(initialPostId);
   const [dateFrom, setDateFrom] = useState(initialParams.from ?? "");
   const [dateTo, setDateTo] = useState(initialParams.to ?? "");
-  const [showDates, setShowDates] = useState(false);
   const [subreddit, setSubreddit] = useState(initialMode === "username" && initialParams.sub ? String(initialParams.sub).replace(/^r\//, "") : "");
   const [urlQuery, setUrlQuery] = useState(initialParams.url || "");
   const [showNsfw, setShowNsfw] = useState(true); // checked = show NSFW (no filter); unchecked = exclude NSFW
+  const [showSpoilers, setShowSpoilers] = useState(initialParams.hideSpoilers !== "1");
   const [sortOrder, setSortOrder] = useState(initialParams.sort === "asc" ? "asc" : "desc");
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [deletedOnly, setDeletedOnly] = useState(initialParams.deleted === "1");
@@ -99,10 +127,6 @@ export default function App() {
   }, []);
 
   const [bannerDismissed, setBannerDismissed] = useState(false);
-  // Enable the hero→results collapse transition only after first paint, so the
-  // search bar doesn't animate into place (slide up) on initial page load.
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => { setMounted(true); }, []);
   const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
     let ticking = false;
@@ -132,6 +156,7 @@ export default function App() {
       if (fromTs != null && item.created_utc < fromTs) return false;
       if (toTs != null && item.created_utc > toTs) return false;
       const type = activeTab === "all" ? itemType(item) : activeTab;
+      if (!showSpoilers && type === "posts" && item.spoiler) return false;
       if (deletedOnly) {
         const s = getStatus(item, type);
         if (!s.removed && !s.deleted) return false;
@@ -140,20 +165,27 @@ export default function App() {
       if (!matchKeyword(item, deferredKeyword, type)) return false;
       return true;
     }).sort((a, b) => sortOrder === "desc" ? b.created_utc - a.created_utc : a.created_utc - b.created_utc);
-  }, [activeTab, posts.items, comments.items, deletedOnly, nsfwOnly, deferredKeyword, sortOrder, dateFrom, dateTo]);
+  }, [activeTab, posts.items, comments.items, deletedOnly, nsfwOnly, showSpoilers, deferredKeyword, sortOrder, dateFrom, dateTo]);
 
   const [bgStatsVersion, setBgStatsVersion] = useState(0);
   const [isCrawling, setIsCrawling] = useState(false);
   const [crawledCount, setCrawledCount] = useState(0);
+  const [crawlCapped, setCrawlCapped] = useState(false);
   const [crawlKey, setCrawlKey] = useState(0);
   const bgStatsRef = useRef(null);
   const bgCrawlRef = useRef(null);
   const crawlItemsRef = useRef(0);
-  const crawledTotalRef = useRef(0);
   const crawlProcessedRef = useRef(new Set());
   const crawledPostsRef = useRef([]);
   const crawledCommentsRef = useRef([]);
   const lastCrawlQueryRef = useRef(null);
+  // Whether the background crawl stopped on its budget/timeout rather than
+  // because the archive ran out. Drives an honest "sample" label in the
+  // counter — without it a capped crawl looks like one that never finishes.
+  const crawlCappedRef = useRef(false);
+  // Archive-wide item totals (from the users endpoint), used to stop the
+  // crawl as soon as everything has actually been fetched.
+  const expectedTotalsRef = useRef(null);
   // Explicit Refresh (profile "Refresh" button) requests the full deep crawl;
   // auto-crawl after paint stays shallow (fewer pages, deferred, gentler gaps).
   const fullCrawlRef = useRef(false);
@@ -164,6 +196,7 @@ export default function App() {
     fullCrawlRef.current = true;
     setIsCrawling(true);
     setCrawledCount(0);
+    setCrawlCapped(false);
     setCrawlKey(k => k + 1);
   }, []);
 
@@ -184,8 +217,9 @@ export default function App() {
 
     setIsCrawling(true);
     setCrawledCount(0);
+    setCrawlCapped(false);
     crawlItemsRef.current = 0;
-    crawledTotalRef.current = 0;
+    crawlCappedRef.current = false;
     crawlProcessedRef.current = new Set();
     crawledPostsRef.current = [];
     crawledCommentsRef.current = [];
@@ -205,7 +239,7 @@ export default function App() {
     const crawlTimeoutId = setTimeout(() => { try { controller.abort(); } catch { /* noop */ } }, CRAWL_TIMEOUT_MS);
     const sleepAbortable = (ms, signal) => {
       if (ms <= 0) return Promise.resolve();
-      if (!signal) return sleep(CRAWL_SLEEP_MS);
+      if (!signal) return sleep(ms);
       if (signal.aborted) return Promise.resolve();
       return new Promise(resolve => {
         const t = setTimeout(() => {
@@ -261,6 +295,11 @@ export default function App() {
         let before = null;
         let lastId = null;
         let pages = 0;
+        let fetched = 0;
+        // Everything the archive reports for this type, if the totals arrived.
+        const expected = expectedTotalsRef.current
+          ? (isComment ? expectedTotalsRef.current.comments : expectedTotalsRef.current.posts)
+          : null;
 
         // Seed cursor with oldest item from initial page to start deep paging immediately
         const initialList = isComment ? comments.items : posts.items;
@@ -270,10 +309,19 @@ export default function App() {
             before = oldest.created_utc;
             lastId = oldest.id;
           }
+          // The first page is already loaded, so it counts toward the total
+          // we are trying to reach — otherwise the crawl never recognises
+          // that the history is complete and keeps paging for nothing.
+          fetched = initialList.length;
         }
 
         while (!controller.signal.aborted) {
-          if (pages >= MAX_BG_PAGES) break;
+          // Budget exhausted: record that we stopped short of the full
+          // history so the UI can say "sample" instead of looking stuck.
+          if (pages >= MAX_BG_PAGES) {
+            crawlCappedRef.current = true;
+            break;
+          }
           // Timestamp-only cursor: Arctic rejects before_id with HTTP 400.
           const pagination = before ? { before } : {};
           let result;
@@ -289,11 +337,11 @@ export default function App() {
 
           let anyNew = false;
           for (const item of result.items) {
-            crawledTotalRef.current++;
             if (seen.has(item.id)) continue;
             seen.add(item.id);
             crawlProcessedRef.current.add(item.id);
             crawlItemsRef.current++;
+            fetched++;
             anyNew = true;
             processItem(crawlStats, item, isComment);
 
@@ -308,6 +356,11 @@ export default function App() {
           if (anyNew) {
             scheduleCrawlFlush();
           }
+
+          // The archive reports fewer items than this for the type, so there
+          // is nothing left to page for. Stop instead of burning the rest of
+          // the budget (and the wall clock) on empty pages.
+          if (expected != null && fetched >= expected) break;
 
           const last = result.items[result.items.length - 1];
           if (!last || result.items.length < LIMIT) break;
@@ -338,7 +391,12 @@ export default function App() {
           setBgStatsVersion(v => v + 1);
           pendingFlush = false;
         }
-        setIsCrawling(false);
+        if (bgCrawlRef.current === controller) {
+          setIsCrawling(false);
+          // Surface whether we stopped on budget/timeout rather than because
+          // the archive ran out, so the counter can say "sample" honestly.
+          setCrawlCapped(crawlCappedRef.current);
+        }
       }
     };
 
@@ -406,6 +464,13 @@ export default function App() {
           stats.wordFreqs[type][word].items += counts.items;
         }
       }
+      // Carry the crawl's text sample across too. Dropping it silently threw
+      // away most of the deep-crawl's text evidence: the compass only saw the
+      // first page plus the capped in-memory item lists. The compass engine
+      // dedupes these against the id-bearing streams, so merging is safe.
+      if (bg.sampleItems?.length) {
+        stats.sampleItems = (stats.sampleItems || []).concat(bg.sampleItems);
+      }
     }
 
     return stats;
@@ -465,7 +530,7 @@ export default function App() {
   // only reacts to `deferredKeyword`, keeping typing at 60fps.
   useEffect(() => {
     setVisibleCount(PAGE_SIZE);
-  }, [query, activeTab, deferredKeyword, sortOrder, dateFrom, dateTo, deletedOnly, nsfwOnly]);
+  }, [query, activeTab, deferredKeyword, sortOrder, dateFrom, dateTo, deletedOnly, nsfwOnly, showSpoilers]);
 
   // Memoized render window: avoids re-slicing/mapping 100s of items on every
   // keystroke or unrelated parent render (e.g. crawl progress ticks).
@@ -474,7 +539,7 @@ export default function App() {
     [filteredItems, visibleCount]
   );
 
-  const isOutageTakeover = bothSourcesFailed && posts.items.length === 0 && comments.items.length === 0;
+  const isOutageTakeover = !postMode && bothSourcesFailed && posts.items.length === 0 && comments.items.length === 0;
   useEffect(() => {
     document.title = "Rosint+";
   }, []);
@@ -483,15 +548,25 @@ export default function App() {
   useEffect(() => {
     if (!query || mode === "subreddit") {
       setUserMeta(null);
+      expectedTotalsRef.current = null;
       return;
     }
-    const ctrl = new AbortController();
     let cancelled = false;
-    safeFetch(`${ARCTIC}/api/users/search?author=${encodeURIComponent(query)}&limit=1`, { signal: ctrl.signal }).then(res => {
+    setUserMeta(null);
+    expectedTotalsRef.current = null;
+    // No AbortSignal here by choice: this request is tiny and is shared via
+    // safeFetch's single-flight cache with UserSummary, so letting it run to
+    // completion is cheaper than tracking cancellation. The `cancelled` guard
+    // keeps state off unmounted / superseded queries.
+    safeFetch(`${ARCTIC}/api/users/search?author=${encodeURIComponent(query)}&limit=1`).then(res => {
       if (cancelled) return;
-      setUserMeta(res.data?.[0]?._meta ?? null);
+      const meta = res.data?.[0]?._meta ?? null;
+      setUserMeta(meta);
+      expectedTotalsRef.current = meta
+        ? { posts: meta.num_posts || 0, comments: meta.num_comments || 0 }
+        : null;
     }).catch(() => {});
-    return () => { cancelled = true; ctrl.abort(); };
+    return () => { cancelled = true; };
   }, [query, mode]);
   const buildFilters = useCallback((searchMode = mode) => {
     const f = {};
@@ -502,8 +577,10 @@ export default function App() {
     if (urlQuery.trim()) f.url = urlQuery.trim();
     return f;
   }, [dateFrom, dateTo, subreddit, showNsfw, mode, urlQuery]);
-  const hasFilters = dateFrom || dateTo || (mode === "username" && subreddit.trim()) || !showNsfw || urlQuery.trim();
+  const hasFilters = dateFrom || dateTo || (mode === "username" && subreddit.trim()) || !showNsfw || !showSpoilers || urlQuery.trim();
   const clearPostMode = useCallback(() => {
+    setSelectedComment(null);
+    setSelectedCommentId(null);
     setPostMode(false);
     setPostId(null);
     postIdRef.current = null;
@@ -526,8 +603,8 @@ export default function App() {
     if (!searched || !query) return;
     if (postMode) {
       const url = new URL(window.location.href);
-      if (postId) {
-        url.searchParams.set("post", postId);
+      if (postId || selectedCommentId) {
+        url.searchParams.set("post", selectedCommentId ? `t1_${selectedCommentId}` : postId);
         url.searchParams.delete("u");
         url.searchParams.delete("sub");
         url.searchParams.delete("mode");
@@ -562,12 +639,14 @@ export default function App() {
     else url.searchParams.delete("deleted");
     if (nsfwOnly) url.searchParams.set("nsfw", "1");
     else url.searchParams.delete("nsfw");
+    if (!showSpoilers) url.searchParams.set("hideSpoilers", "1");
+    else url.searchParams.delete("hideSpoilers");
     if (urlQuery.trim()) url.searchParams.set("url", urlQuery.trim());
     else url.searchParams.delete("url");
     if (showProfile) url.searchParams.set("stats", "1");
     else url.searchParams.delete("stats");
     window.history.replaceState({}, "", url);
-  }, [searched, query, mode, activeTab, subreddit, dateFrom, dateTo, sortOrder, deletedOnly, nsfwOnly, showProfile, postMode, postId, urlQuery]);
+  }, [searched, query, mode, activeTab, subreddit, dateFrom, dateTo, sortOrder, deletedOnly, nsfwOnly, showSpoilers, showProfile, postMode, postId, selectedCommentId, urlQuery]);
   const {
     reset: resetPosts
   } = posts;
@@ -587,9 +666,12 @@ export default function App() {
       return;
     }
     const id = parsed.postId;
+    setSelectedCommentId(parsed.commentId);
+    setSelectedComment(null);
+    captureSearchOrigin();
     const searchId = ++searchIdRef.current;
     setPostId(id);
-    postIdRef.current = id;
+    postIdRef.current = id || `t1_${parsed.commentId}`;
     setPostMode(true);
     if (modeRef.current !== "post") {
       modeRef.current = "post";
@@ -605,12 +687,44 @@ export default function App() {
     setInitialLoading(true);
     if (push) {
       const url = new URL(window.location.href);
-      url.searchParams.set("post", id);
+      url.searchParams.set("post", parsed.commentId ? `t1_${parsed.commentId}` : id);
       url.searchParams.delete("u");
       url.searchParams.delete("sub");
       url.searchParams.delete("mode");
       url.searchParams.delete("tab");
       window.history.pushState({}, "", url);
+    }
+    if (parsed.commentId) {
+      const requestId = postIdRef.current;
+      const isCurrent = () => searchId === searchIdRef.current && postIdRef.current === requestId;
+      try {
+        const result = await fetchCommentById(parsed.commentId);
+        if (!isCurrent()) return;
+        if (!result.comment) {
+          setPostError(t("commentNotFound"));
+          return;
+        }
+        setSelectedComment(result.comment);
+        setPostSources(result.sources);
+        setPostLoading(false);
+        setInitialLoading(false);
+        const parentId = String(result.comment.link_id || parsed.postId || "").replace(/^t3_/i, "");
+        if (parentId) {
+          setPostId(parentId);
+          const parent = await fetchPostById(parentId);
+          if (!isCurrent()) return;
+          setPostData(parent.post);
+          setPostSources(prev => [...new Set([...prev, ...parent.sources])]);
+        }
+      } catch (err) {
+        if (isCurrent()) setPostError(err.message || t("commentNotFound"));
+      } finally {
+        if (isCurrent()) {
+          setPostLoading(false);
+          setInitialLoading(false);
+        }
+      }
+      return;
     }
     // Stream: show post as soon as it arrives, don't wait for comments
     const postPromise = fetchPostById(id).then(postRes => {
@@ -654,7 +768,7 @@ export default function App() {
       setPostLoading(false);
       setInitialLoading(false);
     }
-  }, [t]);
+  }, [t, captureSearchOrigin]);
   const searchUser = useCallback(async (rawUser, {
     push = true,
     silent = false
@@ -664,6 +778,8 @@ export default function App() {
     }
     // exiting post mode for a normal user/subreddit search
     if (postMode) {
+      setSelectedComment(null);
+      setSelectedCommentId(null);
       setPostMode(false);
       setPostId(null);
       postIdRef.current = null;
@@ -680,9 +796,19 @@ export default function App() {
     const m = modeRef.current;
     const user = m === "subreddit" ? normalizeSubreddit(rawUser) : normalizeUsername(rawUser);
     if (!user) return;
+    captureSearchOrigin();
     const searchId = ++searchIdRef.current;
     setQuery(user);
     setSearched(true);
+    if (bgCrawlRef.current) bgCrawlRef.current.abort();
+    bgCrawlRef.current = null;
+    bgStatsRef.current = null;
+    crawlProcessedRef.current = new Set();
+    crawledPostsRef.current = [];
+    crawledCommentsRef.current = [];
+    crawlItemsRef.current = 0;
+    setBgStatsVersion(0);
+    setCrawlCapped(false);
     if (m === "username") {
       setIsCrawling(true);
       setCrawledCount(0);
@@ -724,7 +850,7 @@ export default function App() {
       window.history.pushState({}, "", url);
     }
     if (!silent) setInitialLoading(false);
-  }, [buildFilters, resetPosts, resetComments, sortOrder, postMode, searchPost]);
+  }, [buildFilters, resetPosts, resetComments, sortOrder, postMode, searchPost, captureSearchOrigin]);
   const searchUserRef = useRef(searchUser);
   searchUserRef.current = searchUser;
   const handleModeChange = useCallback(nextMode => {
@@ -764,7 +890,7 @@ export default function App() {
     const p = new URLSearchParams(window.location.search);
     const rawPost = p.get("post") || p.get("p") || p.get("postId") || p.get("id") || "";
     const parsed = parsePostInput(rawPost) || (rawPost && /^[a-z0-9]{5,10}$/i.test(rawPost.trim()) ? { postId: rawPost.trim().replace(/^t3_/i, "").toLowerCase(), commentId: null } : null);
-    if (parsed?.postId) {
+    if (parsed?.postId || parsed?.commentId) {
       searchPost(rawPost, { push: false });
       return;
     }
@@ -789,7 +915,7 @@ export default function App() {
       const p = new URLSearchParams(window.location.search);
       const rawPost = p.get("post") || p.get("p") || p.get("postId") || p.get("id") || "";
       const parsed = parsePostInput(rawPost) || (rawPost && /^[a-z0-9]{5,10}$/i.test(rawPost.trim()) ? { postId: rawPost.trim().replace(/^t3_/i, "").toLowerCase() } : null);
-      if (parsed?.postId) {
+      if (parsed?.postId || parsed?.commentId) {
         searchPost(rawPost, { push: false });
         return;
       }
@@ -821,8 +947,8 @@ export default function App() {
     return () => window.removeEventListener("popstate", onPop);
   }, [searchUser, searchPost, clearPostMode]);
   const handleRetry = useCallback(async () => {
-    if (postMode && postId) {
-      await searchPost(postId, { push: false });
+    if (postMode && query) {
+      await searchPost(query, { push: false });
       return;
     }
     if (!query) return;
@@ -835,16 +961,18 @@ export default function App() {
       bypassCache: true, sort: sortOrder, mode: m
     })]);
     setInitialLoading(false);
-  }, [query, buildFilters, resetPosts, resetComments, sortOrder, postMode, postId, searchPost]);
+  }, [query, buildFilters, resetPosts, resetComments, sortOrder, postMode, searchPost]);
   const clearFilters = useCallback(async () => {
     setDateFrom("");
     setDateTo("");
     setSubreddit("");
     setUrlQuery("");
     setShowNsfw(true);
+    setShowSpoilers(true);
+    setDeletedOnly(false);
     setNsfwOnly(false);
-    if (postMode && postId) {
-      await searchPost(postId, { push: false });
+    if (postMode && query) {
+      await searchPost(query, { push: false });
       return;
     }
     if (!query) return;
@@ -852,7 +980,7 @@ export default function App() {
     const m = modeRef.current;
     await Promise.all([resetPosts(query, {}, { sort: sortOrder, mode: m }), resetComments(query, {}, { sort: sortOrder, mode: m })]);
     setInitialLoading(false);
-  }, [query, resetPosts, resetComments, sortOrder, postMode, postId, searchPost]);
+  }, [query, resetPosts, resetComments, sortOrder, postMode, searchPost]);
 
   const active = useMemo(() => activeTab === "posts" ? posts : activeTab === "comments" ? comments : { loading: posts.loading || comments.loading, error: posts.error || comments.error, done: posts.done && comments.done }, [activeTab, posts, comments]);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- active.items is undefined for "all" tab
@@ -949,8 +1077,8 @@ export default function App() {
                 <ThemeSwitcher />
             </header>
 
-            <main id="main-content" className="flex-1 flex flex-col pt-12">
-                {arcticIsDown && !bannerDismissed && <div className="bg-[color:var(--border)] border-b border-[color:var(--border-hover)] px-4 py-2 flex items-center justify-between gap-3">
+            <main ref={searchLayoutRef} id="main-content" className="flex-1 flex flex-col pt-12">
+                {arcticIsDown && !isOutageTakeover && !bannerDismissed && <div className="bg-[color:var(--border)] border-b border-[color:var(--border-hover)] px-4 py-2 flex items-center justify-between gap-3">
                         <p className="text-[12px] text-[color:var(--accent-text)]">
                             <span className="font-semibold">{t("bannerTitle")}</span>
                             {" "}{t("bannerBody")}
@@ -959,7 +1087,7 @@ export default function App() {
                             ×
                         </button>
                     </div>}
-                <div className={`w-full max-w-3xl mx-auto px-3 sm:px-4 ${mounted ? "transition-all duration-300" : ""} ${searched ? "pt-6" : "flex-1 flex flex-col justify-center"}`}>
+                <div className={`w-full max-w-3xl mx-auto px-3 sm:px-4 ${searched ? "pt-6" : "flex-1 flex flex-col justify-center"}`}>
                     {!searched && (
                         <div className="text-center mb-8">
                             <h1 className="font-bold text-[color:var(--text)] tracking-tight leading-none select-none text-[clamp(2rem,14vw,5.5rem)] sm:text-[clamp(3rem,15vw,9rem)]" style={{ WebkitFontSmoothing: 'antialiased', MozOsxFontSmoothing: 'grayscale' }}>
@@ -973,7 +1101,7 @@ export default function App() {
                             </p>
                         </div>
                     )}
-                    <div className="relative mx-auto w-full flex-shrink-0" style={{
+                    <div ref={searchBarRef} className="relative mx-auto w-full flex-shrink-0" style={{
           maxWidth: searched ? '100%' : '690px'
         }}>
                         
@@ -984,65 +1112,46 @@ export default function App() {
           maxWidth: '690px'
         }}>
                             <div className="flex items-center justify-between gap-2 w-full min-w-0">
-                            <button type="button" onClick={() => setShowAdvancedFilters(f => !f)} className="flex items-center gap-1.5 h-[30px] px-3 text-[12px] text-[color:var(--text-muted)] border border-[color:var(--border-hover)] bg-[color:var(--bg)] rounded hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] transition-colors">
+                            {mode !== "post" && <button type="button" aria-expanded={showAdvancedFilters} aria-controls="home-search-filters" onClick={() => setShowAdvancedFilters(f => !f)} className="flex items-center gap-1.5 h-[30px] px-3 text-[12px] text-[color:var(--text-muted)] border border-[color:var(--border-hover)] bg-[color:var(--bg)] rounded hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] transition-colors">
                                 {t("advancedFilters")}
                                 <svg aria-hidden="true" className={`w-3 h-3 transition-transform duration-200 ${showAdvancedFilters ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                                 </svg>
-                            </button>
+                            </button>}
                             <div className="ml-auto flex-shrink-0"><ModeSelector mode={mode} onModeChange={handleModeChange} /></div>
                             </div>
-                            {showAdvancedFilters && <div className="absolute left-0 right-0 top-full mt-2 z-30 bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded-md shadow-xl shadow-black/40 px-3 py-2.5 flex flex-col gap-2.5">
-                                    <div className="flex flex-wrap items-center gap-2 w-full">
-                                        <span className="text-[11px] text-[color:var(--text-muted)]">{t("from")}</span>
-                                        <input aria-label="Date from" type="date" max={dateTo || undefined} value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-2 h-8 text-[12px] text-[color:var(--text)] focus:outline-none focus:border-[color:var(--accent)] transition-colors" />
-                                        <span className="text-[11px] text-[color:var(--text-muted)]">{t("to")}</span>
-                                        <input aria-label="Date to" type="date" min={dateFrom || undefined} value={dateTo} onChange={e => setDateTo(e.target.value)} className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-2 h-8 text-[12px] text-[color:var(--text)] focus:outline-none focus:border-[color:var(--accent)] transition-colors" />
-                                        {mode === "username" && <><span className="text-[11px] text-[color:var(--text-muted)]">{t("in")}</span>
-                                        <div className="relative">
-                                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[color:var(--text-muted)] text-sm font-medium select-none">r/</span>
-                                            <input aria-label="Filter by subreddit" type="text" value={subreddit} onChange={e => setSubreddit(e.target.value.replace(/^r\//, ""))} onKeyDown={e => {
-                    if (e.key === 'Enter' && searched && query && !initialLoading) {
-                      searchUser(query, {
-                        push: false
-                      });
-                    }
-                  }} onBlur={() => {
-                    if (searched && query && !initialLoading) {
-                      searchUser(query, {
-                        push: false
-                      });
-                    }
-                  }} placeholder={t("subredditPlaceholder")} className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded pl-8 pr-3 h-8 text-[12px] text-[color:var(--text)] placeholder-[color:var(--text-muted)] focus:outline-none focus:border-[color:var(--accent)] transition-colors min-w-[120px] max-w-[240px] flex-1" />
-                                        </div></>}
-                                    </div>
-                                    <div className="flex flex-wrap items-center gap-2 w-full">
-                                        <span className="text-[11px] text-[color:var(--text-muted)] whitespace-nowrap">{t("externalLink")}</span>
-                                        <input aria-label="External link URL contains" type="text" value={urlQuery} onChange={e => setUrlQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && searched && query && !initialLoading) searchUser(query, { push: false }); }} onBlur={() => { if (searched && query && !initialLoading && urlQuery.trim()) searchUser(query, { push: false }); }} placeholder={t("externalLinkPlaceholder")} className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-2 h-8 text-[12px] text-[color:var(--text)] placeholder-[color:var(--text-muted)] focus:outline-none focus:border-[color:var(--accent)] transition-colors min-w-[160px] flex-1" />
-                                        <div className="ml-auto flex items-center gap-3 flex-shrink-0">
-                                            <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                                                <input type="checkbox" checked={deletedOnly} onChange={e => setDeletedOnly(e.target.checked)} className="w-3.5 h-3.5 accent-[color:var(--accent)] cursor-pointer" />
-                                                <span className="text-[11px] text-[color:var(--text-muted)] whitespace-nowrap">{t("deletedOnly")}</span>
-                                            </label>
-                                            <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                                                <input type="checkbox" checked={showNsfw} onChange={e => setShowNsfw(e.target.checked)} className="w-3.5 h-3.5 accent-[color:var(--accent)] cursor-pointer" />
-                                                <span className="text-[11px] text-[color:var(--text-muted)] whitespace-nowrap">{t("showNsfw")}</span>
-                                            </label>
-                                        </div>
-                                    </div>
-                                </div>}
+                            {mode !== "post" && showAdvancedFilters && <SearchFilters
+                              mode={mode} dateFrom={dateFrom} dateTo={dateTo} setDateFrom={setDateFrom} setDateTo={setDateTo}
+                              subreddit={subreddit} setSubreddit={setSubreddit} urlQuery={urlQuery} setUrlQuery={setUrlQuery}
+                              deletedOnly={deletedOnly} setDeletedOnly={setDeletedOnly} showNsfw={showNsfw} setShowNsfw={setShowNsfw}
+                              showSpoilers={showSpoilers} setShowSpoilers={setShowSpoilers}
+                              onCommit={() => { if (searched && query && !initialLoading) searchUser(query, { push: false }); }}
+                              onClear={clearFilters}
+                            />}
                         </div>}
                 </div>
 
                 {searched && isOutageTakeover && <div className="max-w-md mx-auto px-4 mt-12 pb-16">
                         <div className="border border-[color:var(--border-hover)] bg-[color:var(--bg)] rounded-xl px-7 pt-10 pb-5 text-center shadow-lg shadow-black/30">
                             <p className="text-[color:var(--text)] text-lg font-semibold mb-2">
-                                {t("outageTitle")}
+                                {t("archiveUnavailableTitle")}
                             </p>
                             <p className="text-[color:var(--text)] text-sm leading-relaxed">
-                                {t("outageBody")}
+                                {t("archiveUnavailableBody")}
                             </p>
-                                                    </div>
+                            <ul className="mt-4 text-sm text-[color:var(--text-muted)] space-y-2">
+                              {[["arctic", "Arctic Shift"], ["pullpush", "PullPush"]].map(([key, name]) => {
+                                const failure = posts.sourceErrors[key] || comments.sourceErrors[key];
+                                return <li key={key}>{name}: {t(failure?.reason === "rateLimited" ? "archiveRateLimited" : failure?.reason === "timeout" ? "archiveTimedOut" : failure?.reason === "http" ? "archiveHttpError" : "archiveConnectionError", { status: failure?.status })}</li>;
+                              })}
+                            </ul>
+                            <div className="mt-5 flex flex-col items-center gap-3 text-sm">
+                              <button type="button" onClick={handleRetry} disabled={initialLoading || posts.loading || comments.loading} className="text-[color:var(--accent-text)] hover:underline disabled:opacity-50">
+                                {initialLoading || posts.loading || comments.loading ? t("loading") : t("tryAgain")}
+                              </button>
+                              <a href="https://status.arctic-shift.photon-reddit.com" target="_blank" rel="noopener noreferrer" className="text-[color:var(--accent-text)] hover:underline">{t("archiveStatus")}</a>
+                            </div>
+                        </div>
                     </div>}
 
                 {searched && !isOutageTakeover && <div className="w-full max-w-3xl mx-auto px-3 sm:px-4 mt-3 pb-16">
@@ -1050,6 +1159,7 @@ export default function App() {
                         {/* KPI summary + bot check live outside the Stats panel so they are always visible */}
                         {mode === "username" && !initialLoading && <Suspense fallback={null}>
                             <ProfileSummary
+                              key={query.toLowerCase()}
                               username={query}
                               posts={allPosts}
                               comments={allComments}
@@ -1077,6 +1187,7 @@ export default function App() {
   </div>
 }>
                             <AccountProfile
+                              key={query.toLowerCase()}
                               query={query}
                               activeTab={activeTab}
                               onWordClick={handleWordClick}
@@ -1084,6 +1195,7 @@ export default function App() {
                               userMeta={userMeta}
                               loadedCount={loadedCount}
                               crawledCount={crawledCount}
+                              crawlCapped={crawlCapped}
                               isCrawling={isCrawling}
                               onRefresh={handleRefreshCrawl}
                               onStopCrawl={handleStopCrawl}
@@ -1100,8 +1212,12 @@ export default function App() {
                                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
                                 {t("returnHome")}
                               </button>
-                              <span className="text-[11px] text-[color:var(--text-faint)] truncate">{postId ? `t3_${postId}` : ""} {postSources.length ? `· ${postSources.join(" + ")}` : ""}</span>
+                              <span className="text-[11px] text-[color:var(--text-faint)] truncate">{selectedCommentId ? `t1_${selectedCommentId}` : postId ? `t3_${postId}` : ""} {postSources.length ? `· ${postSources.join(" + ")}` : ""}</span>
                             </div>
+                            {selectedComment && <div className="mb-4">
+                              <h3 className="text-sm font-semibold mb-2">{t("selectedCommentTitle")}</h3>
+                              <CommentCard comment={selectedComment} skipPostLoad={true} highlightTerm={deferredKeyword} />
+                            </div>}
                             {postLoading ? (
                               <div aria-busy="true" className="w-full flex flex-col gap-3 py-2">
                                 <div className="w-full bg-[color:var(--bg-elevated)] border border-[color:var(--border-hover)] rounded overflow-hidden">
@@ -1137,7 +1253,7 @@ export default function App() {
                                 </div>
                               </div>
                             ) : postError ? (
-                              <ErrorState message={postError} onRetry={() => searchPost(postId, { push: false })} />
+                              <ErrorState message={postError} onRetry={() => searchPost(query, { push: false })} />
                             ) : postData ? (
                               <div className="flex flex-col gap-4">
                                 <div className="bg-[color:var(--bg-elevated)] border border-[color:var(--border-hover)] rounded overflow-hidden">
@@ -1187,7 +1303,7 @@ export default function App() {
                                     })()}
                                   </div>
                                 </div>
-                                <div>
+                                {!selectedCommentId && <div>
                                   <h3 className="text-[13px] font-semibold text-[color:var(--text)] mb-2 flex items-center gap-2">
                                     {t("postCommentsTitle")} <span className="text-[11px] font-normal text-[color:var(--text-muted)]">{fmtNum(Math.max(postComments.length, postData.num_comments ?? 0))} {t("commentsWord")}</span>
                                   </h3>
@@ -1198,7 +1314,7 @@ export default function App() {
                                       {postComments.map(c => <CommentCard key={c.id} comment={c} skipPostLoad={true} highlightTerm={deferredKeyword} />)}
                                     </div>
                                   )}
-                                </div>
+                                </div>}
                               </div>
                             ) : null}
                           </div>
@@ -1230,27 +1346,15 @@ export default function App() {
                                     <input aria-label="Date from" type="date" max={dateTo || undefined} value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-2 h-8 text-[11px] text-[color:var(--text)] cursor-pointer" />
                                     <input aria-label="Date to" type="date" min={dateFrom || undefined} value={dateTo} onChange={e => setDateTo(e.target.value)} className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-2 h-8 text-[11px] text-[color:var(--text)] cursor-pointer" />
                                 </div>
-                                <button type="button" aria-hidden="true" tabIndex={-1} className="hidden">
-                                    <IconCalendar />
-                                </button>
-                                {showDates && <>
-                                    <div className="fixed inset-0 z-20" onClick={() => setShowDates(false)} aria-hidden="true" />
-                                    <div className="absolute right-0 top-full mt-2 z-30 flex items-center gap-2 p-2 whitespace-nowrap bg-[color:var(--bg-elevated)] border border-[color:var(--border-hover)] rounded-md shadow-xl">
-                                        <label className="flex items-center gap-1.5 text-[11px] text-[color:var(--text-muted)]">{t("from")}
-                                            <input aria-label="Date from" type="date" max={dateTo || undefined} value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-2 h-7 text-[12px] text-[color:var(--text)]" />
-                                        </label>
-                                        <label className="flex items-center gap-1.5 text-[11px] text-[color:var(--text-muted)]">{t("to")}
-                                            <input aria-label="Date to" type="date" min={dateFrom || undefined} value={dateTo} onChange={e => setDateTo(e.target.value)} className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-2 h-7 text-[12px] text-[color:var(--text)]" />
-                                        </label>
-                                        <button onClick={clearFilters} disabled={!dateFrom && !dateTo} className="px-2 h-7 text-[11px] border border-[color:var(--border-hover)] rounded disabled:opacity-50">{t("clear")}</button>
-                                    </div>
-                                </>}
                             </div>
                             <label className="flex items-center gap-1.5 flex-shrink-0 px-2 h-8 border border-[color:var(--border-hover)] rounded text-[11px] text-[color:var(--text-muted)] whitespace-nowrap cursor-pointer hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] transition-colors">
                                 <input type="checkbox" checked={deletedOnly} onChange={e => setDeletedOnly(e.target.checked)} className="w-3 h-3 accent-[color:var(--accent)]" /> {t("deletedOnly").replace(/\s+only$/i, "")}
                             </label>
                             <label className="flex items-center gap-1.5 flex-shrink-0 px-2 h-8 border border-[color:var(--border-hover)] rounded text-[11px] text-[color:var(--text-muted)] whitespace-nowrap cursor-pointer hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] transition-colors">
                                 <input type="checkbox" checked={nsfwOnly} onChange={e => setNsfwOnly(e.target.checked)} className="w-3 h-3 accent-[color:var(--accent)]" /> {t("nsfwOnly").replace(/\s+only$/i, "")}
+                            </label>
+                            <label className="flex items-center gap-1.5 flex-shrink-0 px-2 h-8 border border-[color:var(--border-hover)] rounded text-[11px] text-[color:var(--text-muted)] whitespace-nowrap cursor-pointer">
+                                <input type="checkbox" checked={showSpoilers} onChange={e => setShowSpoilers(e.target.checked)} className="w-3 h-3 accent-[color:var(--accent)]" /> {t("showSpoilers")}
                             </label>
                             {mode === "username" && <button onClick={() => setShowProfile(value => !value)} className={`flex items-center gap-1.5 flex-shrink-0 px-2.5 h-8 border rounded text-[11px] cursor-pointer transition-colors ${showProfile ? "bg-[color:var(--bg-elevated)] text-[color:var(--text)] border-[color:var(--text-muted)]" : "border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)]"}`}><IconActivity />{t("stats")}</button>}
                             <div className="relative flex flex-shrink-0 items-stretch rounded border border-[color:var(--border-hover)] bg-[color:var(--bg)] p-0.5 select-none" role="radiogroup" aria-label="Sort order">
@@ -1279,142 +1383,7 @@ export default function App() {
                                 <div className="skeleton h-8 w-[73px] rounded flex-shrink-0"></div>
                                 <div className="skeleton h-8 w-[118px] rounded flex-shrink-0"></div>
                                 <div className="skeleton h-8 w-[95px] rounded flex-shrink-0"></div>
-                            </div> : <>
-                                <div className="hidden grid-cols-3 gap-1 mb-1.5">
-                                    <HoverHint hint={t("searchOnRedditHint")}>
-                                        <a href={mode === "subreddit" ? `https://www.reddit.com/r/${encodeURIComponent(query)}` : `https://www.reddit.com/search/?q=author%3A%22${encodeURIComponent(query)}%22`} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-1 w-full min-w-0 text-[11px] text-[color:var(--text-muted)] hover:text-[color:var(--accent-text)] transition-colors h-8 border border-[color:var(--border-hover)] rounded">
-                                            <IconExternal /> {t("searchOnReddit")}
-                                        </a>
-                                    </HoverHint>
-                                    <label className="flex items-center justify-center gap-1.5 flex-1 min-w-0 cursor-pointer select-none border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] rounded h-8 bg-[color:var(--bg)] transition-colors">
-                                        <input type="checkbox" checked={deletedOnly} onChange={e => setDeletedOnly(e.target.checked)} className="w-3 h-3 accent-[color:var(--accent)] cursor-pointer" />
-                                        <span className="text-[11px] whitespace-nowrap">{t("deletedOnly")}</span>
-                                    </label>
-                                    <label className="flex items-center justify-center gap-1.5 flex-1 min-w-0 cursor-pointer select-none border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] rounded h-8 bg-[color:var(--bg)] transition-colors">
-                                        <input type="checkbox" checked={nsfwOnly} onChange={e => setNsfwOnly(e.target.checked)} className="w-3 h-3 accent-[color:var(--accent)] cursor-pointer" />
-                                        <span className="text-[11px] whitespace-nowrap">{t("nsfwOnly")}</span>
-                                    </label>
-                                </div>
-                                <div className="hidden gap-1 mb-3">
-                                    <details className="hidden relative group/sort flex-1" onKeyDown={closeOnEscape}>
-                                        <summary aria-label={t("newest")} className="flex items-center justify-center gap-1.5 bg-[color:var(--bg)] border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] rounded h-8 px-2 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)] cursor-pointer list-none [&::-webkit-details-marker]:hidden">
-                                            <span className="text-[11px] pointer-events-none">{sortOrder === "desc" ? t("newest") : t("oldest")}</span><svg className="w-3 h-3 text-[color:var(--text-muted)] pointer-events-none opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-                                        </summary>
-                                        <div className="fixed inset-0 z-40 hidden group-open/sort:block" onClick={e => e.currentTarget.closest('details').removeAttribute('open')} aria-hidden="true" />
-                                        <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 bg-[color:var(--bg-elevated)] border border-[color:var(--border-hover)] rounded-md shadow-xl overflow-hidden z-50 min-w-[90px] hidden group-open/sort:block">
-                                            <button onClick={e => { setSortOrder("desc"); e.currentTarget.closest('details').removeAttribute('open'); }} className="w-full text-left px-3 py-1.5 text-[11px] hover:bg-[color:var(--border)] transition-colors">
-                                                <span className={sortOrder === "desc" ? "text-[color:var(--text)] font-medium" : "text-[color:var(--text-muted)] hover:text-[color:var(--text)]"}>{t("newest")}</span>
-                                            </button>
-                                            <button onClick={e => { setSortOrder("asc"); e.currentTarget.closest('details').removeAttribute('open'); }} className="w-full text-left px-3 py-1.5 text-[11px] hover:bg-[color:var(--border)] transition-colors">
-                                                <span className={sortOrder === "asc" ? "text-[color:var(--text)] font-medium" : "text-[color:var(--text-muted)] hover:text-[color:var(--text)]"}>{t("oldest")}</span>
-                                            </button>
-                                        </div>
-                                    </details>
-                                    {mode === "username" && <button onClick={() => setShowProfile(p => !p)} className={`flex items-center justify-center gap-1.5 flex-1 px-2.5 h-8 transition-colors border rounded outline-none cursor-pointer select-none ${showProfile ? "bg-[color:var(--bg-elevated)] text-[color:var(--text)] border-[color:var(--text-muted)]" : "bg-[color:var(--bg)] text-[color:var(--text-muted)] border-[color:var(--border-hover)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] hover:border-[color:var(--text-muted)]"}`}>
-                                        <IconActivity />
-                                        <span className="text-[11px] whitespace-nowrap">{t("stats")}</span>
-                                    </button>}
-                                    <details className="hidden relative group/export flex-1" onKeyDown={closeOnEscape}>
-                                        <summary aria-label="Export" className="flex items-center justify-center gap-1.5 bg-[color:var(--bg)] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] hover:border-[color:var(--text-muted)] h-8 transition-colors border border-[color:var(--border-hover)] rounded text-[11px] whitespace-nowrap cursor-pointer list-none [&::-webkit-details-marker]:hidden outline-none">
-                                            <svg className="w-3 h-3 text-[color:var(--text-muted)] pointer-events-none opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-                                            Export
-                                        </summary>
-                                        <div className="fixed inset-0 z-40 hidden group-open/export:block" onClick={e => e.currentTarget.closest('details').removeAttribute('open')} aria-hidden="true" />
-                                        <div className="absolute right-0 top-full mt-1 bg-[color:var(--bg-elevated)] border border-[color:var(--border-hover)] rounded-md shadow-xl overflow-hidden z-50 min-w-[100px] hidden group-open/export:block">
-                                            <button onClick={e => {
-                                                const cols = ["id", "type", "created_utc", "subreddit", "author", "score", "permalink", "text", "removed", "deleted"];
-                                                const csv = [cols.join(",")].concat(filteredItems.map(item => {
-                                                    const type = activeTab === "all" ? itemType(item) : activeTab;
-                                                    const status = getStatus(item, type);
-                                                    const text = isPost(item) ? item.title : item.body;
-                                                    const vals = [item.id, isPost(item) ? "post" : "comment", item.created_utc, item.subreddit, item.author, item.score || 0, item.permalink, text ? `"${text.replace(/"/g, '""').replace(/\n/g, " ")}"` : "", status.removed, status.deleted];
-                                                    return vals.join(",");
-                                                })).join("\n");
-                                                downloadFile(`rosint_${query}_${activeTab}.csv`, csv, "text/csv");
-                                                e.currentTarget.closest('details').removeAttribute('open');
-                                            }} className="w-full text-left px-3 py-1.5 text-[11px] flex items-center gap-2 hover:bg-[color:var(--border)] transition-colors">
-                                                <IconDownload />
-                                                CSV
-                                            </button>
-                                            <button onClick={e => {
-                                                downloadFile(`rosint_${query}_${activeTab}.json`, JSON.stringify(filteredItems, null, 2), "application/json");
-                                                e.currentTarget.closest('details').removeAttribute('open');
-                                            }} className="w-full text-left px-3 py-1.5 text-[11px] flex items-center gap-2 hover:bg-[color:var(--border)] transition-colors">
-                                                <IconDownload />
-                                                JSON
-                                            </button>
-                                        </div>
-                                    </details>
-                                </div>
-                                <div className="hidden flex-wrap items-center gap-x-1 gap-y-1.5 mb-3 justify-between">
-                                    <div className="flex items-center gap-1.5">
-                                        <HoverHint hint={t("searchOnRedditHint")}>
-                                            <a href={mode === "subreddit" ? `https://www.reddit.com/r/${encodeURIComponent(query)}` : `https://www.reddit.com/search/?q=author%3A%22${encodeURIComponent(query)}%22`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-[11px] text-[color:var(--text-muted)] hover:text-[color:var(--accent-text)] transition-colors leading-relaxed">
-                                                <IconExternal /> {t("searchOnReddit")}
-                                            </a>
-                                        </HoverHint>
-                                        <label className="flex items-center gap-1.5 cursor-pointer select-none border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] rounded px-2 h-8 bg-[color:var(--bg)] transition-colors">
-                                            <input type="checkbox" checked={deletedOnly} onChange={e => setDeletedOnly(e.target.checked)} className="w-3 h-3 accent-[color:var(--accent)] cursor-pointer" />
-                                            <span className="text-[11px] whitespace-nowrap">{t("deletedOnly")}</span>
-                                        </label>
-                                        <label className="flex items-center gap-1.5 cursor-pointer select-none border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] rounded px-2 h-8 bg-[color:var(--bg)] transition-colors">
-                                            <input type="checkbox" checked={nsfwOnly} onChange={e => setNsfwOnly(e.target.checked)} className="w-3 h-3 accent-[color:var(--accent)] cursor-pointer" />
-                                            <span className="text-[11px] whitespace-nowrap">{t("nsfwOnly")}</span>
-                                        </label>
-                                    </div>
-                                    <div className="flex items-center gap-1.5">
-                                        <details className="hidden relative group/sort" onKeyDown={closeOnEscape}>
-                                            <summary aria-label={t("newest")} className="flex items-center gap-1.5 bg-[color:var(--bg)] border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] rounded h-8 px-2 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)] cursor-pointer list-none [&::-webkit-details-marker]:hidden">
-                                                <span className="text-[11px] pointer-events-none">{sortOrder === "desc" ? t("newest") : t("oldest")}</span><svg className="w-3 h-3 text-[color:var(--text-muted)] pointer-events-none opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-                                            </summary>
-                                            <div className="fixed inset-0 z-40 hidden group-open/sort:block" onClick={e => e.currentTarget.closest('details').removeAttribute('open')} aria-hidden="true" />
-                                            <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 bg-[color:var(--bg-elevated)] border border-[color:var(--border-hover)] rounded-md shadow-xl overflow-hidden z-50 min-w-[90px] hidden group-open/sort:block">
-                                                <button onClick={e => { setSortOrder("desc"); e.currentTarget.closest('details').removeAttribute('open'); }} className="w-full text-left px-3 py-1.5 text-[11px] hover:bg-[color:var(--border)] transition-colors">
-                                                    <span className={sortOrder === "desc" ? "text-[color:var(--text)] font-medium" : "text-[color:var(--text-muted)] hover:text-[color:var(--text)]"}>{t("newest")}</span>
-                                                </button>
-                                                <button onClick={e => { setSortOrder("asc"); e.currentTarget.closest('details').removeAttribute('open'); }} className="w-full text-left px-3 py-1.5 text-[11px] hover:bg-[color:var(--border)] transition-colors">
-                                                    <span className={sortOrder === "asc" ? "text-[color:var(--text)] font-medium" : "text-[color:var(--text-muted)] hover:text-[color:var(--text)]"}>{t("oldest")}</span>
-                                                </button>
-                                            </div>
-                                        </details>
-                                        {mode === "username" && <button onClick={() => setShowProfile(p => !p)} className={`flex items-center gap-1.5 px-2.5 h-8 transition-colors border rounded outline-none cursor-pointer select-none ${showProfile ? "bg-[color:var(--bg-elevated)] text-[color:var(--text)] border-[color:var(--text-muted)]" : "bg-[color:var(--bg)] text-[color:var(--text-muted)] border-[color:var(--border-hover)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] hover:border-[color:var(--text-muted)]"}`}>
-                                            <IconActivity />
-                                            <span className="text-[11px] whitespace-nowrap">{t("stats")}</span>
-                                        </button>}
-                                        <details className="hidden relative group/export" onKeyDown={closeOnEscape}>
-                                            <summary aria-label="Export" className="flex items-center gap-1.5 bg-[color:var(--bg)] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] hover:border-[color:var(--text-muted)] px-2.5 h-8 transition-colors border border-[color:var(--border-hover)] rounded text-[11px] whitespace-nowrap cursor-pointer list-none [&::-webkit-details-marker]:hidden outline-none">
-                                                <svg className="w-3 h-3 text-[color:var(--text-muted)] pointer-events-none opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-                                                Export
-                                            </summary>
-                                            <div className="fixed inset-0 z-40 hidden group-open/export:block" onClick={e => e.currentTarget.closest('details').removeAttribute('open')} aria-hidden="true" />
-                                            <div className="absolute right-0 top-full mt-1 bg-[color:var(--bg-elevated)] border border-[color:var(--border-hover)] rounded-md shadow-xl overflow-hidden z-50 min-w-[100px] hidden group-open/export:block">
-                                                <button onClick={e => {
-                                                    const cols = ["id", "type", "created_utc", "subreddit", "author", "score", "permalink", "text", "removed", "deleted"];
-                                                    const csv = [cols.join(",")].concat(filteredItems.map(item => {
-                                                        const type = activeTab === "all" ? itemType(item) : activeTab;
-                                                        const status = getStatus(item, type);
-                                                        const text = isPost(item) ? item.title : item.body;
-                                                        const vals = [item.id, isPost(item) ? "post" : "comment", item.created_utc, item.subreddit, item.author, item.score || 0, item.permalink, text ? `"${text.replace(/"/g, '""').replace(/\n/g, " ")}"` : "", status.removed, status.deleted];
-                                                        return vals.join(",");
-                                                    })).join("\n");
-                                                    downloadFile(`rosint_${query}_${activeTab}.csv`, csv, "text/csv");
-                                                    e.currentTarget.closest('details').removeAttribute('open');
-                                                }} className="w-full text-left px-3 py-1.5 text-[11px] flex items-center gap-2 hover:bg-[color:var(--border)] transition-colors">
-                                                    <IconDownload />
-                                                    CSV
-                                                </button>
-                                                <button onClick={e => {
-                                                    downloadFile(`rosint_${query}_${activeTab}.json`, JSON.stringify(filteredItems, null, 2), "application/json");
-                                                    e.currentTarget.closest('details').removeAttribute('open');
-                                                }} className="w-full text-left px-3 py-1.5 text-[11px] flex items-center gap-2 hover:bg-[color:var(--border)] transition-colors">
-                                                    <IconDownload />
-                                                    JSON
-                                                </button>
-                                            </div>
-                                        </details>
-                                    </div>
-                                </div>
-                            </>}
+                            </div> : null}
 
                         {initialLoading ? <div className="relative mb-3">
                                 <div className="w-full h-[42px] sm:h-[33px] rounded border border-[color:var(--border-hover)] bg-[color:var(--bg)] flex items-center gap-2 pl-3 pr-3">

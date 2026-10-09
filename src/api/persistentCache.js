@@ -129,6 +129,7 @@ export function writePersistentFirstPage(username, type, pagination = {}, dateFi
         sources: result.sources || [],
         arcticDown: !!result.arcticDown,
         pullpushDown: !!result.pullpushDown,
+        sourceErrors: result.sourceErrors || {},
         done: !!result.done,
       },
     });

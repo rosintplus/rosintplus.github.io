@@ -36,6 +36,7 @@ export {
   fetchBoth,
   FETCH_BOTH_INFLIGHT,
   fetchPostById,
+  fetchCommentById,
   fetchCommentsForPost,
   fetchUserInteractions,
   fetchSubredditInteractions,

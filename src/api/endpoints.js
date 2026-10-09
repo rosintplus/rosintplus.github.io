@@ -90,6 +90,14 @@ function timeoutMarker(ms, internalSignal) {
   return sleepAbortable(ms, internalSignal).then(() => ({ timeout: true, data: [], ok: false }));
 }
 
+export function sourceFailure(result) {
+  if (result.ok) return null;
+  if (result.status === 429 || result.blocked) return { reason: "rateLimited", status: 429 };
+  if (result.timeout) return { reason: "timeout" };
+  if (result.status) return { reason: "http", status: result.status };
+  return { reason: "connection" };
+}
+
 function raceFetchBoth(promise, callerSignal) {
   if (!callerSignal) return promise;
   if (callerSignal.aborted) return Promise.reject(new DOMException("Aborted", "AbortError"));
@@ -110,20 +118,27 @@ function raceFetchBoth(promise, callerSignal) {
   });
 }
 
+function scheduleFetchBothAbort(entry) {
+  if (entry.abortScheduled) return;
+  entry.abortScheduled = true;
+  // StrictMode cleanup and its replacement effect share this tick.
+  // Give the replacement a chance to register before cancelling the fan-out.
+  queueMicrotask(() => {
+    entry.abortScheduled = false;
+    if (entry.waiters <= 0 && !entry.settled) entry.controller.abort();
+  });
+}
+
 function linkFetchBothCaller(entry, callerSignal) {
   if (!callerSignal || entry.settled || !entry.controller) return;
   if (callerSignal.aborted) {
     entry.waiters -= 1;
-    if (entry.waiters <= 0 && !entry.settled) {
-      try { entry.controller.abort(); } catch { /* noop */ }
-    }
+    scheduleFetchBothAbort(entry);
     return;
   }
   const onAbort = () => {
     entry.waiters -= 1;
-    if (entry.waiters <= 0 && !entry.settled) {
-      try { entry.controller.abort(); } catch { /* noop */ }
-    }
+    scheduleFetchBothAbort(entry);
   };
   callerSignal.addEventListener("abort", onAbort, { once: true });
   entry.promise.then(
@@ -144,7 +159,7 @@ export function fetchBoth(username, type, pagination = {}, dateFilters = {}, {
   }
   const key = fetchBothKey(username, type, pagination, dateFilters, sort, mode);
   const existing = FETCH_BOTH_INFLIGHT.get(key);
-  if (existing && !existing.settled) {
+  if (existing && !existing.settled && !existing.controller.signal.aborted) {
     existing.waiters += 1;
     linkFetchBothCaller(existing, signal);
     return raceFetchBoth(existing.promise, signal);
@@ -195,7 +210,7 @@ async function runFetchBoth(username, type, pagination = {}, dateFilters = {}, {
   const pullpushBlocked = isPullPushBlocked();
   const arcticPromise = safeFetch(arctic, { bypassCache, signal });
   const pullpushPromise = pullpushBlocked
-    ? Promise.resolve({ data: [], ok: false, blocked: true })
+    ? Promise.resolve({ data: [], ok: false, blocked: true, status: 429 })
     : safeFetch(pullpush, { bypassCache, signal });
   const arcticRes = await arcticPromise;
   let pullpushRes;
@@ -211,7 +226,7 @@ async function runFetchBoth(username, type, pagination = {}, dateFilters = {}, {
       pullpushPromise.then(() => {
         // Warm cache already via safeFetch; nothing to do
       }).catch(() => {});
-      pullpushRes = { data: [], ok: false };
+      pullpushRes = { data: [], ok: false, timeout: true };
     }
   } else if (arcticRes.ok && arcticRes.data.length > 0) {
     // Arctic has some data — give PullPush a short window to contribute
@@ -221,7 +236,7 @@ async function runFetchBoth(username, type, pagination = {}, dateFilters = {}, {
     ]);
     if (pullpushRes.timeout) {
       pullpushPromise.then(() => {}).catch(() => {});
-      pullpushRes = { data: [], ok: false };
+      pullpushRes = { data: [], ok: false, timeout: true };
     }
   } else {
     // Arctic empty/failed — must wait for PullPush
@@ -258,6 +273,7 @@ async function runFetchBoth(username, type, pagination = {}, dateFilters = {}, {
     sources,
     arcticDown: !arcticRes.ok,
     pullpushDown: !pullpushRes.ok,
+    sourceErrors: { arctic: sourceFailure(arcticRes), pullpush: sourceFailure(pullpushRes) },
     done: bothOk && arcticRes.data.length < LIMIT && pullpushRes.data.length < LIMIT
   };
   // Persist first-page results (refresh paints instantly from localStorage;
@@ -269,6 +285,25 @@ async function runFetchBoth(username, type, pagination = {}, dateFilters = {}, {
     } catch { /* best-effort */ }
   }
   return out;
+}
+
+export async function fetchCommentById(commentId, { signal } = {}) {
+  const id = String(commentId || "").replace(/^t1_/i, "").trim().toLowerCase();
+  if (!/^[a-z0-9]{5,10}$/.test(id)) return { comment: null, sources: [] };
+  const [arctic, pullpush] = await Promise.all([
+    safeFetch(`${ARCTIC}/api/comments/ids?ids=${encodeURIComponent(id)}`, { signal }),
+    safeFetch(`${PULLPUSH}/reddit/search/comment/?test&ids=${encodeURIComponent(id)}&limit=5`, { signal }),
+  ]);
+  const sources = [];
+  let comment = null;
+  for (const [name, result] of [["Arctic Shift", arctic], ["PullPush", pullpush]]) {
+    const hit = result.ok && result.data.find(item => item.id === id || item.name === `t1_${id}`);
+    if (hit) {
+      comment ||= hit;
+      sources.push(name);
+    }
+  }
+  return { comment, sources, arcticDown: !arctic.ok, pullpushDown: !pullpush.ok };
 }
 
 export async function fetchPostById(postId, { signal } = {}) {

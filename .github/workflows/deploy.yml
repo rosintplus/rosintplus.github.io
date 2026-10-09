@@ -23,9 +23,14 @@ jobs:
         with:
           node-version: 20
       - run: npm ci
+      # No secret is injected here on purpose: this build has no API integration.
+      # The political compass is a deterministic statistical estimator that runs
+      # in the visitor's browser (src/compass/). If you add one, never use a
+      # VITE_* variable — Vite statically inlines those into the public bundle,
+      # so a build-time key would be readable by every visitor and its quota
+      # spendable by anyone.
       - run: npm run build
-        env:
-          VITE_OPENROUTER_KEY: ${{ secrets.VITE_OPENROUTER_KEY }}
+      - run: npm test
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

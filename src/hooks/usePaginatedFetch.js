@@ -37,6 +37,7 @@ export function usePaginatedFetch(type) {
   const [done, setDone] = useState(false);
   const [arcticDown, setArcticDown] = useState(false);
   const [pullpushDown, setPullpushDown] = useState(false);
+  const [sourceErrors, setSourceErrors] = useState({});
   const doneRef = useRef(false);
   const fetchIdRef = useRef(0);
   const abortRef = useRef(null);
@@ -60,7 +61,7 @@ export function usePaginatedFetch(type) {
   } = {}) => {
     const key = requestKey(username, type, pagination, filters, sort, mode, bypassCache);
     const inFlight = inFlightRef.current;
-    if (inFlight && inFlight.key === key && !bypassCache) {
+    if (inFlight && inFlight.key === key && !inFlight.controller.signal.aborted && !bypassCache) {
       // Identical request already in flight — share it instead of aborting
       // and restarting (saves a full Arctic+PullPush fan-out).
       return inFlight.promise;
@@ -78,7 +79,8 @@ export function usePaginatedFetch(type) {
           sources: srcs,
           arcticDown: down,
           pullpushDown: ppDown,
-          done: streamDone
+          done: streamDone,
+          sourceErrors: failures = {}
         } = await fetchBoth(username, type, pagination, filters, {
           bypassCache,
           signal: ctrl.signal,
@@ -91,6 +93,7 @@ export function usePaginatedFetch(type) {
         setSources(srcs);
         setArcticDown(down);
         setPullpushDown(ppDown);
+        setSourceErrors(failures);
         return { data, done: streamDone };
       } catch (err) {
         if (err?.name === "AbortError" || fetchId !== fetchIdRef.current) return null;
@@ -109,6 +112,15 @@ export function usePaginatedFetch(type) {
     sort = "desc",
     mode = "username"
   } = {}) => {
+    if (storedUserRef.current.toLowerCase() !== username.toLowerCase() || storedModeRef.current !== mode) {
+      setItems([]);
+      setSources([]);
+      setError(null);
+      setArcticDown(false);
+      setPullpushDown(false);
+      setSourceErrors({});
+      cursorRef.current = null;
+    }
     storedUserRef.current = username;
     storedFiltersRef.current = filters;
     storedSortRef.current = sort;
@@ -133,6 +145,7 @@ export function usePaginatedFetch(type) {
         setSources(Array.isArray(hit.sources) ? hit.sources : []);
         setArcticDown(!!hit.arcticDown);
         setPullpushDown(!!hit.pullpushDown);
+        setSourceErrors(hit.sourceErrors || {});
         setError(null);
         setLoading(false);
         cursorRef.current = cursorFromData(hit.items);
@@ -194,7 +207,8 @@ export function usePaginatedFetch(type) {
     done,
     arcticDown,
     pullpushDown,
+    sourceErrors,
     reset,
     loadMore
-  }), [items, sources, loading, error, done, arcticDown, pullpushDown, reset, loadMore]);
+  }), [items, sources, loading, error, done, arcticDown, pullpushDown, sourceErrors, reset, loadMore]);
 }

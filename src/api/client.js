@@ -208,7 +208,7 @@ export async function fetchWithRetry(url, {
           ok: true
         };
       } catch (err) {
-        if (err?.name === "AbortError") throw err;
+        if (err?.name === "AbortError" || err?.name === "TimeoutError") throw err;
         lastErr = err;
         if (attempt < cappedRetries) {
           await sleepAbortable(250 * (attempt + 1), combined);
@@ -249,13 +249,13 @@ export function safeFetch(url, {
   // Open breaker: skip PullPush network entirely (return cached/empty fast)
   // instead of retrying into the rate limit. Arctic is unaffected.
   if (isPullPushUrl(url) && isPullPushBlocked()) {
-    return Promise.resolve({ data: [], ok: false, blocked: true });
+    return Promise.resolve({ data: [], ok: false, blocked: true, status: 429 });
   }
   const cappedRetries = Math.max(0, Math.min(retries, MAX_RETRIES));
 
   if (!bypassCache) {
     const cached = FETCH_CACHE.get(url);
-    if (cached) {
+    if (cached && !cached.controller?.signal.aborted) {
       const isFresh = Date.now() - cached.ts < CACHE_TTL_MS;
       if (isFresh) {
         // Fresh hit — share in-flight or resolved value, no new network.
@@ -303,7 +303,10 @@ export function safeFetch(url, {
   // above and shares instead of starting duplicate network.
   const controller = new AbortController();
   const timeoutId = setTimeout(() => { try { controller.abort(); } catch { /* noop */ } }, FETCH_TIMEOUT_MS);
-  const entry = { ts: Date.now(), promise: null, controller, settled: false, waiters: 1 };
+  // `waiters` counts live sharers and is incremented by linkCallerToEntry.
+  // Starts at 0: a request created with no caller signal has nobody to abort
+  // it and runs to its bounded timeout.
+  const entry = { ts: Date.now(), promise: null, controller, settled: false, waiters: 0, abortScheduled: false };
   const underlying = fetchWithRetry(url, {
     signal: controller.signal,
     retries: cappedRetries,
@@ -313,6 +316,7 @@ export function safeFetch(url, {
       ok: !!res?.ok,
     };
     if (res?.err) out.err = res.err;
+    if (res?.status) out.status = res.status;
     entry.settled = true;
     clearTimeout(timeoutId);
     if (!out.ok || out.data.length === 0) {
@@ -323,10 +327,11 @@ export function safeFetch(url, {
     entry.settled = true;
     clearTimeout(timeoutId);
     evictIfOurs(url, underlying);
-    if (err?.name === "AbortError") return {
+    if (err?.name === "AbortError" || err?.name === "TimeoutError") return {
       data: [],
       ok: false,
-      aborted: true
+      aborted: true,
+      timeout: !signal?.aborted,
     };
     return {
       data: [],
@@ -345,22 +350,40 @@ export function safeFetch(url, {
 
 function linkCallerToEntry(entry, signal) {
   if (!signal || !entry || entry.settled || !entry.controller) return;
-  if (signal.aborted) {
+  // This caller is now a sharer of the underlying request. `waiters` counts
+  // live sharers and is incremented on every link — previously it was only
+  // ever decremented, so the first caller's abort killed the shared request
+  // while other callers were still waiting on it (which is how parent posts
+  // and archive totals silently came back empty).
+  entry.waiters += 1;
+  const release = () => {
     entry.waiters -= 1;
-    if (entry.waiters <= 0 && !entry.settled) {
-      try { entry.controller.abort(); } catch { /* noop */ }
-    }
+    // Deferred, not synchronous: React StrictMode aborts the first effect's
+    // signal in cleanup and re-registers a replacement in the same tick.
+    // Deciding immediately would abort the shared fetch before the new caller
+    // links, leaving it an aborted (empty) result. A microtask lets the
+    // replacement register first; we re-check then.
+    scheduleAbortIfUnshared(entry);
+  };
+  if (signal.aborted) {
+    release();
     return;
   }
-  const onAbort = () => {
-    entry.waiters -= 1;
-    if (entry.waiters <= 0 && !entry.settled) {
-      try { entry.controller.abort(); } catch { /* noop */ }
-    }
-  };
+  const onAbort = () => release();
   signal.addEventListener("abort", onAbort, { once: true });
   entry.promise?.then(
     () => { try { signal.removeEventListener("abort", onAbort); } catch { /* noop */ } },
     () => { try { signal.removeEventListener("abort", onAbort); } catch { /* noop */ } },
   );
+}
+
+function scheduleAbortIfUnshared(entry) {
+  if (!entry || entry.abortScheduled) return;
+  entry.abortScheduled = true;
+  queueMicrotask(() => {
+    entry.abortScheduled = false;
+    if (entry.waiters <= 0 && !entry.settled) {
+      try { entry.controller.abort(); } catch { /* noop */ }
+    }
+  });
 }

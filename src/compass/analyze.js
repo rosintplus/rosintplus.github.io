@@ -1,98 +1,201 @@
-/** Context & stance-aware political position evaluation. */
-import { SUBREDDIT_POLITICAL_MAP } from "./map.js";
-import { PROPOSITION_PATTERNS, DISAGREEMENT_WORDS } from "./patterns.js";
+/**
+ * Political position evaluation.
+ *
+ * Two *independent* estimators run over the same account and are combined
+ * meta-analytically:
+ *
+ *   1. Text side — Laver & Garry (2000) pro/con balance over a dictionary of
+ *      political categories (see dictionary.js / textscore.js). Positions are
+ *      the relative balance of text units coding each pole of a dimension,
+ *      bounded in ±10 by construction, with a binomial standard error.
+ *
+ *   2. Community side — ideal-point estimation (Poole & Rosenthal 1985;
+ *      Barberá 2015) over the participation distribution across subreddits of
+ *      known position (see community.js). Also yields a standard error.
+ *
+ * The two are combined by inverse-variance weighting (Cochran; Hedges &
+ * Olkin), the standard way to pool independent estimates of one quantity.
+ * Every reported score therefore travels with an uncertainty, and the
+ * *label* for a dimension is withheld whenever the 95% confidence interval
+ * includes zero. A thin or contradictory history reads as "centre /
+ * uncertain" instead of landing on an extreme — you cannot be extreme and
+ * uncertain at the same time.
+ *
+ * Heuristics (negation scope, arguing-against-a-community, sarcasm markers)
+ * only ever damp or discount evidence. They never flip a sign. A heuristic
+ * able to invert an answer is a heuristic that produces nonsense answers.
+ */
 
-export function sanitizeTextForPoliticalAnalysis(rawText) {
-  if (!rawText || typeof rawText !== 'string') return '';
-  let text = rawText;
-  text = text.replace(/^[ \t]*>.*$/gm, ' ');
-  text = text.replace(/\[([^\]]+)\]\([^)]+\)/g, ' $1 ');
-  text = text.replace(/https?:\/\/\S+/gi, ' ');
-  text = text.replace(/(?:\/?r\/|\/?u\/)[A-Za-z0-9_]+/gi, ' ');
-  text = text.replace(/\btraditional\s+(?:chinese|japanese|korean|art|drawing|painting|animation|media|food|recipe|dress|garb|instrument|music|dance|craft|tattoo|medicine)\b/gi, ' ');
-  return text;
+import { scoreText, politicalText } from "./textscore.js";
+import { estimateFromCommunities } from "./community.js";
+import { CATEGORIES } from "./dictionary.js";
+
+// ─── Tunables ────────────────────────────────────────────────────────────────
+
+// A reading requires at least this much pooled evidence mass before any
+// position is reported at all.
+const MIN_TOTAL_EVIDENCE = 6;
+
+// The 95% confidence interval is estimate ± 1.96 SE. If it contains zero,
+// the dimension is reported as centre / uncertain.
+const Z95 = 1.96;
+
+// Quadrant hysteresis. A label must be this far from the centre to *enter* a
+// quadrant, and stays put until the reading falls back inside EXIT. Without
+// this a borderline account flip-flops between labels as items trickle in.
+const ENTER = 2.8;
+const EXIT = 1.6;
+
+// ─── Quadrants ──────────────────────────────────────────────────────────────
+
+const QUADRANT_LABELS = {
+  "auth-left": "Authoritarian Left (Auth-Left)",
+  "auth-right": "Authoritarian Right (Auth-Right)",
+  "auth-center": "Authoritarian Center (Auth-Center)",
+  "lib-left": "Libertarian Left (Lib-Left)",
+  "lib-right": "Libertarian Right (Lib-Right)",
+  "lib-center": "Libertarian Center (Lib-Center)",
+  "left-center": "Left-Center (Social Democrat / Left)",
+  "right-center": "Right-Center (Fiscal Conservative / Center-Right)",
+  center: "Centrist / Moderate",
+};
+
+/**
+ * Classify a (econ, gov) reading into one of nine quadrants.
+ *
+ * When `prevQuadrant` is supplied the result is hysteretic: the previous
+ * quadrant is retained until the reading clearly leaves it, so a borderline
+ * account keeps a stable label instead of oscillating.
+ *
+ * @returns {{quadrant: string, label: string, held: boolean}}
+ */
+export function classifyQuadrant(econ, gov, { prevQuadrant = null, hasLeftSignals = false, hasRightSignals = false } = {}) {
+  const inQuadrant = (q) => {
+    switch (q) {
+      case "auth-left": return econ < -EXIT && gov > EXIT;
+      case "auth-right": return econ > EXIT && gov > EXIT;
+      case "lib-left": return econ < -EXIT && gov < -EXIT;
+      case "lib-right": return econ > EXIT && gov < -EXIT;
+      case "auth-center": return Math.abs(econ) <= EXIT && gov > EXIT;
+      case "lib-center": return Math.abs(econ) <= EXIT && gov < -EXIT;
+      case "left-center": return econ < -EXIT && Math.abs(gov) <= EXIT;
+      case "right-center": return econ > EXIT && Math.abs(gov) <= EXIT;
+      case "center": return Math.abs(econ) <= EXIT && Math.abs(gov) <= EXIT;
+      default: return false;
+    }
+  };
+
+  const fresh = () => {
+    const eOut = Math.abs(econ) > ENTER;
+    const gOut = Math.abs(gov) > ENTER;
+    if (eOut && gOut) {
+      if (econ < 0) return gov > 0 ? "auth-left" : "lib-left";
+      return gov > 0 ? "auth-right" : "lib-right";
+    }
+    if (gOut) return gov > 0 ? "auth-center" : "lib-center";
+    if (eOut) return econ < 0 ? "left-center" : "right-center";
+    if (hasLeftSignals && hasRightSignals) return "cross";
+    return "center";
+  };
+
+  if (prevQuadrant && prevQuadrant !== "cross" && inQuadrant(prevQuadrant)) {
+    return { quadrant: prevQuadrant, label: QUADRANT_LABELS[prevQuadrant] || QUADRANT_LABELS.center, held: true };
+  }
+  const quadrant = fresh();
+  if (quadrant === "cross") {
+    return { quadrant, label: "Cross-Ideological / Mixed Discussion", held: false };
+  }
+  return { quadrant, label: QUADRANT_LABELS[quadrant] || QUADRANT_LABELS.center, held: false };
 }
 
-export function getIdeologicalArchetype(econ, gov, { hasLeftSignals = false, hasRightSignals = false } = {}) {
-  // Quadrant is econ × gov to match the plotted grid (x=econ, y=gov) and the
-  // AI prompt contract. Thresholds ±2.2 shared with getQuadrantArchetype.
-  const isEconCenter = Math.abs(econ) <= 2.2;
-  const isGovCenter = Math.abs(gov) <= 2.2;
-
-  if (isEconCenter && isGovCenter) {
-    if (hasLeftSignals && hasRightSignals) return 'Cross-Ideological / Mixed Discussion';
-    return 'Centrist / Moderate';
-  }
-  if (isEconCenter && gov > 2.2) return 'Authoritarian Center (Auth-Center)';
-  if (isEconCenter && gov < -2.2) return 'Libertarian Center (Lib-Center)';
-
-  if (econ < -2.2 && isGovCenter) return 'Left-Center (Social Democrat / Left)';
-  if (econ > 2.2 && isGovCenter) return 'Right-Center (Fiscal Conservative / Center-Right)';
-
-  if (econ < -2.2 && gov > 2.2) return 'Authoritarian Left (Auth-Left)';
-  if (econ > 2.2 && gov > 2.2) return 'Authoritarian Right (Auth-Right)';
-  if (econ < -2.2 && gov < -2.2) return 'Libertarian Left (Lib-Left)';
-  if (econ > 2.2 && gov < -2.2) return 'Libertarian Right (Lib-Right)';
-
-  return 'Centrist / Moderate';
+/** Legacy string-only entry point (no hysteresis). */
+export function getIdeologicalArchetype(econ, gov, opts = {}) {
+  return classifyQuadrant(econ, gov, opts).label;
 }
 
 export function getDimensionLabels(econ, soc, gov) {
   const econLabel = econ <= -6.0 ? "Socialist / Democratic Left" : econ <= -2.0 ? "Social Market / Mixed Left" : econ <= 2.0 ? "Centrist / Mixed Economy" : econ <= 6.0 ? "Fiscal Conservative / Pro-Market" : "Laissez-Faire Free Market";
   const socLabel = soc <= -4.0 ? "Progressive / Secular" : soc <= 2.0 ? "Pluralist / Moderate" : "Traditional / Social Conservative";
   const govLabel = gov <= -4.0 ? "Civil Libertarian / Anti-Authoritarian" : gov <= 2.0 ? "Balanced Governance" : "Statist / Law & Order";
-
   return { econLabel, socLabel, govLabel };
 }
 
-export function isSarcastic(rawText, snippet) {
-  if (!rawText && !snippet) return false;
-  const combined = `${rawText} ${snippet}`;
-
-  // Explicit /s or /Sarcasm or (sarcasm)
-  if (/(?:^|\s)\/s(?:arcasm)?(?:\s|$|[.!?,;])/i.test(combined)) return true;
-  if (/\((?:sarcasm|\?!)\)/i.test(combined) || /\?!\?/i.test(combined)) return true;
-
-  // Mocking alternating caps (e.g. "tOtAlLy gEnIuS")
-  if (/(?:[a-z][A-Z][a-z][A-Z]|[A-Z][a-z][A-Z][a-z]){2,}/.test(combined)) return true;
-
-  // Sarcastic rhetorical phrases with quotes/exclamation
-  if (/\b(?:yeah right|oh sure|surely|totally|obviously|what could possibly go wrong|because that always works)\b/i.test(combined) && (/[!"]/.test(combined) || combined.toLowerCase().includes("genius"))) return true;
-
-  return false;
-}
-
+// ─── Item pooling (dedupe) ──────────────────────────────────────────────────
+//
 /**
- * Main Political Compass & Propositional Stance Evaluation
+ * Pool items from the three sources without double-counting.
+ *
+ * Items reach the engine from the active search results and the background
+ * crawl (both carry an id) and from `stats.sampleItems` (built by
+ * processItem(), which retains both the id and kind). Samples with IDs are
+ * pooled by identity; legacy samples without IDs are pooled by full content.
+ * Distinct items stay distinct even when they happen to share text.
+ *
+ * The correct rule: the id-bearing streams are the authority and are pooled
+ * by kind and id. A sample is admitted only if its identity (or, for a legacy
+ * sample, its content) is not already represented.
  */
-export function evaluatePoliticalCompass({ stats = {}, posts = [], comments = [] } = {}) {
-  const cacheKey = buildCompassCacheKey(stats, posts, comments);
-  const hit = compassCache.get(cacheKey);
-  if (hit) return hit;
-  const result = evaluatePoliticalCompassUncached({ stats, posts, comments });
-  compassCache.set(cacheKey, result);
-  if (compassCache.size > 30) {
-    const oldest = compassCache.keys().next().value;
-    compassCache.delete(oldest);
-  }
-  return result;
+function contentKey(item) {
+  const raw = politicalText(item);
+  const sub = (item?.subreddit || "").toLowerCase();
+  return JSON.stringify([sub, raw]);
 }
 
-// Per-dataset cache keyed by item identity + subreddit counts. The local
-// compass engine scans every body against dozens of proposition patterns
-// (O(items × patterns)), so re-running it on every parent render (crawl
-// ticks, keyword typing) is wasted work when the underlying ids are unchanged.
-const compassCache = new Map();
+function identityKey(item, kind) {
+  return item?.id ? `${kind || item.kind || (item.body ? "t1" : "t3")}:${item.id}` : null;
+}
 
-function hashCompassIds(items) {
-  let h = 0;
-  const n = items?.length || 0;
-  h = (Math.imul(h, 31) + n) | 0;
-  for (let i = 0; i < n; i++) {
-    const s = items[i]?.id || "";
-    for (let j = 0; j < s.length; j++) {
-      h = (Math.imul(h, 31) + s.charCodeAt(j)) | 0;
+function poolItems(stats, posts, comments) {
+  const out = [];
+  const seenIds = new Set();
+  const seenContent = new Set();
+
+  const push = (item, kind) => {
+    out.push(item);
+    const id = identityKey(item, kind);
+    if (id) seenIds.add(id);
+    seenContent.add(contentKey(item));
+  };
+
+  for (const [kind, list] of [["t1", comments || []], ["t3", posts || []]]) {
+    for (const item of list) {
+      if (!item) continue;
+      if (item.id) {
+        const id = identityKey(item, kind);
+        if (seenIds.has(id)) continue;
+      } else if (seenContent.has(contentKey(item))) {
+        continue;
+      }
+      push(item, kind);
     }
+  }
+
+  for (const item of stats?.sampleItems || []) {
+    if (!item) continue;
+    const id = identityKey(item);
+    if (id ? seenIds.has(id) : seenContent.has(contentKey(item))) continue;
+    push(item);
+  }
+
+  return out;
+}
+
+// ─── Cache ──────────────────────────────────────────────────────────────────
+//
+// The engine runs on every crawl flush and on every parent re-render, so
+// results are memoised. The key must cover *everything the engine reads*:
+// item identity AND item content, plus the subreddit counts and the
+// sampleItems the crawl feeds in. A key that omits sampleItems returns a
+// stale reading when only those change.
+
+const compassCache = new Map();
+const COMPASS_CACHE_MAX = 30;
+
+function hashStrings(parts) {
+  let h = 0;
+  h = (Math.imul(h, 31) + parts.length) | 0;
+  for (const s of parts) {
+    for (let j = 0; j < s.length; j++) h = (Math.imul(h, 31) + s.charCodeAt(j)) | 0;
     h = (Math.imul(h, 31) + 0x9e3779b9) | 0;
   }
   return (h >>> 0).toString(36);
@@ -107,233 +210,261 @@ function buildCompassCacheKey(stats, posts, comments) {
     for (let j = 0; j < k.length; j++) h = (Math.imul(h, 31) + k.charCodeAt(j)) | 0;
     h = (Math.imul(h, 31) + c) | 0;
   }
-  return `subs${subKeys.length}:${(h >>> 0).toString(36)}|p${posts?.length || 0}:${hashCompassIds(posts)}|c${comments?.length || 0}:${hashCompassIds(comments)}`;
+  // Include sampleItems identity in the key: they are engine input and are
+  // NOT derivable from the subreddit counts or the id lists.
+  const sampleIds = (stats?.sampleItems || []).map((s) => `${identityKey(s) || ""}|${contentKey(s)}`);
+  return [
+    `subs${subKeys.length}:${(h >>> 0).toString(36)}`,
+    `p${(posts || []).length}:${hashStrings((posts || []).map((i) => `${i?.id || ""}|${contentKey(i)}`))}`,
+    `c${(comments || []).length}:${hashStrings((comments || []).map((i) => `${i?.id || ""}|${contentKey(i)}`))}`,
+    `s${sampleIds.length}:${hashStrings(sampleIds)}`,
+  ].join("|");
+}
+
+// Sarcasm / quotation markers live in ./tone.js and are re-exported here for
+// compatibility. They are uncertainty signals: they widen a standard error,
+// never flip a direction.
+export { detectSarcasm, isSarcastic } from "./tone.js";
+import { detectSarcasm } from "./tone.js";
+/** Legacy escape hatch used by older callers. */
+export function sanitizeTextForPoliticalAnalysis(rawText) {
+  if (!rawText || typeof rawText !== "string") return "";
+  let text = rawText;
+  text = text.replace(/^[ \t]*>.*$/gm, " ");
+  text = text.replace(/\[([^\]]+)\]\([^)]+\)/g, " $1 ");
+  text = text.replace(/https?:\/\/\S+/gi, " ");
+  text = text.replace(/(?:\/?r\/|\/?u\/)[A-Za-z0-9_]+/gi, " ");
+  return text;
+}
+
+// ─── Pooling the two estimators ─────────────────────────────────────────────
+
+/**
+ * Inverse-variance (Cochran) combination of two independent estimates.
+ * An estimate with infinite standard error contributes zero weight.
+ */
+function combine(textEst, commEst) {
+  const wText = Number.isFinite(textEst.se) && textEst.se > 0 ? 1 / (textEst.se ** 2) : 0;
+  const wComm = Number.isFinite(commEst.se) && commEst.se > 0 ? 1 / (commEst.se ** 2) : 0;
+  const wSum = wText + wComm;
+  if (wSum <= 0) {
+    return { score: 0, se: Number.POSITIVE_INFINITY, weight: 0, textWeight: 0, commWeight: 0 };
+  }
+  const score = (wText * textEst.score + wComm * commEst.score) / wSum;
+  return {
+    score,
+    se: 1 / Math.sqrt(wSum),
+    weight: wSum,
+    textWeight: wText,
+    commWeight: wComm,
+  };
+}
+
+// Prior standard deviation of a position on the ±10 scale. Used for
+// empirical-Bayes shrinkage: score_shrunk = score * tau^2 / (tau^2 + se^2).
+// This is what makes "extreme and uncertain" impossible — as the standard
+// error grows the estimate is pulled to the centre, so a thin history cannot
+// look confident.
+const PRIOR_SD = 5;
+const PRIOR_VAR = PRIOR_SD * PRIOR_SD;
+
+function shrink(score, se) {
+  if (!Number.isFinite(se)) return 0;
+  return score * (PRIOR_VAR / (PRIOR_VAR + se * se));
+}
+
+function clampScore(v) {
+  return Math.max(-10, Math.min(10, Math.round(v * 10) / 10));
+}
+
+// ─── Public API ─────────────────────────────────────────────────────────────
+
+export function evaluatePoliticalCompass({ stats = {}, posts = [], comments = [] } = {}) {
+  const cacheKey = buildCompassCacheKey(stats, posts, comments);
+  const hit = compassCache.get(cacheKey);
+  if (hit) return hit;
+  const result = evaluatePoliticalCompassUncached({ stats, posts, comments });
+  compassCache.set(cacheKey, result);
+  if (compassCache.size > COMPASS_CACHE_MAX) {
+    const oldest = compassCache.keys().next().value;
+    if (oldest) compassCache.delete(oldest);
+  }
+  return result;
 }
 
 function evaluatePoliticalCompassUncached({ stats = {}, posts = [], comments = [] } = {}) {
-  let totalWeight = 0;
-  let weightedEcon = 0;
-  let weightedSoc = 0;
-  let weightedGov = 0;
+  const items = poolItems(stats, posts, comments);
 
-  const topSubSignals = [];
-  const detectedPositions = [];
-  const matchedTopicSet = new Set();
+  // Group the author's own text per subreddit. Used only to detect whether
+  // they are arguing against a community — never to score content.
+  const textBySub = new Map();
+  const liveItems = [];
+  for (const item of items) {
+    const raw = politicalText(item);
+    if (!raw || raw === "[deleted]" || raw === "[removed]") continue;
+    liveItems.push(item);
+    const sub = (item.subreddit || "").toLowerCase();
+    if (!textBySub.has(sub)) textBySub.set(sub, []);
+    textBySub.get(sub).push(raw);
+  }
 
-  const subCounts = stats?.subredditCounts || {};
+  // 1. Text estimator — Laver & Garry (2000) pro/con balance.
+  const text = scoreText(liveItems);
 
-  // 1. Stance-Aware Subreddit Context & Interaction Tone
-  // Group user comments by subreddit to check if they were in agreement or debating
-  const subCommentMap = new Map();
-  const seenBodies = new Set();
-  const pushUnique = (sub, body) => {
-    const key = `${sub}::${(body || '').slice(0, 200)}`;
-    if (seenBodies.has(key)) return;
-    seenBodies.add(key);
-    if (!subCommentMap.has(sub)) subCommentMap.set(sub, []);
-    subCommentMap.get(sub).push(body || '');
+  // Sarcasm markers are evidence the surface wording may not be the author's
+  // position. They widen uncertainty; they never reverse a direction.
+  let sarcasmHits = 0;
+  for (const item of liveItems) {
+    const raw = politicalText(item);
+    if (raw && detectSarcasm(raw, "").sarcastic) sarcasmHits++;
+  }
+  const sarcasmRate = liveItems.length > 0 ? Math.min(1, sarcasmHits / liveItems.length) : 0;
+  const sarcasmInflation = 1 + sarcasmRate;
+
+  // 2. Community estimator — Poole-Rosenthal / Barberá-style ideal point.
+  const community = estimateFromCommunities(stats?.subredditCounts || {}, textBySub);
+
+  // 3. Pool by inverse variance, per dimension, then shrink toward zero by
+  //    the estimate's own uncertainty.
+  const combined = {};
+  for (const dim of ["econ", "soc", "gov"]) {
+    const t = text.dimensions[dim] || { score: 0, se: PRIOR_SD, n: 0 };
+    const c = community.dimensions[dim] || { score: 0, se: Number.POSITIVE_INFINITY, n: 0 };
+    const tAdj = { score: t.score, se: Number.isFinite(t.se) ? t.se * sarcasmInflation : t.se };
+    const pooled = combine(tAdj, c);
+    combined[dim] = {
+      ...pooled,
+      display: clampScore(shrink(pooled.score, pooled.se)),
+    };
+  }
+
+  const textUnits = text.units;
+  const communityMass = Number.isFinite(community.units) ? community.units : 0;
+  const totalEvidence = textUnits + communityMass;
+
+  const anyFinite =
+    Number.isFinite(combined.econ.se) ||
+    Number.isFinite(combined.soc.se) ||
+    Number.isFinite(combined.gov.se);
+  const hasSignal = totalEvidence >= MIN_TOTAL_EVIDENCE && anyFinite;
+
+  // Label a dimension only when its 95% CI excludes zero. This, together
+  // with shrinkage above, is what keeps an uncertain reading from looking
+  // extreme: uncertainty suppresses both the number and its label.
+  const labelFor = (est, neg, pos) => {
+    if (!Number.isFinite(est.se)) return "Insufficient evidence";
+    const ciLow = est.score - Z95 * est.se;
+    const ciHigh = est.score + Z95 * est.se;
+    if (ciLow <= 0 && ciHigh >= 0) return "Centre / uncertain";
+    const s = est.display;
+    if (s <= -6) return `${neg} (strong)`;
+    if (s <= -2) return neg;
+    if (s < 2) return "Mixed / Moderate";
+    if (s < 6) return pos;
+    return `${pos} (strong)`;
   };
-  for (const c of (comments || [])) {
-    const sub = (c.subreddit || '').toLowerCase();
-    pushUnique(sub, c.body || '');
-  }
-  for (const p of (posts || [])) {
-    const sub = (p.subreddit || '').toLowerCase();
-    pushUnique(sub, p.selftext || p.title || '');
-  }
-  for (const item of (stats?.sampleItems || [])) {
-    const sub = (item.subreddit || '').toLowerCase();
-    pushUnique(sub, item.body || '');
-  }
 
-  let leftSignalWeight = 0;
-  let rightSignalWeight = 0;
+  const econ = hasSignal ? combined.econ.display : 0;
+  const soc = hasSignal ? combined.soc.display : 0;
+  const gov = hasSignal ? combined.gov.display : 0;
 
-  for (const [subName, count] of Object.entries(subCounts)) {
-    const lower = subName.toLowerCase();
-    let entry = SUBREDDIT_POLITICAL_MAP[lower];
+  // Directional corroboration, used only to disambiguate a genuine cross-
+  // ideological history from a blank one.
+  const leftHits = text.topCategories.reduce((s, r) => s + ((r.dims.econ || 0) < 0 ? 1 : 0), 0);
+  const rightHits = text.topCategories.reduce((s, r) => s + ((r.dims.econ || 0) > 0 ? 1 : 0), 0);
 
-    if (!entry) {
-      const isAntiSub = /(?:anti|fuck|against|virus|666|gret|watch|impeach|exposed|critic|cult|hate)/i.test(lower);
-      if (lower.includes('conserv') && !isAntiSub) entry = { econ: 6.5, soc: 5.5, gov: 5.0, weight: 0.8, side: 'right' };
-      else if ((lower.includes('republican') || lower.includes('trump') || lower.includes('maga')) && !isAntiSub) entry = { econ: 7.0, soc: 6.5, gov: 6.0, weight: 0.85, side: 'right' };
-      else if (isAntiSub && (lower.includes('trump') || lower.includes('maga') || lower.includes('altright') || lower.includes('nazi') || lower.includes('conserv'))) entry = { econ: -5.0, soc: -6.0, gov: -5.0, weight: 0.8, side: 'left' };
-      else if (lower.includes('socialis') || lower.includes('communis') || lower.includes('marx')) entry = { econ: -8.0, soc: 2.0, gov: 4.0, weight: 0.85, side: 'left' };
-      else if (lower.includes('anarch')) entry = { econ: -7.5, soc: -8.5, gov: -9.0, weight: 0.85, side: 'left' };
-      else if (lower.includes('libertarian')) entry = { econ: 7.0, soc: -3.5, gov: -8.0, weight: 0.85, side: 'right' };
-      else if (lower.includes('democrat') || lower.includes('liberal') || lower.includes('progressive')) entry = { econ: -5.0, soc: -5.5, gov: -4.5, weight: 0.8, side: 'left' };
-      else if (lower.includes('atheis')) entry = { econ: -3.5, soc: -7.5, gov: -6.0, weight: 0.8, side: 'left' };
-    }
+  const classified = classifyQuadrant(econ, gov, {
+    hasLeftSignals: leftHits > 0 && rightHits === 0,
+    hasRightSignals: rightHits > 0 && leftHits === 0,
+  });
 
-    if (entry) {
-      // Analyze user's tone inside this specific subreddit
-      const userSubTexts = (subCommentMap.get(lower) || []).join(' ').toLowerCase();
-      const wordsInSub = userSubTexts.split(/[^a-z0-9_-]+/);
-      let disagreeCount = 0;
-      for (const w of wordsInSub) {
-        if (DISAGREEMENT_WORDS.has(w)) disagreeCount++;
-      }
+  // Reliability: 1 at zero standard error, falling as uncertainty grows. The
+  // UI shows this next to the reading so the evidence basis is never hidden.
+  const pooledSE = [combined.econ.se, combined.soc.se, combined.gov.se].filter(Number.isFinite);
+  const meanSE = pooledSE.length ? pooledSE.reduce((a, b) => a + b, 0) / pooledSE.length : Number.POSITIVE_INFINITY;
+  const reliability = Number.isFinite(meanSE) ? Math.round((1 / (1 + meanSE / 3)) * 100) / 100 : 0;
 
-      // Only tag if user was engaged in oppositional debate / argument
-      let effectiveEcon = entry.econ;
-      let effectiveSoc = entry.soc;
-      let effectiveGov = entry.gov ?? entry.soc;
-      let interactionTag = null;
+  const distinctCategories = text.topCategories.length;
+  const communityCount = community.communities.length;
 
-      if (disagreeCount >= 2 && userSubTexts.length > 40) {
-        // Invert polarity: user is debating against the subreddit's ideology
-        if (entry.side === 'right') {
-          effectiveEcon = -5.0;
-          effectiveSoc = -5.0;
-          effectiveGov = -4.0;
-          interactionTag = "Debating";
-        } else if (entry.side === 'left') {
-          effectiveEcon = 5.0;
-          effectiveSoc = 4.0;
-          effectiveGov = 3.0;
-          interactionTag = "Debating";
-        }
-      }
-
-      // Pre-existing standard: Log-frequency community weighting (Waller & Anderson, ACM WWW '24)
-      const effectiveWeight = Math.log1p(count) * entry.weight;
-      weightedEcon += effectiveEcon * effectiveWeight;
-      weightedSoc += effectiveSoc * effectiveWeight;
-      weightedGov += effectiveGov * effectiveWeight;
-      totalWeight += effectiveWeight;
-
-      if (effectiveEcon <= -2.0 || effectiveSoc <= -2.0) leftSignalWeight += effectiveWeight;
-      if (effectiveEcon >= 2.0 || effectiveSoc >= 2.0) rightSignalWeight += effectiveWeight;
-
-      topSubSignals.push({
-        sub: subName,
-        count,
-        econ: effectiveEcon,
-        soc: effectiveSoc,
-        interactionTag,
-        weight: effectiveWeight,
-      });
-    }
-  }
-
-  // 2. Propositional Stance & Viewpoint Extraction from Comments & Posts
-  // Pool active items + all background crawled sample items, deduped by id/body
-  // (sampleItems already contains these bodies — naive concat double-counts).
-  const seenStanceKeys = new Set();
-  const sampleItems = [];
-  for (const item of [...(comments || []), ...(posts || []), ...(stats?.sampleItems || [])]) {
-    const raw = item.body || item.title || item.selftext || '';
-    const key = item.id ? `id:${item.id}` : `b:${(item.subreddit || '')}::${raw.slice(0, 200)}`;
-    if (seenStanceKeys.has(key)) continue;
-    seenStanceKeys.add(key);
-    sampleItems.push(item);
-  }
-
-  for (const item of sampleItems) {
-    const rawText = item.body || item.title || item.selftext || '';
-    if (!rawText || rawText === '[deleted]' || rawText === '[removed]') continue;
-    const text = sanitizeTextForPoliticalAnalysis(rawText);
-
-    // Test each Propositional Stance Pattern
-    for (const prop of PROPOSITION_PATTERNS) {
-      const match = text.match(prop.pattern);
-      if (match && match.index != null) {
-        const start = Math.max(0, match.index - 70);
-        const end = Math.min(text.length, match.index + match[0].length + 70);
-        const snippet = text.slice(start, end).trim();
-
-        // Check Sarcasm
-        const sarcastic = isSarcastic(rawText, snippet);
-
-        let effectiveEcon = prop.econ ?? 0;
-        let effectiveSoc = prop.soc ?? 0;
-        let effectiveGov = prop.gov ?? prop.soc ?? 0;
-        let effectiveStance = prop.stance;
-        let effectivePolarity = prop.polarity;
-
-        if (sarcastic) {
-          // Invert coords AND label: "Opposes X (Sarcastic)" with flipped
-          // coords would otherwise read as far-right while saying Opposes.
-          effectiveEcon = -(prop.econ ?? 0);
-          effectiveSoc = -(prop.soc ?? 0);
-          effectiveGov = -((prop.gov ?? prop.soc) ?? 0);
-          let s = prop.stance;
-          if (/^\s*Opposes\b/i.test(s)) s = s.replace(/^\s*Opposes\b/i, "Supports");
-          else if (/^\s*Critical of\b/i.test(s)) s = s.replace(/^\s*Critical of\b/i, "Supports");
-          else if (/^\s*Supports\b/i.test(s)) s = s.replace(/^\s*Supports\b/i, "Critical of");
-          else if (/Pro-Choice/i.test(s)) s = s.replace(/Pro-Choice/i, "Pro-Life");
-          else if (/Pro-Life/i.test(s)) s = s.replace(/Pro-Life/i, "Pro-Choice");
-          else if (/Strong\s+Support/i.test(s)) s = s.replace(/Strong\s+Support.*?for/i, "Critical of");
-          effectivePolarity = "Opposition (Sarcastic)";
-          effectiveStance = `${s} (Sarcastic — interpreted as opposite)`;
-        }
-
-        const w = 4.0; // High confidence propositional assertion
-        weightedEcon += effectiveEcon * w;
-        weightedSoc += effectiveSoc * w;
-        weightedGov += effectiveGov * w;
-        totalWeight += w;
-
-        if (effectiveEcon <= -2.0 || effectiveSoc <= -2.0) leftSignalWeight += w;
-        if (effectiveEcon >= 2.0 || effectiveSoc >= 2.0) rightSignalWeight += w;
-
-        if (!matchedTopicSet.has(prop.topic)) {
-          matchedTopicSet.add(prop.topic);
-          detectedPositions.push({
-            topic: prop.topic,
-            stance: effectiveStance,
-            polarity: effectivePolarity,
-            keyword: prop.searchKw,
-            snippet: snippet.length > 90 ? `"...${snippet}..."` : `"${snippet}"`,
-            econ: effectiveEcon,
-            soc: effectiveSoc
-          });
-        }
-      }
-    }
-  }
-
-  // 3. Minimum Signal Threshold Calibration
-  const hasRealSignal = totalWeight >= 2.5 || detectedPositions.length > 0;
-
-  let econ = 0;
-  let soc = 0;
-  let gov = 0;
-  let confidence = 'Low (Few political markers)';
-  let archetype = 'Undetermined / Non-Political Activity';
-
-  if (hasRealSignal && totalWeight > 0) {
-    econ = Math.max(-10, Math.min(10, Math.round((weightedEcon / totalWeight) * 10) / 10));
-    soc = Math.max(-10, Math.min(10, Math.round((weightedSoc / totalWeight) * 10) / 10));
-    gov = Math.max(-10, Math.min(10, Math.round((weightedGov / totalWeight) * 10) / 10));
-
-    if (detectedPositions.length >= 2) confidence = 'High (Multiple verified policy stances)';
-    else if (detectedPositions.length === 1 && totalWeight >= 6) confidence = 'Moderate (Policy stance + community footprint)';
-    else if (detectedPositions.length === 1) confidence = 'Moderate (Corroborating position statement)';
-    else if (totalWeight >= 10) confidence = 'Moderate (Community participation footprint)';
-    else confidence = 'Low (Emerging community activity)';
-
-    archetype = getIdeologicalArchetype(econ, gov, {
-      hasLeftSignals: leftSignalWeight >= 2.0,
-      hasRightSignals: rightSignalWeight >= 2.0,
-    });
-  }
-
-  const { econLabel, socLabel, govLabel } = getDimensionLabels(econ, soc, gov);
+  const confidence = !hasSignal
+    ? "Insufficient signal"
+    : reliability >= 0.75 && distinctCategories >= 3 && communityCount >= 2
+      ? "High (convergent text and community evidence)"
+      : reliability >= 0.5
+        ? "Moderate (corroborated evidence)"
+        : "Low (limited evidence — treat as provisional)";
 
   return {
     econ,
     soc,
     gov,
-    hasSignal: hasRealSignal,
-    archetype,
+    hasSignal,
+    archetype: hasSignal ? classified.label : "Undetermined / Non-Political Activity",
+    quadrant: hasSignal ? classified.quadrant : "center",
     confidence,
-    dimensions: {
-      econ: { score: econ, label: hasRealSignal ? econLabel : "Non-Political" },
-      soc: { score: soc, label: hasRealSignal ? socLabel : "Non-Political" },
-      gov: { score: gov, label: hasRealSignal ? govLabel : "Non-Political" },
+    evidence: {
+      totalWeight: Math.round(totalEvidence * 10) / 10,
+      communityWeight: Math.round(communityMass * 10) / 10,
+      stanceWeight: textUnits,
+      distinctTopics: distinctCategories,
+      stanceDepth: text.topCategories.reduce((m, r) => Math.max(m, r.mentions || 0), 0),
+      reliability,
+      se: {
+        econ: Number.isFinite(combined.econ.se) ? Math.round(combined.econ.se * 10) / 10 : null,
+        soc: Number.isFinite(combined.soc.se) ? Math.round(combined.soc.se * 10) / 10 : null,
+        gov: Number.isFinite(combined.gov.se) ? Math.round(combined.gov.se * 10) / 10 : null,
+      },
+      textClusters: {
+        econ: text.dimensions.econ?.clusters || 0,
+        soc: text.dimensions.soc?.clusters || 0,
+        gov: text.dimensions.gov?.clusters || 0,
+      },
+      communityCount,
+      method: "Laver & Garry (2000) pro/con balance + Poole-Rosenthal ideal point, inverse-variance pooled, empirical-Bayes shrunk",
     },
-    detectedPositions,
-    topSubSignals: topSubSignals.sort((a, b) => b.weight - a.weight).slice(0, 6),
+    dimensions: {
+      econ: {
+        score: econ,
+        label: hasSignal ? labelFor(combined.econ, "State / Labour", "Free Market") : "Non-Political",
+        se: Number.isFinite(combined.econ.se) ? Math.round(combined.econ.se * 10) / 10 : null,
+        units: text.dimensions.econ?.n || 0,
+      },
+      soc: {
+        score: soc,
+        label: hasSignal ? labelFor(combined.soc, "Progressive", "Traditional") : "Non-Political",
+        se: Number.isFinite(combined.soc.se) ? Math.round(combined.soc.se * 10) / 10 : null,
+        units: text.dimensions.soc?.n || 0,
+      },
+      gov: {
+        score: gov,
+        label: hasSignal ? labelFor(combined.gov, "Civil Liberty", "Authority") : "Non-Political",
+        se: Number.isFinite(combined.gov.se) ? Math.round(combined.gov.se * 10) / 10 : null,
+        units: text.dimensions.gov?.n || 0,
+      },
+    },
+    detectedPositions: text.topCategories.map((r) => ({
+      topic: r.topic,
+      stance: r.stance,
+      polarity: polarityLabel(r.dims),
+      keyword: r.keyword,
+      snippet: r.snippet ? `"${r.snippet}"` : "",
+      econ: Math.round((r.dims.econ || 0) * 10) / 10,
+      soc: Math.round((r.dims.soc || 0) * 10) / 10,
+      mentions: r.mentions,
+      weight: r.magnitude,
+      possibleSarcasm: !!r.possibleSarcasm,
+    })),
+    topSubSignals: community.communities,
   };
 }
+
+function polarityLabel(dims) {
+  const parts = [];
+  if (dims.econ) parts.push(dims.econ < 0 ? "Economic Left" : "Economic Right");
+  if (dims.soc) parts.push(dims.soc < 0 ? "Progressive" : "Traditional");
+  if (dims.gov) parts.push(dims.gov < 0 ? "Libertarian" : "Authoritarian");
+  return parts.length ? parts.join(" · ") : "Neutral";
+}
+
+export { CATEGORIES, MIN_TOTAL_EVIDENCE };
