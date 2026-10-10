@@ -44,7 +44,7 @@ const unavailable = await fetchBoth('diagnostics', 'posts');
 assert.deepEqual(unavailable.sourceErrors.arctic, { reason: 'http', status: 522 });
 assert.deepEqual(unavailable.sourceErrors.pullpush, { reason: 'rateLimited', status: 429 });
 const blocked = await fetchBoth('diagnostics-next', 'comments');
-assert.deepEqual(blocked.sourceErrors.pullpush, { reason: 'rateLimited', status: 429 });
+assert.deepEqual(blocked.sourceErrors.pullpush, { reason: 'cooldown', status: 429 });
 assert.deepEqual(sourceFailure({ ok: false, timeout: true }), { reason: 'timeout' });
 console.log('PASS upstream HTTP errors, rate limits, and timeouts retain their diagnosis');
 
@@ -52,6 +52,22 @@ const { safeFetch } = await import('../src/api/client.js');
 globalThis.fetch = async () => { throw new DOMException('Timed out', 'TimeoutError'); };
 assert.deepEqual(sourceFailure(await safeFetch('https://example.test/timeout-diagnostics')), { reason: 'timeout' });
 console.log('PASS timeout exceptions are reported as timeouts without retrying');
+
+globalThis.fetch = async () => ({ ok: true, json: async () => { throw new SyntaxError('Invalid JSON'); } });
+assert.deepEqual(sourceFailure(await safeFetch('https://example.test/invalid-json')), { reason: 'response' });
+globalThis.fetch = async () => ({ ok: true, json: async () => ({ data: 'unexpected' }) });
+assert.deepEqual(sourceFailure(await safeFetch('https://example.test/invalid-shape')), { reason: 'response' });
+assert.equal(sourceFailure({ ok: true, data: [] }), null);
+const { failureMessageKey, archiveFailureSummary } = await import('../src/archiveErrors.js');
+assert.equal(failureMessageKey({ reason: 'http', status: 403 }), 'archiveAccessDenied');
+assert.equal(failureMessageKey({ reason: 'http', status: 404 }), 'archiveEndpointMissing');
+assert.equal(failureMessageKey({ reason: 'http', status: 503 }), 'archiveServerError');
+assert.equal(archiveFailureSummary([{ reason: 'timeout' }, { reason: 'timeout' }]), 'archiveTimeout');
+assert.equal(archiveFailureSummary([{ reason: 'rateLimited' }]), 'archiveLimited');
+assert.equal(archiveFailureSummary([{ reason: 'connection' }]), 'archiveConnection');
+assert.equal(archiveFailureSummary([{ reason: 'response' }]), 'archiveResponse');
+assert.equal(archiveFailureSummary([{ reason: 'timeout' }, { reason: 'rateLimited' }]), 'archiveUnavailable');
+console.log('PASS failure messages distinguish response, connection, HTTP, timeout, and cooldown errors');
 
 // A minimal hook runner keeps tests dependency-free. Only React scheduling
 // and the network boundary are replaced; the hook implementation is loaded intact.

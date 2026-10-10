@@ -1,4 +1,7 @@
 import { safeFetch, fetchBoth, REDDIT_BASE, ARCTIC, LIMIT, fetchPostById, fetchCommentById, fetchCommentsForPost } from "./api";
+import { sleepAbortable } from "./api/client.js";
+import { serializeCsv } from "./csv.js";
+import { failureMessageKey, archiveFailureSummary } from "./archiveErrors.js";
 import { downloadFile, normalizeUsername, normalizeSubreddit, parsePostInput, fmtNum } from "./utils";
 import { emptyStats, processItem } from "./profileData.js";
 import { useI18n } from "./i18n.js";
@@ -16,7 +19,7 @@ import { ModeSelector } from "./components/ModeSelector.jsx";
 import { SearchBar } from "./components/SearchBar.jsx";
 import { SearchFilters } from "./components/SearchFilters.jsx";
 import { usePaginatedFetch } from "./hooks/usePaginatedFetch.js";
-import { NO_DECORATION, sleep, tJsx, matchKeyword } from "./constants.js";
+import { NO_DECORATION, tJsx, matchKeyword } from "./constants.js";
 
 // Preserved public exports (previously defined in App.jsx).
 export { HoverHint } from "./components/HoverHint.jsx";
@@ -237,23 +240,6 @@ export default function App() {
     const CRAWL_TIMEOUT_MS = 30000;
     const CRAWL_SLEEP_MS = 800;
     const crawlTimeoutId = setTimeout(() => { try { controller.abort(); } catch { /* noop */ } }, CRAWL_TIMEOUT_MS);
-    const sleepAbortable = (ms, signal) => {
-      if (ms <= 0) return Promise.resolve();
-      if (!signal) return sleep(ms);
-      if (signal.aborted) return Promise.resolve();
-      return new Promise(resolve => {
-        const t = setTimeout(() => {
-          try { signal.removeEventListener("abort", onAbort); } catch { /* noop */ }
-          resolve();
-        }, ms);
-        const onAbort = () => {
-          clearTimeout(t);
-          resolve();
-        };
-        signal.addEventListener("abort", onAbort, { once: true });
-      });
-    };
-
     // Batched crawl progress: a version bump recomputes profileStats over the
     // growing lists + re-renders 30 cards + heat grid + compass/bot analysis.
     // Flushing at most ~1x/sec (single bump per page, coalesced across both
@@ -539,7 +525,11 @@ export default function App() {
     [filteredItems, visibleCount]
   );
 
-  const isOutageTakeover = !postMode && bothSourcesFailed && posts.items.length === 0 && comments.items.length === 0;
+  const isOutageTakeover = !postMode && !initialLoading && !posts.loading && !comments.loading && bothSourcesFailed && posts.items.length === 0 && comments.items.length === 0;
+  const archiveSummary = archiveFailureSummary([
+    posts.sourceErrors.arctic, comments.sourceErrors.arctic,
+    posts.sourceErrors.pullpush, comments.sourceErrors.pullpush,
+  ]);
   useEffect(() => {
     document.title = "Rosint+";
   }, []);
@@ -1134,15 +1124,19 @@ export default function App() {
                 {searched && isOutageTakeover && <div className="max-w-md mx-auto px-4 mt-12 pb-16">
                         <div className="border border-[color:var(--border-hover)] bg-[color:var(--bg)] rounded-xl px-7 pt-10 pb-5 text-center shadow-lg shadow-black/30">
                             <p className="text-[color:var(--text)] text-lg font-semibold mb-2">
-                                {t("archiveUnavailableTitle")}
+                                {t(`${archiveSummary}Title`)}
                             </p>
                             <p className="text-[color:var(--text)] text-sm leading-relaxed">
-                                {t("archiveUnavailableBody")}
+                                {t(`${archiveSummary}Body`)}
                             </p>
                             <ul className="mt-4 text-sm text-[color:var(--text-muted)] space-y-2">
                               {[["arctic", "Arctic Shift"], ["pullpush", "PullPush"]].map(([key, name]) => {
-                                const failure = posts.sourceErrors[key] || comments.sourceErrors[key];
-                                return <li key={key}>{name}: {t(failure?.reason === "rateLimited" ? "archiveRateLimited" : failure?.reason === "timeout" ? "archiveTimedOut" : failure?.reason === "http" ? "archiveHttpError" : "archiveConnectionError", { status: failure?.status })}</li>;
+                                const postFailure = posts.sourceErrors[key];
+                                const commentFailure = comments.sourceErrors[key];
+                                const sameFailure = failureMessageKey(postFailure) === failureMessageKey(commentFailure) && postFailure?.status === commentFailure?.status;
+                                return <li key={key}>{name}: {sameFailure
+                                  ? t(failureMessageKey(postFailure), { status: postFailure?.status })
+                                  : <>{t("tabPosts")}: {t(failureMessageKey(postFailure), { status: postFailure?.status })}<br />{t("tabComments")}: {t(failureMessageKey(commentFailure), { status: commentFailure?.status })}</>}</li>;
                               })}
                             </ul>
                             <div className="mt-5 flex flex-col items-center gap-3 text-sm">
@@ -1364,10 +1358,11 @@ export default function App() {
                             <div className="flex flex-shrink-0 items-stretch rounded border border-[color:var(--border-hover)] bg-[color:var(--bg)] overflow-hidden select-none">
                             <button onClick={() => {
                                 const cols = ["id", "type", "created_utc", "subreddit", "author", "score", "permalink", "text"];
-                                const csv = [cols.join(",")].concat(filteredItems.map(item => {
+                                const rows = filteredItems.map(item => {
                                     const text = isPost(item) ? item.title : item.body;
-                                    return [item.id, isPost(item) ? "post" : "comment", item.created_utc, item.subreddit, item.author, item.score || 0, item.permalink, text ? `"${text.replace(/"/g, '""').replace(/\n/g, " ")}"` : ""].join(",");
-                                })).join("\n");
+                                    return [item.id, isPost(item) ? "post" : "comment", item.created_utc, item.subreddit, item.author, item.score || 0, item.permalink, text];
+                                });
+                                const csv = serializeCsv([cols, ...rows]);
                                 downloadFile(`rosint_${query}_${activeTab}.csv`, csv, "text/csv");
                             }} className="px-3 h-8 text-[11px] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] cursor-pointer">CSV</button>
                             <div className="w-px self-stretch bg-[color:var(--border-hover)]" aria-hidden="true" />

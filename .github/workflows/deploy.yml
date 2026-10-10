@@ -23,6 +23,7 @@ jobs:
         with:
           node-version: 20
       - run: npm ci
+      - run: npm run lint
       # No secret is injected here on purpose: this build has no API integration.
       # The political compass is a deterministic statistical estimator that runs
       # in the visitor's browser (src/compass/). If you add one, never use a

@@ -1,5 +1,5 @@
 /** Reddit archive endpoints built on top of the low-level client. */
-import { ARCTIC, PULLPUSH, LIMIT, safeFetch, sleep, isPullPushBlocked } from "./client.js";
+import { ARCTIC, PULLPUSH, LIMIT, safeFetch, sleepAbortable, isPullPushBlocked } from "./client.js";
 import { writePersistentFirstPage } from "./persistentCache.js";
 
 export function buildUrls(username, type, pagination = {}, dateFilters = {}, { sort = "desc", mode = "username" } = {}) {
@@ -69,31 +69,16 @@ function fetchBothKey(username, type, pagination, dateFilters, sort, mode) {
   return stableStringify({ username, type, pagination, dateFilters, sort, mode });
 }
 
-function sleepAbortable(ms, signal) {
-  if (ms <= 0) return Promise.resolve();
-  if (!signal) return sleep(ms);
-  if (signal.aborted) return Promise.resolve();
-  return new Promise(resolve => {
-    const t = setTimeout(() => {
-      try { signal.removeEventListener("abort", onAbort); } catch { /* noop */ }
-      resolve();
-    }, ms);
-    const onAbort = () => {
-      clearTimeout(t);
-      resolve();
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
-}
-
 function timeoutMarker(ms, internalSignal) {
   return sleepAbortable(ms, internalSignal).then(() => ({ timeout: true, data: [], ok: false }));
 }
 
 export function sourceFailure(result) {
   if (result.ok) return null;
-  if (result.status === 429 || result.blocked) return { reason: "rateLimited", status: 429 };
+  if (result.blocked) return { reason: "cooldown", status: 429 };
+  if (result.status === 429) return { reason: "rateLimited", status: 429 };
   if (result.timeout) return { reason: "timeout" };
+  if (result.invalidResponse) return { reason: "response" };
   if (result.status) return { reason: "http", status: result.status };
   return { reason: "connection" };
 }
@@ -214,27 +199,15 @@ async function runFetchBoth(username, type, pagination = {}, dateFilters = {}, {
     : safeFetch(pullpush, { bypassCache, signal });
   const arcticRes = await arcticPromise;
   let pullpushRes;
-  if (arcticRes.ok && arcticRes.data.length >= LIMIT) {
-    // Arctic has a full page — PullPush unlikely to add new items, don't block.
-    // Race PullPush with a short timeout; if it wins, merge, otherwise return Arctic.
+  if (arcticRes.ok && arcticRes.data.length > 0) {
+    // A full Arctic page leaves less room for PullPush to contribute.
+    const contributionWindow = arcticRes.data.length >= LIMIT ? 280 : 350;
     pullpushRes = await Promise.race([
       pullpushPromise,
-      timeoutMarker(280, signal)
+      timeoutMarker(contributionWindow, signal)
     ]);
     if (pullpushRes.timeout) {
-      // Let PullPush finish in background for cache warming, but don't block
-      pullpushPromise.then(() => {
-        // Warm cache already via safeFetch; nothing to do
-      }).catch(() => {});
-      pullpushRes = { data: [], ok: false, timeout: true };
-    }
-  } else if (arcticRes.ok && arcticRes.data.length > 0) {
-    // Arctic has some data — give PullPush a short window to contribute
-    pullpushRes = await Promise.race([
-      pullpushPromise,
-      timeoutMarker(350, signal)
-    ]);
-    if (pullpushRes.timeout) {
+      // Let safeFetch warm the cache in the background without blocking results.
       pullpushPromise.then(() => {}).catch(() => {});
       pullpushRes = { data: [], ok: false, timeout: true };
     }

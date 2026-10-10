@@ -110,7 +110,7 @@ function combineSignals(outer, timeoutMs) {
   };
 }
 
-function sleepAbortable(ms, signal) {
+export function sleepAbortable(ms, signal) {
   if (ms <= 0) return Promise.resolve();
   if (!signal) return sleep(ms);
   if (signal.aborted) return Promise.resolve();
@@ -202,7 +202,14 @@ export async function fetchWithRetry(url, {
             status: res.status,
           };
         }
-        const json = await res.json();
+        let json;
+        try {
+          json = await res.json();
+        } catch (err) {
+          if (err?.name === "AbortError" || err?.name === "TimeoutError") throw err;
+          return { data: [], ok: false, invalidResponse: true };
+        }
+        if (!Array.isArray(json?.data)) return { data: [], ok: false, invalidResponse: true };
         return {
           data: json?.data ?? [],
           ok: true
@@ -317,6 +324,7 @@ export function safeFetch(url, {
     };
     if (res?.err) out.err = res.err;
     if (res?.status) out.status = res.status;
+    if (res?.invalidResponse) out.invalidResponse = true;
     entry.settled = true;
     clearTimeout(timeoutId);
     if (!out.ok || out.data.length === 0) {
