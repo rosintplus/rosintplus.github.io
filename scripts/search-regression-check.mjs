@@ -57,6 +57,8 @@ globalThis.fetch = async () => ({ ok: true, json: async () => { throw new Syntax
 assert.deepEqual(sourceFailure(await safeFetch('https://example.test/invalid-json')), { reason: 'response' });
 globalThis.fetch = async () => ({ ok: true, json: async () => ({ data: 'unexpected' }) });
 assert.deepEqual(sourceFailure(await safeFetch('https://example.test/invalid-shape')), { reason: 'response' });
+globalThis.fetch = async () => ({ ok: true, json: async () => { throw new TypeError('Connection lost while reading response'); } });
+assert.deepEqual(sourceFailure(await safeFetch('https://example.test/body-connection')), { reason: 'connection' });
 assert.equal(sourceFailure({ ok: true, data: [] }), null);
 const { failureMessageKey, archiveFailureSummary } = await import('../src/archiveErrors.js');
 assert.equal(failureMessageKey({ reason: 'http', status: 403 }), 'archiveAccessDenied');

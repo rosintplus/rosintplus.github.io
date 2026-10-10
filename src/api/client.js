@@ -206,8 +206,8 @@ export async function fetchWithRetry(url, {
         try {
           json = await res.json();
         } catch (err) {
-          if (err?.name === "AbortError" || err?.name === "TimeoutError") throw err;
-          return { data: [], ok: false, invalidResponse: true };
+          if (err?.name === "SyntaxError") return { data: [], ok: false, invalidResponse: true };
+          throw err;
         }
         if (!Array.isArray(json?.data)) return { data: [], ok: false, invalidResponse: true };
         return {
