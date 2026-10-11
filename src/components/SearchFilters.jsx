@@ -19,7 +19,7 @@ export function SearchFilters({
   const toggleFilters = [
     { label: t('deletedOnly'), checked: deletedOnly, setChecked: setDeletedOnly },
     { label: t('showNsfw'), checked: showNsfw, setChecked: setShowNsfw },
-    { label: t('showSpoilers'), checked: showSpoilers, setChecked: setShowSpoilers },
+    { label: t('showSpoilers'), hint: t('spoilersHint'), checked: showSpoilers, setChecked: setShowSpoilers },
   ];
   const commitOnEnter = event => {
     if (event.key !== 'Enter') return;
@@ -46,7 +46,7 @@ export function SearchFilters({
       </label>
     </div>
     <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-[color:var(--border)] pt-2 text-[11px] text-[color:var(--text-muted)]">
-      {toggleFilters.map(({ label, checked, setChecked }) => <label key={label} className="flex items-center gap-1.5 cursor-pointer select-none">
+      {toggleFilters.map(({ label, hint, checked, setChecked }) => <label key={label} title={hint} className="flex items-center gap-1.5 cursor-pointer select-none">
         <input type="checkbox" checked={checked} onChange={e => setChecked(e.target.checked)} className="h-3.5 w-3.5 accent-[color:var(--accent)]" />
         {label}
       </label>)}

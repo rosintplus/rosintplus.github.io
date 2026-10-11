@@ -6,7 +6,7 @@ const zh = {
   modeSubreddit: "版块",
   modePost: "帖子",
   modeLink: "链接",
-  showSpoilers: "显示剧透",
+  showSpoilers: "剧透",
   searchPlaceholderPost: "帖子链接或ID",
   searchMode: "搜索模式",
   emptyNoneSub: "未在该版块中找到{tab}。",
@@ -128,7 +128,7 @@ const zh = {
   deletedText: "该评论已被作者删除——存档中未捕获到文本。",
   noContent: "（无内容）",
   // Political compass (local statistical engine)
-  apCompassHint: "政治罗盘完全在您的浏览器本地计算，依据是该账号自己的文字和社区足迹。立场采用 Laver & Garry（2000）针对政治词典的赞成／反对相对平衡，并与基于子版块参与的 Poole-Rosenthal 理想点合并，同时给出标准误。只有当某维度的 95% 置信区间不包含零时才给出标签，因此证据薄弱或自相矛盾时读作「中间／不确定」，而不会落到极端。",
+  apCompassHint: "根据存档文字和社区活动估算。证据越少，不确定性越大。",
   apCompassProvisional: "暂定",
   apCompassUncertain: "中间／不确定",
   apCompassSe: "经济 ±{e} · 社会 ±{s} · 政府 ±{g}（标准误）",

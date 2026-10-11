@@ -130,40 +130,7 @@ export function evaluateBotLikelihood({
   posts = [],
   comments = [],
 } = {}) {
-  const cacheKey = buildBotCacheKey(username, posts, comments);
-  const hit = botCache.get(cacheKey);
-  if (hit) return hit;
-  const result = evaluateBotLikelihoodUncached({ username, posts, comments });
-  botCache.set(cacheKey, result);
-  if (botCache.size > 30) {
-    const oldest = botCache.keys().next().value;
-    botCache.delete(oldest);
-  }
-  return result;
-}
-
-// Per-profile result cache keyed by item identity. ProfileSummary memoizes
-// on array identity, but the crawl creates new array wrappers on every batch
-// (and keyword typing re-renders parents), so without this the O(n) duplicate
-// grouping would rerun far more often than the data actually changes.
-const botCache = new Map();
-
-function hashItemIds(items) {
-  let h = 0;
-  const n = items?.length || 0;
-  h = (Math.imul(h, 31) + n) | 0;
-  for (let i = 0; i < n; i++) {
-    const s = items[i]?.id || "";
-    for (let j = 0; j < s.length; j++) {
-      h = (Math.imul(h, 31) + s.charCodeAt(j)) | 0;
-    }
-    h = (Math.imul(h, 31) + 0x9e3779b9) | 0;
-  }
-  return (h >>> 0).toString(36);
-}
-
-function buildBotCacheKey(username, posts, comments) {
-  return `${String(username || "").toLowerCase()}|p${posts?.length || 0}:${hashItemIds(posts)}|c${comments?.length || 0}:${hashItemIds(comments)}`;
+  return evaluateBotLikelihoodUncached({ username, posts, comments });
 }
 
 function evaluateBotLikelihoodUncached({
@@ -195,6 +162,15 @@ function evaluateBotLikelihoodUncached({
     ...toEvidence('Duplicate titles', 'title', titleGroups),
     ...toEvidence('Duplicate comments', 'comment', bodyGroups),
   ].sort((a, b) => b.count - a.count);
+
+  // Count repeated items once even when both their title and media match.
+  // Posts and comments have independent Reddit ID namespaces.
+  const repeatedItems = new Set();
+  for (const [kind, groups] of [['post', mediaGroups], ['post', titleGroups], ['comment', bodyGroups]]) {
+    for (const group of groups) {
+      for (const item of group.items.slice(1)) repeatedItems.add(`${kind}:${item.id}`);
+    }
+  }
 
   const flags = disclosure ? [`Bot disclosure: ${disclosure.detail}`] : [];
 
@@ -232,6 +208,7 @@ function evaluateBotLikelihoodUncached({
       loadedPosts: uniquePosts.length,
       loadedComments: uniqueComments.length,
       duplicateGroups: mediaGroups.length + titleGroups.length + bodyGroups.length,
+      duplicateItems: repeatedItems.size,
       maxCopies,
       disclosed: !!disclosure,
     },

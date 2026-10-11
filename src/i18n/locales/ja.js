@@ -6,7 +6,7 @@ const ja = {
   modeSubreddit: "サブレディット",
   modePost: "投稿",
   modeLink: "リンク",
-  showSpoilers: "ネタバレを表示",
+  showSpoilers: "ネタバレ",
   searchPlaceholderPost: "投稿リンクまたはID",
   searchMode: "検索モード",
   emptyNoneSub: "このサブレディットに{tab}はありません。",
@@ -128,7 +128,7 @@ const ja = {
   deletedText: "このコメントは投稿者によって削除されました — アーカイブにテキストはありません。",
   noContent: "（コンテンツなし）",
   // Political compass (local statistical engine)
-  apCompassHint: "政治的コンパスは、このアカウント自身の投稿とコミュニティ上の足跡から、ブラウザ内でローカルに計算されます。位置づけは政治辞書に対する Laver & Garry (2000) の賛成／反対バランスを用い、サブレディット参加からの Poole-Rosenthal の理想点と統合し、標準誤差付きで示されます。95%信頼区間が 0 を含まない場合にのみ次元にラベルが付くため、根拠が乏しい、または矛盾する場合は極端な位置ではなく「中間／不確実」として読まれます。",
+  apCompassHint: "保存された文章とコミュニティ活動からの推定です。証拠が少ないほど不確実になります。",
   apCompassProvisional: "暫定",
   apCompassUncertain: "中間／不確実",
   apCompassSe: "経済 ±{e} · 社会 ±{s} · 国家 ±{g}（標準誤差）",

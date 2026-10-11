@@ -4,24 +4,10 @@ import { useI18n, LOCALES } from '../../i18n.js';
 import { evaluateBotLikelihood } from '../../botDetector.js';
 import { fmtNum } from '../../utils.js';
 
-const RISK_BADGE = {
-  high: 'bg-rose-500/20 text-rose-700 dark:text-rose-300 border border-rose-500/30',
-  medium: 'bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30',
-  low: 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30',
-};
-
 const RISK_TEXT = {
   high: 'text-rose-700 dark:text-rose-300 font-bold',
   medium: 'text-amber-700 dark:text-amber-300 font-semibold',
   low: 'text-[color:var(--text)]',
-};
-
-// Short, single-word verdict text for the compact KPI cell (must not wrap on mobile).
-const VERDICT_SHORT = {
-  'Disclosed Automation': 'bot',
-  'Repost Pattern': 'repost',
-  'Duplicate Posts': 'duplicates',
-  'No Duplicates': 'clean',
 };
 
 /**
@@ -81,8 +67,6 @@ const ProfileSummary = memo(function ProfileSummary({
 
   if (!posts.length && !comments.length) return null;
 
-  const shortVerdict = (VERDICT_SHORT[analysis.verdict] || analysis.verdict).toLowerCase().split(/\s+/)[0];
-
   return <div className="flex flex-col gap-2 mb-3">
             <div className="bg-[color:var(--bg-elevated)] border border-[color:var(--border)] rounded-lg px-2 sm:px-3 py-2.5 sm:py-3 grid grid-cols-5 divide-x divide-[color:var(--border)]">
                 <div className="min-w-0 text-center px-1">
@@ -104,16 +88,16 @@ const ProfileSummary = memo(function ProfileSummary({
                     role="button"
                     tabIndex={0}
                     aria-expanded={open}
-                    aria-label={t("apBotToggle")}
+                    aria-label={t("apDuplicatesToggle")}
                     onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen(o => !o); } }}
-                    title={t("apBotBreakdown")}
-                    className="min-w-0 text-center px-1 cursor-pointer hover:bg-[color:var(--border)]/20 transition-colors rounded py-0.5"
+                    title={t("apDuplicatesHint")}
+                    className="min-w-0 text-center px-1 cursor-pointer hover:bg-[color:var(--border)]/20 transition-colors rounded"
                 >
                     <div className={`text-[15px] sm:text-[18px] font-bold leading-none truncate whitespace-nowrap ${RISK_TEXT[analysis.riskLevel] || RISK_TEXT.low}`}>
-                        {shortVerdict}
+                        {fmtNum(analysis.metrics.duplicateItems, LOCALES[lang] || "en")}
                     </div>
                     <div className="text-[9.5px] sm:text-[11px] leading-none mt-1 truncate">
-                        <span className="text-[color:var(--text-muted)]">{t("apBotCheck")}</span>
+                        <span className="text-[color:var(--text-muted)]">{t("apDuplicates")}</span>
                     </div>
                 </div>
 
@@ -133,13 +117,9 @@ const ProfileSummary = memo(function ProfileSummary({
             </div>
 
             {open && <div className="bg-[color:var(--bg-elevated)] border border-[color:var(--border)] rounded-lg p-3 text-xs flex flex-col gap-2.5 shadow-sm">
-                    <div className="flex items-center justify-between border-b border-[color:var(--border)] pb-2">
-                        <div className="flex items-center gap-2">
-                            <span className="font-semibold text-sm">{t("apBotBreakdownTitle")}</span>
-                            <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold tracking-wider ${RISK_BADGE[analysis.riskLevel] || RISK_BADGE.low}`}>
-                                {analysis.verdict}
-                            </span>
-                            <span className="text-[10px] text-[color:var(--text-faint)]">
+                    <div className="flex items-center justify-between gap-2 border-b border-[color:var(--border)] pb-2">
+                        <div className="flex flex-wrap items-center gap-2 min-w-0">
+                            <span className="font-semibold text-sm">{t("apDuplicatesTitle")}</span>
                             <span className="text-[10px] text-[color:var(--text-faint)]">
                                 {(() => {
                                     const scanned = analysis.metrics.loadedPosts + analysis.metrics.loadedComments;
@@ -152,7 +132,6 @@ const ProfileSummary = memo(function ProfileSummary({
                                     return t("apBotScanned", { posts: analysis.metrics.loadedPosts, comments: analysis.metrics.loadedComments });
                                 })()}
                             </span>
-                            </span>
                         </div>
                         <button
                             type="button"
@@ -162,6 +141,7 @@ const ProfileSummary = memo(function ProfileSummary({
                             ✕
                         </button>
                     </div>
+                    <p className="text-[11px] text-[color:var(--text-muted)]">{t("apDuplicatesNote")}</p>
 
                     {analysis.flags.length > 0 && (
                         <div className="flex flex-col gap-1 bg-amber-500/10 border border-amber-500/20 rounded p-2 text-[11px] text-amber-700 dark:text-amber-300">

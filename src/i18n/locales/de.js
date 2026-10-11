@@ -6,7 +6,7 @@ const de = {
   modeSubreddit: "Subreddit",
   modePost: "Beitrag",
   modeLink: "Link",
-  showSpoilers: "Spoiler anzeigen",
+  showSpoilers: "Spoiler",
   searchPlaceholderPost: "Post-Link oder ID",
   searchMode: "Suchmodus",
   emptyNoneSub: "Keine {tab} in diesem Subreddit gefunden.",
@@ -128,7 +128,7 @@ const de = {
   deletedText: "Dieser Kommentar wurde von seinem Autor gelöscht — das Archiv hat keinen Text erfasst.",
   noContent: "(kein Inhalt)",
   // Political compass (local statistical engine)
-  apCompassHint: "Politischer Kompass, lokal in Ihrem Browser berechnet aus den eigenen Beiträgen dieses Kontos und dem Community-Fußabdruck. Die Positionen verwenden die Pro-/Contra-Bilanz nach Laver und Garry (2000) über ein politisches Wörterbuch, gepoolt mit einem Poole-Rosenthal-Idealpunkt aus der Subreddit-Beteiligung, und werden mit einem Standardfehler angegeben. Eine Dimension wird nur beschriftet, wenn ihr 95%-Konfidenzintervall die Null ausschließt, damit spärliche oder widersprüchliche Belege als Mitte / unsicher gelesen werden statt in ein Extrem zu fallen.",
+  apCompassHint: "Schätzung aus archivierten Texten und Community-Aktivität. Wenig Daten bedeuten mehr Unsicherheit.",
   apCompassProvisional: "Vorläufig",
   apCompassUncertain: "Mitte / unsicher",
   apCompassSe: "Wirtschaft ±{e} · Soziales ±{s} · Staat ±{g} (Standardfehler)",

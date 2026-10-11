@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build && node -e \"require('fs').copyFileSync('dist/index.html','dist/404.html');require('fs').copyFileSync('dist/index.html','dist/privacy.html')\"",
     "lint": "eslint .",
-    "test": "node scripts/compass-check.mjs && node scripts/fetch-share-check.mjs && node scripts/search-regression-check.mjs && node scripts/comment-search-check.mjs && node scripts/csv-export-check.mjs",
+    "test": "node scripts/compass-check.mjs && node scripts/fetch-share-check.mjs && node scripts/search-regression-check.mjs && node scripts/comment-search-check.mjs && node scripts/csv-export-check.mjs && node scripts/profile-crawl-check.mjs && node scripts/duplicates-check.mjs",
     "test:render": "node scripts/render-smoke.mjs",
     "preview": "vite preview"
   },

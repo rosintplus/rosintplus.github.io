@@ -104,6 +104,15 @@ export default function App() {
   const postIdRef = useRef(initialPostId);
   const [dateFrom, setDateFrom] = useState(initialParams.from ?? "");
   const [dateTo, setDateTo] = useState(initialParams.to ?? "");
+  const datesMenuRef = useRef(null);
+  useEffect(() => {
+    const closeDatesOutside = event => {
+      const menu = datesMenuRef.current;
+      if (menu?.open && !menu.contains(event.target)) menu.open = false;
+    };
+    document.addEventListener("pointerdown", closeDatesOutside);
+    return () => document.removeEventListener("pointerdown", closeDatesOutside);
+  }, []);
   const [subreddit, setSubreddit] = useState(initialMode === "username" && initialParams.sub ? String(initialParams.sub).replace(/^r\//, "") : "");
   const [urlQuery, setUrlQuery] = useState(initialParams.url || "");
   const [showNsfw, setShowNsfw] = useState(true); // checked = show NSFW (no filter); unchecked = exclude NSFW
@@ -190,7 +199,7 @@ export default function App() {
   // crawl as soon as everything has actually been fetched.
   const expectedTotalsRef = useRef(null);
   // Explicit Refresh (profile "Refresh" button) requests the full deep crawl;
-  // auto-crawl after paint stays shallow (fewer pages, deferred, gentler gaps).
+  // auto-crawl after paint is deferred and paced to keep searches responsive.
   const fullCrawlRef = useRef(false);
 
   const handleRefreshCrawl = useCallback(() => {
@@ -229,17 +238,19 @@ export default function App() {
 
     const controller = new AbortController();
     bgCrawlRef.current = controller;
-    // Explicit Refresh gets the full deep crawl; auto-crawl stays shallow so a
-    // refresh never hammers the rate-limited archives behind first paint.
+    // Refresh allows a larger scan; both paths pace requests and support Stop.
     const isFullCrawl = fullCrawlRef.current;
     fullCrawlRef.current = false;
     // Bounded background crawl: cap pages so prolific histories can't page
     // unboundedly, and cap wall-clock time so a slow archive can't stall the
     // tab forever. Abort stops new pages immediately (sleep is abort-aware).
-    const MAX_BG_PAGES = isFullCrawl ? 8 : 3;
-    const CRAWL_TIMEOUT_MS = 30000;
+    const MAX_BG_PAGES = isFullCrawl ? 200 : 100;
+    const CRAWL_TIMEOUT_MS = isFullCrawl ? 300000 : 180000;
     const CRAWL_SLEEP_MS = 800;
-    const crawlTimeoutId = setTimeout(() => { try { controller.abort(); } catch { /* noop */ } }, CRAWL_TIMEOUT_MS);
+    const crawlTimeoutId = setTimeout(() => {
+      crawlCappedRef.current = true;
+      controller.abort();
+    }, CRAWL_TIMEOUT_MS);
     // Batched crawl progress: a version bump recomputes profileStats over the
     // growing lists + re-renders 30 cards + heat grid + compass/bot analysis.
     // Flushing at most ~1x/sec (single bump per page, coalesced across both
@@ -287,14 +298,11 @@ export default function App() {
           ? (isComment ? expectedTotalsRef.current.comments : expectedTotalsRef.current.posts)
           : null;
 
-        // Seed cursor with oldest item from initial page to start deep paging immediately
+        // Count already loaded items, but scan from the newest archive page.
+        // Search filters or Oldest sorting can make the initial page unsuitable
+        // as a cursor for scanning the complete profile history.
         const initialList = isComment ? comments.items : posts.items;
         if (initialList && initialList.length > 0) {
-          const oldest = initialList[initialList.length - 1];
-          if (oldest?.created_utc) {
-            before = oldest.created_utc;
-            lastId = oldest.id;
-          }
           // The first page is already loaded, so it counts toward the total
           // we are trying to reach — otherwise the crawl never recognises
           // that the history is complete and keeps paging for nothing.
@@ -302,6 +310,7 @@ export default function App() {
         }
 
         while (!controller.signal.aborted) {
+          if (expected != null && fetched >= expected) break;
           // Budget exhausted: record that we stopped short of the full
           // history so the UI can say "sample" instead of looking stuck.
           if (pages >= MAX_BG_PAGES) {
@@ -319,7 +328,11 @@ export default function App() {
           }
           pages += 1;
 
-          if (controller.signal.aborted || !result?.items || result.items.length === 0) break;
+          if (controller.signal.aborted) break;
+          if (!result?.items || result.items.length === 0) {
+            if (!result?.done || (expected != null && fetched < expected)) crawlCappedRef.current = true;
+            break;
+          }
 
           let anyNew = false;
           for (const item of result.items) {
@@ -331,9 +344,9 @@ export default function App() {
             anyNew = true;
             processItem(crawlStats, item, isComment);
 
-            if (isComment && crawledCommentsRef.current.length < 150) {
+            if (isComment) {
               crawledCommentsRef.current.push(item);
-            } else if (!isComment && crawledPostsRef.current.length < 100) {
+            } else {
               crawledPostsRef.current.push(item);
             }
           }
@@ -349,7 +362,10 @@ export default function App() {
           if (expected != null && fetched >= expected) break;
 
           const last = result.items[result.items.length - 1];
-          if (!last || result.items.length < LIMIT) break;
+          if (!last || result.done) {
+            if (expected != null && fetched < expected) crawlCappedRef.current = true;
+            break;
+          }
           if (last.id === lastId) {
             // Repeated page (cursor didn't advance) — step back 1s to force
             // progress instead of stalling. `before` strictly decreases here,
@@ -366,13 +382,14 @@ export default function App() {
       try {
         await Promise.all([crawlType("posts"), crawlType("comments")]);
       } catch (err) {
+        if (bgCrawlRef.current === controller) crawlCappedRef.current = true;
         if (err?.name !== "AbortError") console.error("Background crawl error:", err);
       } finally {
         clearTimeout(crawlTimeoutId);
         if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
         // Final flush so the UI settles on exact totals even when the last
         // page arrived inside the throttle window.
-        if (pendingFlush && !controller.signal.aborted) {
+        if (pendingFlush && bgCrawlRef.current === controller) {
           setCrawledCount(crawlItemsRef.current);
           setBgStatsVersion(v => v + 1);
           pendingFlush = false;
@@ -381,7 +398,7 @@ export default function App() {
           setIsCrawling(false);
           // Surface whether we stopped on budget/timeout rather than because
           // the archive ran out, so the counter can say "sample" honestly.
-          setCrawlCapped(crawlCappedRef.current);
+          setCrawlCapped(crawlCappedRef.current || controller.signal.aborted);
         }
       }
     };
@@ -1334,27 +1351,44 @@ export default function App() {
                 })}
                         </div>
 
-                        {!initialLoading && <div className="flex flex-nowrap items-center gap-1.5 mb-3 overflow-x-auto">
-                            <div className="relative flex-shrink-0">
-                                <div className="flex items-center gap-1.5">
-                                    <input aria-label="Date from" type="date" max={dateTo || undefined} value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-2 h-8 text-[11px] text-[color:var(--text)] cursor-pointer" />
-                                    <input aria-label="Date to" type="date" min={dateFrom || undefined} value={dateTo} onChange={e => setDateTo(e.target.value)} className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-2 h-8 text-[11px] text-[color:var(--text)] cursor-pointer" />
+                        {!initialLoading && <div data-results-toolbar className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <details ref={datesMenuRef} className="relative flex-shrink-0 group">
+                                <summary className={`flex items-center gap-1.5 px-2.5 h-8 border rounded text-[11px] cursor-pointer list-none hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] transition-colors [&::-webkit-details-marker]:hidden ${dateFrom || dateTo ? "border-[color:var(--accent)] text-[color:var(--accent-text)]" : "border-[color:var(--border-hover)] text-[color:var(--text-muted)]"}`}>
+                                    {t("dates")}{dateFrom || dateTo ? " •" : ""}
+                                    <svg aria-hidden="true" className="w-3 h-3 group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6" /></svg>
+                                </summary>
+                                <div className="absolute left-0 top-full z-30 mt-2 w-[280px] max-w-[calc(100vw-48px)] rounded-lg border border-[color:var(--border-hover)] bg-[color:var(--bg-elevated)] p-3 shadow-sm">
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <label className="flex min-w-0 flex-col gap-1 text-[11px] text-[color:var(--text-muted)]">{t("from")}
+                                      <input aria-label="Date from" type="date" max={dateTo || undefined} value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="w-full min-w-0 bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-2 h-8 text-[11px] text-[color:var(--text)] cursor-pointer" />
+                                    </label>
+                                    <label className="flex min-w-0 flex-col gap-1 text-[11px] text-[color:var(--text-muted)]">{t("to")}
+                                      <input aria-label="Date to" type="date" min={dateFrom || undefined} value={dateTo} onChange={e => setDateTo(e.target.value)} className="w-full min-w-0 bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-2 h-8 text-[11px] text-[color:var(--text)] cursor-pointer" />
+                                    </label>
+                                  </div>
+                                  <div className="flex justify-between gap-2 mt-3 text-[11px]">
+                                    <button type="button" onClick={() => { setDateFrom(""); setDateTo(""); }} className="text-[color:var(--text-muted)] hover:text-[color:var(--text)]">{t("clear")}</button>
+                                    <button type="button" onClick={event => event.currentTarget.closest("details").removeAttribute("open")} className="text-[color:var(--accent-text)]">{t("done")}</button>
+                                  </div>
                                 </div>
-                            </div>
+                            </details>
                             <label className="flex items-center gap-1.5 flex-shrink-0 px-2 h-8 border border-[color:var(--border-hover)] rounded text-[11px] text-[color:var(--text-muted)] whitespace-nowrap cursor-pointer hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] transition-colors">
                                 <input type="checkbox" checked={deletedOnly} onChange={e => setDeletedOnly(e.target.checked)} className="w-3 h-3 accent-[color:var(--accent)]" /> {t("deletedOnly").replace(/\s+only$/i, "")}
                             </label>
                             <label className="flex items-center gap-1.5 flex-shrink-0 px-2 h-8 border border-[color:var(--border-hover)] rounded text-[11px] text-[color:var(--text-muted)] whitespace-nowrap cursor-pointer hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] transition-colors">
                                 <input type="checkbox" checked={nsfwOnly} onChange={e => setNsfwOnly(e.target.checked)} className="w-3 h-3 accent-[color:var(--accent)]" /> {t("nsfwOnly").replace(/\s+only$/i, "")}
                             </label>
-                            <label className="flex items-center gap-1.5 flex-shrink-0 px-2 h-8 border border-[color:var(--border-hover)] rounded text-[11px] text-[color:var(--text-muted)] whitespace-nowrap cursor-pointer">
-                                <input type="checkbox" checked={showSpoilers} onChange={e => setShowSpoilers(e.target.checked)} className="w-3 h-3 accent-[color:var(--accent)]" /> {t("showSpoilers")}
+                            <label title={t("spoilersHint")} className="flex items-center gap-1.5 flex-shrink-0 px-2 h-8 border border-[color:var(--border-hover)] rounded text-[11px] text-[color:var(--text-muted)] whitespace-nowrap cursor-pointer hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] transition-colors">
+                                <input type="checkbox" title={t("spoilersHint")} checked={showSpoilers} onChange={e => setShowSpoilers(e.target.checked)} className="w-3 h-3 accent-[color:var(--accent)]" /> {t("showSpoilers")}
                             </label>
-                            {mode === "username" && <button onClick={() => setShowProfile(value => !value)} className={`flex items-center gap-1.5 flex-shrink-0 px-2.5 h-8 border rounded text-[11px] cursor-pointer transition-colors ${showProfile ? "bg-[color:var(--bg-elevated)] text-[color:var(--text)] border-[color:var(--text-muted)]" : "border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)]"}`}><IconActivity />{t("stats")}</button>}
+                          </div>
+                          <div className="ml-auto flex items-center gap-1.5">
                             <div className="relative flex flex-shrink-0 items-stretch rounded border border-[color:var(--border-hover)] bg-[color:var(--bg)] p-0.5 select-none" role="radiogroup" aria-label="Sort order">
                                 <button onClick={() => setSortOrder("desc")} role="radio" aria-checked={sortOrder === "desc"} className={`px-3 h-7 text-[11px] rounded transition-colors cursor-pointer ${sortOrder === "desc" ? "border border-[color:var(--border-hover)] bg-[color:var(--bg-elevated)] text-[color:var(--text)]" : "text-[color:var(--text-muted)] hover:text-[color:var(--text)]"}`}>{t("newest")}</button>
                                 <button onClick={() => setSortOrder("asc")} role="radio" aria-checked={sortOrder === "asc"} className={`px-3 h-7 text-[11px] rounded transition-colors cursor-pointer ${sortOrder === "asc" ? "border border-[color:var(--border-hover)] bg-[color:var(--bg-elevated)] text-[color:var(--text)]" : "text-[color:var(--text-muted)] hover:text-[color:var(--text)]"}`}>{t("oldest")}</button>
                             </div>
+                            {mode === "username" && <button onClick={() => setShowProfile(value => !value)} className={`flex items-center gap-1.5 flex-shrink-0 px-2.5 h-8 border rounded text-[11px] cursor-pointer transition-colors ${showProfile ? "bg-[color:var(--bg-elevated)] text-[color:var(--text)] border-[color:var(--text-muted)]" : "border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)]"}`}><IconActivity />{t("stats")}</button>}
                             <div className="flex flex-shrink-0 items-stretch rounded border border-[color:var(--border-hover)] bg-[color:var(--bg)] overflow-hidden select-none">
                             <button onClick={() => {
                                 const cols = ["id", "type", "created_utc", "subreddit", "author", "score", "permalink", "text"];
@@ -1368,6 +1402,7 @@ export default function App() {
                             <div className="w-px self-stretch bg-[color:var(--border-hover)]" aria-hidden="true" />
                             <button onClick={() => downloadFile(`rosint_${query}_${activeTab}.json`, JSON.stringify(filteredItems, null, 2), "application/json")} className="px-3 h-8 text-[11px] text-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] cursor-pointer">JSON</button>
                             </div>
+                          </div>
                         </div>}
 
                         {initialLoading ? <div className="mb-3 flex flex-nowrap items-center gap-1.5 overflow-hidden" aria-hidden="true">
