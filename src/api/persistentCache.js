@@ -13,17 +13,12 @@
  * the safeFetch memory-cache policy.
  */
 
+import { stableStringify } from "./stableKey.js";
+
 export const PERSIST_TTL_MS = 5 * 60 * 1000;
 export const PERSIST_MAX_ENTRIES = 40;
 
 const LS_PREFIX = "rosint:fetchBoth:v1:";
-
-function stableStringify(value) {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
-  const keys = Object.keys(value).sort();
-  return `{${keys.map(k => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(",")}}`;
-}
 
 /** True when pagination is the first page (no deep-crawl cursor). */
 export function isFirstPage(pagination = {}, dateFilters = {}) {

@@ -10,7 +10,7 @@ assert.ok(start >= 0 && end > start, 'Profile crawl effect must be located');
 const body = source.slice(start + '  useEffect(() => {'.length, end);
 const ref = current => ({ current });
 
-async function scan({ oldest = false, fail = false, full = false, timeout = false } = {}) {
+async function scan({ oldest = false, fail = false, full = false, timeout = false, stop = false } = {}) {
   const history = Array.from({ length: 3117 }, (_, index) => ({ id: `c${index}`, created_utc: 10000 - index }));
   const initial = oldest ? history.slice(-100) : history.slice(0, 100);
   let finish;
@@ -27,6 +27,7 @@ async function scan({ oldest = false, fail = false, full = false, timeout = fals
     lastCrawlQueryRef: ref(null), bgStatsRef: ref(null), bgCrawlRef: ref(null),
     crawlItemsRef: ref(0), crawlCappedRef: ref(false), crawlProcessedRef: ref(new Set()),
     crawledPostsRef: ref([]), crawledCommentsRef: ref([]), fullCrawlRef: ref(full),
+    crawlGenRef: ref(0), manualStopRef: ref(false),
     expectedTotalsRef: ref({ posts: 0, comments: history.length }),
     setIsCrawling(value) { if (!value) finish(); },
     setCrawledCount(value) { extra = value; },
@@ -36,6 +37,13 @@ async function scan({ oldest = false, fail = false, full = false, timeout = fals
     fetchBoth: async (_query, type, pagination) => {
       assert.equal(type, 'comments', 'Known-empty post stream should not be fetched');
       pages++;
+      if (stop && pages === 3) {
+        // Simulate the Stop button: abort the shared crawl controller mid-scan.
+        // Abort during the 3rd fetch so the 2nd page is already processed
+        // (the post-abort break discards the in-flight page). The crawl must
+        // stop with partial progress and must NOT mark capped/incomplete.
+        try { dependencies.bgCrawlRef.current?.abort(); } catch { /* noop */ }
+      }
       if (fail && pages > 1) return { items: [], done: false };
       const eligible = history.filter(item => pagination.before == null || item.created_utc < pagination.before);
       return { items: eligible.slice(0, 100), done: eligible.length <= 100 };
@@ -72,3 +80,9 @@ const timedOut = await scan({ timeout: true });
 assert.equal(timedOut.total, 300, 'Timeout must retain the most recent page in progress');
 assert.equal(timedOut.capped, true);
 console.log('PASS full profile crawl, Oldest initial page, refresh, archive failure, and timeout progress');
+
+const stopped = await scan({ stop: true });
+assert.ok(stopped.total > 100 && stopped.total < 3117, 'Stop must retain partial progress without completing');
+assert.ok(stopped.pages <= 3, 'Stop must halt paging immediately');
+assert.equal(stopped.capped, false, 'Manual Stop must not set crawlCapped');
+console.log('PASS manual Stop retains partial progress without marking capped');

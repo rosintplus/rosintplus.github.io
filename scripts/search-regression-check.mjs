@@ -100,9 +100,12 @@ const moduleUrl = source => `data:text/javascript;base64,${Buffer.from(source).t
 const reactStub = moduleUrl('export const {useState,useRef,useCallback,useMemo,useEffect}=globalThis.__searchHookTest;');
 const apiStub = moduleUrl('export const {fetchBoth}=globalThis.__searchHookTest;');
 const cacheStub = moduleUrl('export const readPersistentFirstPage=()=>null;');
+const stableStub = moduleUrl('export const stableStringify=(v)=>JSON.stringify(v);');
 const source = (await readFile(new URL('../src/hooks/usePaginatedFetch.js', import.meta.url), 'utf8'))
   .replace('"react"', JSON.stringify(reactStub))
+  .replace('"../api/endpoints.js"', JSON.stringify(apiStub))
   .replace('"../api.js"', JSON.stringify(apiStub))
+  .replace('"../api/stableKey.js"', JSON.stringify(stableStub))
   .replace('"../api/persistentCache.js"', JSON.stringify(cacheStub));
 const { usePaginatedFetch } = await import(moduleUrl(source));
 const render = () => { slot = 0; return usePaginatedFetch('comments'); };
@@ -146,3 +149,37 @@ await Promise.all([unmounted, remounted]);
 assert.equal(render().items[0].id, 'remount-comment');
 console.log('PASS remounted hook does not reuse an aborted local request');
 delete globalThis.__searchHookTest;
+
+// Abort-vs-timeout disambiguation: a caller abort during the PullPush
+// contribution window must reject with AbortError, never resolve as a
+// timeout-merge (items + timeout flag).
+{
+  const client = await import('../src/api/client.js');
+  client.resetPullPushBreaker();
+  client.FETCH_CACHE.clear();
+  const { FETCH_BOTH_INFLIGHT } = await import('../src/api/endpoints.js');
+  FETCH_BOTH_INFLIGHT.clear();
+  globalThis.fetch = (url, { signal } = {}) => new Promise((resolve, reject) => {
+    const abort = () => reject(new DOMException('Aborted', 'AbortError'));
+    if (signal?.aborted) { abort(); return; }
+    if (String(url).includes('arctic-shift')) {
+      signal?.addEventListener('abort', abort, { once: true });
+      resolve({ ok: true, status: 200, json: async () => ({ data: [{ id: 'abortme', created_utc: 100 }] }) });
+      return;
+    }
+    // PullPush hangs until caller abort or timeout bounds it.
+    signal?.addEventListener('abort', abort, { once: true });
+  });
+  const ctrl = new AbortController();
+  const pendingAbort = fetchBoth('abort-vs-timeout-user', 'posts', {}, {}, { signal: ctrl.signal }).then(
+    res => ({ resolved: true, res }),
+    err => ({ resolved: false, err }),
+  );
+  await tick();
+  ctrl.abort();
+  const outcome = await pendingAbort;
+  assert.equal(outcome.resolved, false, 'aborted fetchBoth must reject, not timeout-merge');
+  assert.equal(outcome.err?.name, 'AbortError');
+  assert.ok(!outcome.err?.timeout && !outcome.res?.timeout, 'abort must not surface as timeout');
+  console.log('PASS aborted fetchBoth rejects AbortError, not timeout-merge');
+}

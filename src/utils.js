@@ -27,9 +27,9 @@ export function downloadFile(filename, text, mime) {
 export function normalizeUsername(input) {
   let s = String(input || "").trim();
   // Full URL → keep only the path after the domain
-  s = s.replace(/^https?:\/\/(www\.|old\.|new\.)?reddit\.com/i, "");
-  // Leading slashes, then optional u/ /user/ prefix, then a leading @
-  s = s.replace(/^\/+/, "").replace(/^(u|user)\//i, "").replace(/^@/, "");
+  s = s.replace(/^https?:\/\/([a-z0-9-]+\.)?reddit\.com/i, "");
+  // Leading slashes, then optional u/ /user/ / r/ prefix, then a leading @
+  s = s.replace(/^\/+/, "").replace(/^(u|user|r)\//i, "").replace(/^@/, "");
   // Drop any trailing slash / query / whitespace
   s = s.replace(/[/?#].*$/, "").trim();
   return s;
@@ -44,7 +44,7 @@ export function normalizeUsername(input) {
  */
 export function normalizeSubreddit(input) {
   let s = String(input || "").trim();
-  s = s.replace(/^https?:\/\/(www\.|old\.|new\.)?reddit\.com/i, "");
+  s = s.replace(/^https?:\/\/([a-z0-9-]+\.)?reddit\.com/i, "");
   s = s.replace(/^\/+/, "");
   s = s.replace(/^r\//i, "");
   s = s.replace(/[/?#].*$/, "").trim();
@@ -89,6 +89,76 @@ export function parsePostInput(input) {
  */
 export function isPostInput(input) {
   return parsePostInput(input) != null;
+}
+
+/**
+ * Validate a YYYY-MM-DD calendar-day string (from <input type="date"> or
+ * ?from/?to). Invalid strings must be treated as "" (no filter) and dropped
+ * from the URL — never passed to Date (which would yield NaN bounds).
+ * @param {unknown} s - Candidate date string.
+ * @returns {boolean} True when s is a real calendar day.
+ */
+export function isValidDateString(s) {
+  if (typeof s !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const [y, m, d] = s.split("-").map(Number);
+  if (m < 1 || m > 12 || d < 1 || d > 31) return false;
+  const dt = new Date(y, m - 1, d);
+  return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d;
+}
+
+/**
+ * LOCAL calendar-day bounds for <input type="date"> values.
+ * Both the client filter and the server epoch use new Date(y, m-1, d)
+ * (local midnight), NOT `new Date("YYYY-MM-DDT00:00:00Z")` (UTC midnight):
+ * the UTC pin shifted day filters by the viewer's timezone offset.
+ * @param {string} s - Validated YYYY-MM-DD string.
+ * @returns {number|null} Start-of-day epoch seconds, or null when invalid.
+ */
+export function parseLocalDayStartSec(s) {
+  if (!isValidDateString(s)) return null;
+  const [y, m, d] = s.split("-").map(Number);
+  return Math.floor(new Date(y, m - 1, d).getTime() / 1000);
+}
+
+/**
+ * LOCAL end-of-day bound (23:59:59 local) for the same basis as start.
+ * @param {string} s - Validated YYYY-MM-DD string.
+ * @returns {number|null} End-of-day epoch seconds, or null when invalid.
+ */
+export function parseLocalDayEndSec(s) {
+  if (!isValidDateString(s)) return null;
+  const [y, m, d] = s.split("-").map(Number);
+  return Math.floor(new Date(y, m - 1, d, 23, 59, 59).getTime() / 1000);
+}
+
+/**
+ * Sanitize one CSV/JSON export filename segment (query/tab).
+ * Strips Windows-forbidden chars + controls, trims to 60 chars.
+ * @param {unknown} s - Raw segment.
+ * @returns {string} Safe segment, or "export" fallback.
+ */
+export function sanitizeFilenameSegment(s) {
+  // eslint-disable-next-line no-control-regex -- stripping C0 controls requires matching them
+  const clean = String(s ?? "").replace(/[\\/:*?"<>|\x00-\x1f]/g, "").trim().slice(0, 60);
+  return clean || "export";
+}
+
+/**
+ * Allow only http(s) URLs for rendering (href/src). Returns the original
+ * string when it parses with an http/https scheme, else null (caller omits
+ * the href or hides the img).
+ * @param {unknown} href - Candidate URL.
+ * @returns {string|null} Safe URL or null.
+ */
+export function safeHttpUrl(href) {
+  if (typeof href !== "string" || !href) return null;
+  try {
+    const u = new URL(href, "https://localhost");
+    if ((u.protocol === "http:" || u.protocol === "https:") && /^https?:\/\//i.test(href.trim())) return href;
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 /**
