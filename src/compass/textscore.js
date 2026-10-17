@@ -168,6 +168,16 @@ function codeSentence(sentence, tokens, out, meta) {
  * direct report of position, not an inference from vocabulary.
  * @returns {Array<{topic: string, stance: string, pole: {econ?: number, soc?: number, gov?: number}}>}
  */
+
+// Identity patterns precompiled once at module load. codeIdentityDeclarations
+// runs once per item inside scoreText, and rebuilding a RegExp per sentence
+// per pattern there is pure overhead — the dictionary is static, so the
+// global-flagged copies (matchAll requires the g flag) are built a single
+// time and reused. matchAll clones its argument internally and never mutates
+// the shared objects' lastIndex, so reuse is deterministic.
+const COMPILED_IDENTITY_PATTERNS = (CATEGORIES.find((c) => c.identity)?.patterns || []).map(
+  (pattern) => new RegExp(pattern.source, `${pattern.flags.replace(/g/g, "")}g`),
+);
 export function codeIdentityDeclarations(rawText) {
   const out = [];
   const identity = CATEGORIES.find((c) => c.identity);
@@ -175,8 +185,9 @@ export function codeIdentityDeclarations(rawText) {
   const text = normalizeForCoding(rawText).replace(/"[^"\n]*"|“[^”\n]*”|‘[^’\n]*’|(?<!\w)'[^'\n]+'(?!\w)/g, " ");
   for (const sentence of splitSentences(text)) {
     if (QUESTION_CUES.test(sentence) || /\?\s*$/.test(sentence)) continue;
-    for (const pattern of identity.patterns) {
-      for (const m of sentence.matchAll(new RegExp(pattern.source, `${pattern.flags.replace(/g/g, "")}g`))) {
+    for (const pattern of COMPILED_IDENTITY_PATTERNS) {
+      pattern.lastIndex = 0;
+      for (const m of sentence.matchAll(pattern)) {
         const phrase = (m[0] || "").toLowerCase();
         const preceding = tokenize(sentence.slice(0, m.index)).slice(-NEGATION_SCOPE);
         if ([...preceding, ...tokenize(phrase)].some(token => NEGATION_CUES.has(token))) continue;
@@ -349,8 +360,8 @@ export function scoreText(items) {
     const est = balanceEstimate(byDim[dim]);
     const labels = DIMENSION_LABELS[dim];
     dimensions[dim] = {
-      score: Math.round(est.score * 10) / 10,
-      se: Math.round(est.se * 10) / 10,
+      score: est.score,
+      se: est.se,
       pro: est.pro,
       con: est.con,
       n: est.n,

@@ -14,6 +14,7 @@ import {
 import { balanceEstimate, martinVanbergTransform, scoreText, codeIdentityDeclarations } from '../src/compass/textscore.js';
 import { emptyStats, processItem } from '../src/profile/stats.js';
 import { estimateFromCommunities } from '../src/compass/community.js';
+import { getArchetypeColorClass, getQuadrantArchetype } from '../src/components/profile/archetype.js';
 
 const mk = (id, sub, body) => ({ id, subreddit: sub, body, created_utc: 1700000000 });
 const statsFrom = (items) => {
@@ -224,6 +225,37 @@ const sameIdComment = { id: post.id, subreddit: 'test', body: post.selftext };
 check(evaluatePoliticalCompass({ posts: [post], comments: [sameIdComment] }).evidence.stanceWeight === 2 * postOnly.evidence.stanceWeight, 'post and comment IDs belong to separate namespaces');
 const bodyPost = { ...post, id: 'body-only', title: 'My thoughts' };
 check(scoreText([bodyPost]).units > 0, 'post selftext remains evidence when its title is neutral');
+
+console.log('\n=== O. diagonal cross-quadrant (mixed left+right signals) ===');
+// A centred reading with corroboration on BOTH econ poles is a genuine
+// cross-ideological history, not a blank one. Cross is reachable only here:
+// |econ|,|gov| inside ENTER with hasLeft && hasRight (see analyze.js fresh()).
+const crossDirect = classifyQuadrant(0, 0, { hasLeftSignals: true, hasRightSignals: true });
+check(crossDirect.quadrant === 'cross', 'centred reading with left+right signals is cross');
+check(crossDirect.labelKey === 'compassQuadCross', 'cross carries labelKey compassQuadCross');
+check(crossDirect.label === 'Cross-Ideological / Mixed Discussion', 'cross label verbatim');
+check(classifyQuadrant(0, 0, { hasLeftSignals: true }).quadrant === 'center', 'left-only centred reading stays center (no false cross)');
+check(classifyQuadrant(0, 0, { hasRightSignals: true }).quadrant === 'center', 'right-only centred reading stays center (no false cross)');
+check(classifyQuadrant(-9, -9, { hasLeftSignals: true, hasRightSignals: true }).quadrant !== 'cross', 'extreme diagonal dominates cross');
+const mixedLR = ev([...repeat(20, 'socialism', LEFT_TEXT), ...repeat(20, 'conservative', RIGHT_TEXT)]);
+rep('mixed left+right', mixedLR);
+check(mixedLR.hasSignal && mixedLR.quadrant === 'cross', 'balanced left+right history reads cross-quadrant');
+check(mixedLR.archKey === 'compassQuadCross', 'balanced history archKey is compassQuadCross');
+
+console.log('\n=== P. archetype color + quadrant threshold note ===');
+// NOTE: the engine (analyze.js classifyQuadrant) uses hysteresis ENTER 2.8 /
+// EXIT 1.6, while the UI helper getQuadrantArchetype uses flat +/-2.2. The
+// two disagree on purpose in the [2.2, 2.8) band: the helper is a display
+// fallback, the engine label is authoritative. These checks pin both sides
+// so a threshold drift in either file fails loudly.
+check(getArchetypeColorClass('Authoritarian Left (Auth-Left)').includes('quad-auth-left'), 'auth-left archetype maps to auth-left color');
+check(getArchetypeColorClass('Cross-Ideological / Mixed Discussion').includes('--neutral'), 'cross archetype maps to neutral color');
+check(getArchetypeColorClass('Undetermined / Non-Political Activity').includes('--text-muted'), 'undetermined archetype maps to muted color');
+check(classifyQuadrant(2.5, 0).quadrant === 'center', 'engine ENTER 2.8: 2.5 stays center');
+check(classifyQuadrant(3.0, 0).quadrant === 'right-center', 'engine ENTER 2.8: 3.0 enters right-center');
+check(classifyQuadrant(2.0, 0, { prevQuadrant: 'right-center' }).held === true, 'engine EXIT 1.6: 2.0 holds right-center');
+check(classifyQuadrant(1.0, 0, { prevQuadrant: 'right-center' }).quadrant === 'center', 'engine EXIT 1.6: 1.0 releases to center');
+check(getQuadrantArchetype(2.5, 0, '') === 'Center-Right', 'UI helper uses +/-2.2: 2.5 already Center-Right (differs from engine by design)');
 
 console.log('\n' + '='.repeat(52));
 console.log(`  ${pass.length} passed, ${fail.length} failed`);

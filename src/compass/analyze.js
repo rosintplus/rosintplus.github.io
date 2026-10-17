@@ -60,6 +60,21 @@ const QUADRANT_LABELS = {
   center: "Centrist / Moderate",
 };
 
+// i18n keys mirroring QUADRANT_LABELS plus the cross-ideological label.
+// English strings stay verbatim above; labelKey travels alongside label.
+export const QUADRANT_LABEL_KEYS = {
+  "auth-left": "compassQuadAuthLeft",
+  "auth-right": "compassQuadAuthRight",
+  "auth-center": "compassQuadAuthCenter",
+  "lib-left": "compassQuadLibLeft",
+  "lib-right": "compassQuadLibRight",
+  "lib-center": "compassQuadLibCenter",
+  "left-center": "compassQuadLeftCenter",
+  "right-center": "compassQuadRightCenter",
+  center: "compassQuadCenter",
+  cross: "compassQuadCross",
+};
+
 /**
  * Classify a (econ, gov) reading into one of nine quadrants.
  *
@@ -67,7 +82,7 @@ const QUADRANT_LABELS = {
  * quadrant is retained until the reading clearly leaves it, so a borderline
  * account keeps a stable label instead of oscillating.
  *
- * @returns {{quadrant: string, label: string, held: boolean}}
+ * @returns {{quadrant: string, label: string, labelKey: string, held: boolean}}
  */
 export function classifyQuadrant(econ, gov, { prevQuadrant = null, hasLeftSignals = false, hasRightSignals = false } = {}) {
   const inQuadrant = (q) => {
@@ -99,13 +114,13 @@ export function classifyQuadrant(econ, gov, { prevQuadrant = null, hasLeftSignal
   };
 
   if (prevQuadrant && prevQuadrant !== "cross" && inQuadrant(prevQuadrant)) {
-    return { quadrant: prevQuadrant, label: QUADRANT_LABELS[prevQuadrant] || QUADRANT_LABELS.center, held: true };
+    return { quadrant: prevQuadrant, label: QUADRANT_LABELS[prevQuadrant] || QUADRANT_LABELS.center, labelKey: QUADRANT_LABEL_KEYS[prevQuadrant] || QUADRANT_LABEL_KEYS.center, held: true };
   }
   const quadrant = fresh();
   if (quadrant === "cross") {
-    return { quadrant, label: "Cross-Ideological / Mixed Discussion", held: false };
+    return { quadrant, label: "Cross-Ideological / Mixed Discussion", labelKey: QUADRANT_LABEL_KEYS.cross, held: false };
   }
-  return { quadrant, label: QUADRANT_LABELS[quadrant] || QUADRANT_LABELS.center, held: false };
+  return { quadrant, label: QUADRANT_LABELS[quadrant] || QUADRANT_LABELS.center, labelKey: QUADRANT_LABEL_KEYS[quadrant] || QUADRANT_LABEL_KEYS.center, held: false };
 }
 
 /** Legacy string-only entry point (no hysteresis). */
@@ -118,6 +133,14 @@ export function getDimensionLabels(econ, soc, gov) {
   const socLabel = soc <= -4.0 ? "Progressive / Secular" : soc <= 2.0 ? "Pluralist / Moderate" : "Traditional / Social Conservative";
   const govLabel = gov <= -4.0 ? "Civil Libertarian / Anti-Authoritarian" : gov <= 2.0 ? "Balanced Governance" : "Statist / Law & Order";
   return { econLabel, socLabel, govLabel };
+}
+
+// Key-returning parallel to getDimensionLabels — thresholds mirror it exactly.
+export function getDimensionLabelKeys(econ, soc, gov) {
+  const econKey = econ <= -6.0 ? "compassEconSocialist" : econ <= -2.0 ? "compassEconMixedLeft" : econ <= 2.0 ? "compassEconCentrist" : econ <= 6.0 ? "compassEconProMarket" : "compassEconLaissez";
+  const socKey = soc <= -4.0 ? "compassSocProgressive" : soc <= 2.0 ? "compassSocModerate" : "compassSocTraditional";
+  const govKey = gov <= -4.0 ? "compassGovLibertarian" : gov <= 2.0 ? "compassGovBalanced" : "compassGovStatist";
+  return { econKey, socKey, govKey };
 }
 
 // ─── Item pooling (dedupe) ──────────────────────────────────────────────────
@@ -201,6 +224,26 @@ function hashStrings(parts) {
   return (h >>> 0).toString(36);
 }
 
+// Bounded per-item content fingerprint for the cache key. Hashing full bodies
+// every flush is O(total chars); instead hash id + length + first/last 200
+// chars. Length catches insertions/deletions, the edge hashes catch an edit
+// buried past character 200 while keeping per-flush work O(items), not O(chars).
+const CACHE_FINGERPRINT_EDGE = 200;
+
+function contentFingerprint(raw) {
+  const text = String(raw || "");
+  const len = text.length;
+  if (len <= CACHE_FINGERPRINT_EDGE * 2) return `${len}:${hashStrings([text])}`;
+  return `${len}:${hashStrings([`${text.slice(0, CACHE_FINGERPRINT_EDGE)}\0${text.slice(len - CACHE_FINGERPRINT_EDGE)}`])}`;
+}
+
+function cacheItemFingerprint(item, kind) {
+  const raw = politicalText(item);
+  const sub = (item?.subreddit || "").toLowerCase();
+  const id = identityKey(item, kind) || "";
+  return `${id}|${sub}|${contentFingerprint(raw)}`;
+}
+
 function buildCompassCacheKey(stats, posts, comments) {
   const subCounts = stats?.subredditCounts || {};
   const subKeys = Object.keys(subCounts).sort();
@@ -212,11 +255,11 @@ function buildCompassCacheKey(stats, posts, comments) {
   }
   // Include sampleItems identity in the key: they are engine input and are
   // NOT derivable from the subreddit counts or the id lists.
-  const sampleIds = (stats?.sampleItems || []).map((s) => `${identityKey(s) || ""}|${contentKey(s)}`);
+  const sampleIds = (stats?.sampleItems || []).map((s) => cacheItemFingerprint(s));
   return [
     `subs${subKeys.length}:${(h >>> 0).toString(36)}`,
-    `p${(posts || []).length}:${hashStrings((posts || []).map((i) => `${i?.id || ""}|${contentKey(i)}`))}`,
-    `c${(comments || []).length}:${hashStrings((comments || []).map((i) => `${i?.id || ""}|${contentKey(i)}`))}`,
+    `p${(posts || []).length}:${hashStrings((posts || []).map((i) => cacheItemFingerprint(i, "t3")))}`,
+    `c${(comments || []).length}:${hashStrings((comments || []).map((i) => cacheItemFingerprint(i, "t1")))}`,
     `s${sampleIds.length}:${hashStrings(sampleIds)}`,
   ].join("|");
 }
@@ -239,13 +282,31 @@ export function sanitizeTextForPoliticalAnalysis(rawText) {
 
 // ─── Pooling the two estimators ─────────────────────────────────────────────
 
+// Inverse-variance weights are 1/SE^2, so an SE near zero yields an
+// astronomical weight (SE=1e-6 -> w=1e12) that lets one estimator hijack the
+// pooled reading. Clamp finite SEs to [MIN_SE_FOR_WEIGHT, MAX_SE_FOR_WEIGHT]
+// before weighting: typical SEs (2..5) are untouched, while a spuriously tiny
+// SE contributes at most 1/0.5^2 = 4.0 weight and a huge SE contributes ~0.
+const MIN_SE_FOR_WEIGHT = 0.5;
+const MAX_SE_FOR_WEIGHT = 20;
+function clampSEForWeight(se) {
+  if (!Number.isFinite(se)) return se;
+  return Math.min(MAX_SE_FOR_WEIGHT, Math.max(MIN_SE_FOR_WEIGHT, se));
+}
+
 /**
  * Inverse-variance (Cochran) combination of two independent estimates.
  * An estimate with infinite standard error contributes zero weight.
  */
-function combine(textEst, commEst) {
-  const wText = Number.isFinite(textEst.se) && textEst.se > 0 ? 1 / (textEst.se ** 2) : 0;
-  const wComm = Number.isFinite(commEst.se) && commEst.se > 0 ? 1 / (commEst.se ** 2) : 0;
+export function combine(textEst, commEst) {
+  // Keep full precision for weighting; display rounding happens in callers
+  // via clampScore / Math.round. Finite SEs are clamped (see above) so a
+  // spuriously zero SE (e.g. from rounding upstream) becomes a bounded
+  // weight instead of hijacking the pool; infinite SE still gets zero weight.
+  const seText = clampSEForWeight(textEst.se);
+  const seComm = clampSEForWeight(commEst.se);
+  const wText = Number.isFinite(seText) && seText > 0 ? 1 / (seText ** 2) : 0;
+  const wComm = Number.isFinite(seComm) && seComm > 0 ? 1 / (seComm ** 2) : 0;
   const wSum = wText + wComm;
   if (wSum <= 0) {
     return { score: 0, se: Number.POSITIVE_INFINITY, weight: 0, textWeight: 0, commWeight: 0 };
@@ -351,18 +412,24 @@ function evaluatePoliticalCompassUncached({ stats = {}, posts = [], comments = [
   // Label a dimension only when its 95% CI excludes zero. This, together
   // with shrinkage above, is what keeps an uncertain reading from looking
   // extreme: uncertainty suppresses both the number and its label.
-  const labelFor = (est, neg, pos) => {
-    if (!Number.isFinite(est.se)) return "Insufficient evidence";
+  // Single-sourced English + key helper: numeric branches below are the only
+  // logic — labelFor delegates to it so the two can never drift apart.
+  // Centre / uncertain reuses the existing apCompassUncertain key (no duplicate).
+  const labelForWithKey = (est, neg, pos, keys) => {
+    if (!Number.isFinite(est.se)) return { label: "Insufficient evidence", labelKey: "compassDimNoEvidence" };
     const ciLow = est.score - Z95 * est.se;
     const ciHigh = est.score + Z95 * est.se;
-    if (ciLow <= 0 && ciHigh >= 0) return "Centre / uncertain";
+    if (ciLow <= 0 && ciHigh >= 0) return { label: "Centre / uncertain", labelKey: "apCompassUncertain" };
     const s = est.display;
-    if (s <= -6) return `${neg} (strong)`;
-    if (s <= -2) return neg;
-    if (s < 2) return "Mixed / Moderate";
-    if (s < 6) return pos;
-    return `${pos} (strong)`;
+    if (s <= -6) return { label: `${neg} (strong)`, labelKey: keys.negStrongKey };
+    if (s <= -2) return { label: neg, labelKey: keys.negKey };
+    if (s < 2) return { label: "Mixed / Moderate", labelKey: "compassDimMixed" };
+    if (s < 6) return { label: pos, labelKey: keys.posKey };
+    return { label: `${pos} (strong)`, labelKey: keys.posStrongKey };
   };
+  const ECON_KEYS = { negKey: "compassDimEconLeft", negStrongKey: "compassDimEconLeftStrong", posKey: "compassDimEconRight", posStrongKey: "compassDimEconRightStrong" };
+  const SOC_KEYS = { negKey: "compassDimSocLeft", negStrongKey: "compassDimSocLeftStrong", posKey: "compassDimSocRight", posStrongKey: "compassDimSocRightStrong" };
+  const GOV_KEYS = { negKey: "compassDimGovLeft", negStrongKey: "compassDimGovLeftStrong", posKey: "compassDimGovRight", posStrongKey: "compassDimGovRightStrong" };
 
   const econ = hasSignal ? combined.econ.display : 0;
   const soc = hasSignal ? combined.soc.display : 0;
@@ -374,8 +441,8 @@ function evaluatePoliticalCompassUncached({ stats = {}, posts = [], comments = [
   const rightHits = text.topCategories.reduce((s, r) => s + ((r.dims.econ || 0) > 0 ? 1 : 0), 0);
 
   const classified = classifyQuadrant(econ, gov, {
-    hasLeftSignals: leftHits > 0 && rightHits === 0,
-    hasRightSignals: rightHits > 0 && leftHits === 0,
+    hasLeftSignals: leftHits > 0,
+    hasRightSignals: rightHits > 0,
   });
 
   // Reliability: 1 at zero standard error, falling as uncertainty grows. The
@@ -394,6 +461,17 @@ function evaluatePoliticalCompassUncached({ stats = {}, posts = [], comments = [
       : reliability >= 0.5
         ? "Moderate (corroborated evidence)"
         : "Low (limited evidence — treat as provisional)";
+  const confidenceKey = !hasSignal
+    ? "compassConfNoSignal"
+    : reliability >= 0.75 && distinctCategories >= 3 && communityCount >= 2
+      ? "compassConfHigh"
+      : reliability >= 0.5
+        ? "compassConfModerate"
+        : "compassConfLow";
+
+  const econLabel = hasSignal ? labelForWithKey(combined.econ, "State / Labour", "Free Market", ECON_KEYS) : { label: "Non-Political", labelKey: "compassDimNonPolitical" };
+  const socLabel = hasSignal ? labelForWithKey(combined.soc, "Progressive", "Traditional", SOC_KEYS) : { label: "Non-Political", labelKey: "compassDimNonPolitical" };
+  const govLabel = hasSignal ? labelForWithKey(combined.gov, "Civil Liberty", "Authority", GOV_KEYS) : { label: "Non-Political", labelKey: "compassDimNonPolitical" };
 
   return {
     econ,
@@ -401,8 +479,10 @@ function evaluatePoliticalCompassUncached({ stats = {}, posts = [], comments = [
     gov,
     hasSignal,
     archetype: hasSignal ? classified.label : "Undetermined / Non-Political Activity",
+    archKey: hasSignal ? classified.labelKey : "compassArchUndetermined",
     quadrant: hasSignal ? classified.quadrant : "center",
     confidence,
+    confidenceKey,
     evidence: {
       totalWeight: Math.round(totalEvidence * 10) / 10,
       communityWeight: Math.round(communityMass * 10) / 10,
@@ -426,19 +506,22 @@ function evaluatePoliticalCompassUncached({ stats = {}, posts = [], comments = [
     dimensions: {
       econ: {
         score: econ,
-        label: hasSignal ? labelFor(combined.econ, "State / Labour", "Free Market") : "Non-Political",
+        label: econLabel.label,
+        labelKey: econLabel.labelKey,
         se: Number.isFinite(combined.econ.se) ? Math.round(combined.econ.se * 10) / 10 : null,
         units: text.dimensions.econ?.n || 0,
       },
       soc: {
         score: soc,
-        label: hasSignal ? labelFor(combined.soc, "Progressive", "Traditional") : "Non-Political",
+        label: socLabel.label,
+        labelKey: socLabel.labelKey,
         se: Number.isFinite(combined.soc.se) ? Math.round(combined.soc.se * 10) / 10 : null,
         units: text.dimensions.soc?.n || 0,
       },
       gov: {
         score: gov,
-        label: hasSignal ? labelFor(combined.gov, "Civil Liberty", "Authority") : "Non-Political",
+        label: govLabel.label,
+        labelKey: govLabel.labelKey,
         se: Number.isFinite(combined.gov.se) ? Math.round(combined.gov.se * 10) / 10 : null,
         units: text.dimensions.gov?.n || 0,
       },
@@ -447,6 +530,7 @@ function evaluatePoliticalCompassUncached({ stats = {}, posts = [], comments = [
       topic: r.topic,
       stance: r.stance,
       polarity: polarityLabel(r.dims),
+      polarityKeys: polarityKeys(r.dims),
       keyword: r.keyword,
       snippet: r.snippet ? `"${r.snippet}"` : "",
       econ: Math.round((r.dims.econ || 0) * 10) / 10,
@@ -465,6 +549,14 @@ function polarityLabel(dims) {
   if (dims.soc) parts.push(dims.soc < 0 ? "Progressive" : "Traditional");
   if (dims.gov) parts.push(dims.gov < 0 ? "Libertarian" : "Authoritarian");
   return parts.length ? parts.join(" · ") : "Neutral";
+}
+
+export function polarityKeys(dims) {
+  const keys = [];
+  if (dims.econ) keys.push(dims.econ < 0 ? "compassPolEconLeft" : "compassPolEconRight");
+  if (dims.soc) keys.push(dims.soc < 0 ? "compassPolSocProg" : "compassPolSocTrad");
+  if (dims.gov) keys.push(dims.gov < 0 ? "compassPolGovLib" : "compassPolGovAuth");
+  return keys.length ? keys : ["compassPolNeutral"];
 }
 
 export { CATEGORIES, MIN_TOTAL_EVIDENCE };
