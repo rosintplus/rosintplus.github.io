@@ -11,5 +11,6 @@ function encodeCell(value) {
 }
 
 export function serializeCsv(rows) {
-  return rows.map(row => row.map(encodeCell).join(",")).join("\n");
+  // BOM + CRLF for Excel on Windows; quoting/injection defenses in encodeCell stay unchanged.
+  return "\uFEFF" + rows.map(row => row.map(encodeCell).join(",")).join("\r\n");
 }

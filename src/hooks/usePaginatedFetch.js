@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
-import { fetchBoth } from "../api.js";
+import { fetchBoth } from "../api/endpoints.js";
+import { stableStringify } from "../api/stableKey.js";
 import { readPersistentFirstPage } from "../api/persistentCache.js";
 
 export function cursorFromData(data) {
@@ -19,14 +20,16 @@ export function forwardPagination(entry, sort) {
     : { before: entry.lastUtc, beforeId: entry.lastId };
 }
 
-function stableKey(value) {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(stableKey).join(",")}]`;
-  return `{${Object.keys(value).sort().map(k => `${JSON.stringify(k)}:${stableKey(value[k])}`).join(",")}}`;
-}
-
 function requestKey(username, type, pagination, filters, sort, mode, bypassCache) {
-  return stableKey({ username, type, pagination, filters, sort, mode, bypassCache });
+  return stableStringify({
+    username: String(username || "").toLowerCase(),
+    type,
+    pagination: pagination || {},
+    filters: filters || {},
+    sort: sort || "desc",
+    mode: mode || "username",
+    bypassCache,
+  });
 }
 
 export function usePaginatedFetch(type) {
@@ -94,11 +97,16 @@ export function usePaginatedFetch(type) {
         setArcticDown(down);
         setPullpushDown(ppDown);
         setSourceErrors(failures);
+        // Empty + tail-unknown (sources failed) is a failure, not a legit empty:
+        // mark it so background revalidation keeps the painted hit instead of
+        // wiping to []/done. Legit empty (both ok, done true) stays error-free.
+        const emptyFailure = Array.isArray(data) && data.length === 0 && (!streamDone || !!down || !!ppDown);
+        if (emptyFailure) return { data, done: streamDone, error: failures };
         return { data, done: streamDone };
       } catch (err) {
         if (err?.name === "AbortError" || fetchId !== fetchIdRef.current) return null;
         if (!suppressError) setError(err?.message ?? "Network error");
-        return { data: [], done: true };
+        return { data: [], done: false, error: err };
       } finally {
         if (fetchId === fetchIdRef.current) setLoading(false);
         if (inFlightRef.current?.fetchId === fetchId) inFlightRef.current = null;
@@ -154,8 +162,14 @@ export function usePaginatedFetch(type) {
         // Background revalidation: force fresh network (also refreshes the
         // persistent entry via runFetchBoth). Abort/single-flight semantics
         // are preserved — _fetch owns fetchId/abort, stale results are dropped.
+        // Failed revalidation must not wipe the painted hit: only apply when
+        // r is non-null AND (non-empty OR no error). On failure keep hit.items
+        // and keep Load More enabled (done stays as hit.done).
         _fetch(username, pag, filters, { bypassCache: true, sort, mode }).then(r => {
           if (!r) return;
+          const hasData = Array.isArray(r.data) && r.data.length > 0;
+          const noError = !r.error;
+          if (!(hasData || noError)) return;
           setItems(r.data);
           cursorRef.current = cursorFromData(r.data);
           setDone(r.done);
@@ -182,6 +196,8 @@ export function usePaginatedFetch(type) {
       suppressError: true
     });
     if (result === null) return;
+    // Failed page must not close the stream: keep Load More enabled for retry.
+    if (result.error) return;
     const { data, done: streamDone } = result;
     if (data.length > 0) {
       const newCursor = cursorFromData(data);

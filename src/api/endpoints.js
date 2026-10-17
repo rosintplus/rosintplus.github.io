@@ -1,10 +1,14 @@
 /** Reddit archive endpoints built on top of the low-level client. */
 import { ARCTIC, PULLPUSH, LIMIT, safeFetch, sleepAbortable, isPullPushBlocked } from "./client.js";
+import { stableStringify } from "./stableKey.js";
 import { writePersistentFirstPage } from "./persistentCache.js";
 
 export function buildUrls(username, type, pagination = {}, dateFilters = {}, { sort = "desc", mode = "username" } = {}) {
   const target = mode === "subreddit" ? `subreddit=${encodeURIComponent(username)}` : `author=${encodeURIComponent(username)}`;
-  const base = [`limit=${LIMIT}`, `sort=${sort}`, target];
+  // All query values are String()-then-encodeURIComponent encoded: numerics
+  // (limit/before/after) keep identical wire output ("100", epoch strings),
+  // while sort/over_18/before/after are safe against special chars.
+  const base = [`limit=${encodeURIComponent(String(LIMIT))}`, `sort=${encodeURIComponent(String(sort))}`, target];
   if (dateFilters.subreddit && mode !== "subreddit") {
     base.push(`subreddit=${encodeURIComponent(dateFilters.subreddit)}`);
   }
@@ -26,17 +30,17 @@ export function buildUrls(username, type, pagination = {}, dateFilters = {}, { s
   }
   // NSFW is a post-only field; Arctic Shift honors over_18 server-side.
   if (type === "posts" && dateFilters.over18 != null) {
-    base.push(`over_18=${dateFilters.over18}`);
+    base.push(`over_18=${encodeURIComponent(String(dateFilters.over18))}`);
   }
   if (pagination.before != null) {
-    base.push(`before=${pagination.before}`);
+    base.push(`before=${encodeURIComponent(String(pagination.before))}`);
   } else if (dateFilters.dateTo) {
-    base.push(`before=${dateFilters.dateTo}`);
+    base.push(`before=${encodeURIComponent(String(dateFilters.dateTo))}`);
   }
   if (pagination.after != null) {
-    base.push(`after=${pagination.after}`);
+    base.push(`after=${encodeURIComponent(String(pagination.after))}`);
   } else if (dateFilters.dateFrom) {
-    base.push(`after=${dateFilters.dateFrom}`);
+    base.push(`after=${encodeURIComponent(String(dateFilters.dateFrom))}`);
   }
   // NOTE: Arctic Shift rejects before_id/after_id with HTTP 400 (verified),
   // so pagination is timestamp-only. Same-second ties at a page boundary are
@@ -58,19 +62,29 @@ export function buildUrls(username, type, pagination = {}, dateFilters = {}, { s
 // network only when all sharers have aborted.
 export const FETCH_BOTH_INFLIGHT = new Map();
 
-function stableStringify(value) {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
-  const keys = Object.keys(value).sort();
-  return `{${keys.map(k => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(",")}}`;
-}
-
 function fetchBothKey(username, type, pagination, dateFilters, sort, mode) {
-  return stableStringify({ username, type, pagination, dateFilters, sort, mode });
+  return stableStringify({
+    username: String(username || "").toLowerCase(),
+    type,
+    pagination: pagination || {},
+    dateFilters: dateFilters || {},
+    sort: sort || "desc",
+    mode: mode || "username",
+  });
 }
 
 function timeoutMarker(ms, internalSignal) {
-  return sleepAbortable(ms, internalSignal).then(() => ({ timeout: true, data: [], ok: false }));
+  if (internalSignal?.aborted) return Promise.resolve({ aborted: true, data: [], ok: false });
+  return sleepAbortable(ms, internalSignal).then(
+    () => {
+      if (internalSignal?.aborted) return { aborted: true, data: [], ok: false };
+      return { timeout: true, data: [], ok: false };
+    },
+    err => {
+      if (err?.name === "AbortError" || internalSignal?.aborted) return { aborted: true, data: [], ok: false };
+      return { timeout: true, data: [], ok: false };
+    },
+  );
 }
 
 export function sourceFailure(result) {
@@ -198,6 +212,7 @@ async function runFetchBoth(username, type, pagination = {}, dateFilters = {}, {
     ? Promise.resolve({ data: [], ok: false, blocked: true, status: 429 })
     : safeFetch(pullpush, { bypassCache, signal });
   const arcticRes = await arcticPromise;
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
   let pullpushRes;
   if (arcticRes.ok && arcticRes.data.length > 0) {
     // A full Arctic page leaves less room for PullPush to contribute.
@@ -206,6 +221,9 @@ async function runFetchBoth(username, type, pagination = {}, dateFilters = {}, {
       pullpushPromise,
       timeoutMarker(contributionWindow, signal)
     ]);
+    if (signal?.aborted || (pullpushRes?.aborted && !pullpushRes?.timeout)) {
+      throw new DOMException("Aborted", "AbortError");
+    }
     if (pullpushRes.timeout) {
       // Let safeFetch warm the cache in the background without blocking results.
       pullpushPromise.then(() => {}).catch(() => {});
@@ -214,6 +232,9 @@ async function runFetchBoth(username, type, pagination = {}, dateFilters = {}, {
   } else {
     // Arctic empty/failed — must wait for PullPush
     pullpushRes = await pullpushPromise;
+    if (signal?.aborted || (pullpushRes?.aborted && !pullpushRes?.timeout)) {
+      throw new DOMException("Aborted", "AbortError");
+    }
   }
   const seen = new Set();
   const merged = [];
@@ -280,8 +301,8 @@ export async function fetchCommentById(commentId, { signal } = {}) {
 }
 
 export async function fetchPostById(postId, { signal } = {}) {
-  const id = String(postId || "").replace(/^t3_/i, "").trim();
-  if (!id) return { post: null, sources: [], arcticDown: false, pullpushDown: false };
+  const id = String(postId || "").replace(/^t3_/i, "").trim().toLowerCase();
+  if (!/^[a-z0-9]{5,10}$/i.test(id)) return { post: null, sources: [], arcticDown: false, pullpushDown: false };
   const arcticUrl = `${ARCTIC}/api/posts/ids?ids=${encodeURIComponent(id)}`;
   // Start all fetches in parallel for fastest path
   const arcticPromise = safeFetch(arcticUrl, { signal });
@@ -294,6 +315,7 @@ export async function fetchPostById(postId, { signal } = {}) {
   }).catch(() => ({ ok: false, data: [] }));
   const altPromise = safeFetch(`${PULLPUSH}/reddit/search/submission/?test&q=id:${encodeURIComponent(id)}&limit=5`, { signal }).catch(() => ({ ok: false, data: [] }));
   const arcticRes = await arcticPromise;
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
   if (arcticRes.ok && arcticRes.data?.[0]) {
     return { post: arcticRes.data[0], sources: ["Arctic Shift"], arcticDown: false, pullpushDown: false };
   }
@@ -302,6 +324,7 @@ export async function fetchPostById(postId, { signal } = {}) {
     ppPromise,
     timeoutMarker(400, signal)
   ]);
+  if (signal?.aborted || (ppRes?.aborted && !ppRes?.timeout)) throw new DOMException("Aborted", "AbortError");
   if (!ppRes.timeout && ppRes.ok && ppRes.data?.[0]) {
     const hit = ppRes.data.find(x => x.id === id) || ppRes.data[0];
     if (hit) return { post: hit, sources: ["PullPush"], arcticDown: !arcticRes.ok, pullpushDown: false };
@@ -310,6 +333,7 @@ export async function fetchPostById(postId, { signal } = {}) {
     altPromise,
     timeoutMarker(300, signal)
   ]);
+  if (signal?.aborted || (altRes?.aborted && !altRes?.timeout)) throw new DOMException("Aborted", "AbortError");
   if (!altRes.timeout && altRes.ok && altRes.data?.length) {
     const hit = altRes.data.find(x => x.id === id) || altRes.data[0];
     if (hit) return { post: hit, sources: ["PullPush"], arcticDown: !arcticRes.ok, pullpushDown: !ppRes.ok };
@@ -317,11 +341,13 @@ export async function fetchPostById(postId, { signal } = {}) {
   // Fallback: bounded wait (2s) so a hung PullPush can't hang the view forever.
   const bounded = (p) => Promise.race([p.catch(() => ({ ok: false, data: [] })), timeoutMarker(2000, signal)]);
   const finalPp = ppRes.timeout ? await bounded(ppPromise) : ppRes;
+  if (signal?.aborted || (finalPp?.aborted && !finalPp?.timeout)) throw new DOMException("Aborted", "AbortError");
   if (finalPp.ok && finalPp.data?.[0]) {
     const hit = finalPp.data.find(x => x.id === id) || finalPp.data[0];
     if (hit) return { post: hit, sources: ["PullPush"], arcticDown: !arcticRes.ok, pullpushDown: false };
   }
   const finalAlt = altRes.timeout ? await bounded(altPromise) : altRes;
+  if (signal?.aborted || (finalAlt?.aborted && !finalAlt?.timeout)) throw new DOMException("Aborted", "AbortError");
   if (finalAlt.ok && finalAlt.data?.length) {
     const hit = finalAlt.data.find(x => x.id === id) || finalAlt.data[0];
     if (hit) return { post: hit, sources: ["PullPush"], arcticDown: !arcticRes.ok, pullpushDown: false };
@@ -338,6 +364,7 @@ export async function fetchCommentsForPost(postId, { signal, limit = 100 } = {})
   const arcticPromise = safeFetch(arcticUrl, { signal });
   const ppPromise = safeFetch(pullpushUrl, { signal }).catch(() => ({ ok: false, data: [] }));
   const arcticRes = await arcticPromise;
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
   let comments = [];
   const sources = [];
   if (arcticRes.ok && Array.isArray(arcticRes.data)) {
@@ -347,6 +374,7 @@ export async function fetchCommentsForPost(postId, { signal, limit = 100 } = {})
     if (comments.length) sources.push("Arctic Shift");
   }
   if (comments.length > 0) {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
     // Have Arctic comments — return quickly, don't block on PullPush
     // Let PullPush warm cache in background
     ppPromise.then(() => {}).catch(() => {});
@@ -357,12 +385,14 @@ export async function fetchCommentsForPost(postId, { signal, limit = 100 } = {})
     ppPromise,
     timeoutMarker(350, signal)
   ]);
+  if (signal?.aborted || (ppRes?.aborted && !ppRes?.timeout)) throw new DOMException("Aborted", "AbortError");
   if (!ppRes.timeout && ppRes.ok && ppRes.data.length) {
     return { comments: ppRes.data, sources: ["PullPush"], arcticDown: !arcticRes.ok, pullpushDown: false };
   }
   const finalPp = ppRes.timeout
     ? await Promise.race([ppPromise, timeoutMarker(2000, signal)])
     : ppRes;
+  if (signal?.aborted || (finalPp?.aborted && !finalPp?.timeout)) throw new DOMException("Aborted", "AbortError");
   if (finalPp.ok && finalPp.data.length) {
     return { comments: finalPp.data, sources: ["PullPush"], arcticDown: !arcticRes.ok, pullpushDown: false };
   }

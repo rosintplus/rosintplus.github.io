@@ -32,7 +32,7 @@ let pullpushBlockedUntil = 0;
 
 function isPullPushUrl(url) {
   try {
-    return String(url || "").includes(PULLPUSH);
+    return new URL(String(url)).hostname === "api.pullpush.io";
   } catch {
     return false;
   }
@@ -80,20 +80,25 @@ function abortError() {
 
 function toTimeoutSignal(ms) {
   try {
-    if (typeof AbortSignal.timeout === "function") return AbortSignal.timeout(ms);
+    if (typeof AbortSignal.timeout === "function") {
+      return { signal: AbortSignal.timeout(ms), cleanup: () => {} };
+    }
   } catch { /* fall through to manual */ }
   const ctrl = new AbortController();
-  setTimeout(() => { try { ctrl.abort(); } catch { /* noop */ } }, ms);
-  return ctrl.signal;
+  const timer = setTimeout(() => { try { ctrl.abort(); } catch { /* noop */ } }, ms);
+  return { signal: ctrl.signal, cleanup: () => { try { clearTimeout(timer); } catch { /* noop */ } } };
 }
 
 function combineSignals(outer, timeoutMs) {
-  const timeoutSignal = toTimeoutSignal(timeoutMs);
-  if (!outer) return { signal: timeoutSignal, cleanup: () => {} };
-  if (outer.aborted) return { signal: outer, cleanup: () => {} };
+  const { signal: timeoutSignal, cleanup: clearTimeoutFallback } = toTimeoutSignal(timeoutMs);
+  if (!outer) return { signal: timeoutSignal, cleanup: clearTimeoutFallback };
+  if (outer.aborted) {
+    try { clearTimeoutFallback(); } catch { /* noop */ }
+    return { signal: outer, cleanup: () => {} };
+  }
   try {
     if (typeof AbortSignal.any === "function") {
-      return { signal: AbortSignal.any([outer, timeoutSignal]), cleanup: () => {} };
+      return { signal: AbortSignal.any([outer, timeoutSignal]), cleanup: clearTimeoutFallback };
     }
   } catch { /* fall through to manual */ }
   const ctrl = new AbortController();
@@ -106,22 +111,23 @@ function combineSignals(outer, timeoutMs) {
     cleanup: () => {
       try { outer.removeEventListener("abort", onOuter); } catch { /* noop */ }
       try { timeoutSignal.removeEventListener("abort", onTimeout); } catch { /* noop */ }
+      try { clearTimeoutFallback(); } catch { /* noop */ }
     },
   };
 }
 
 export function sleepAbortable(ms, signal) {
-  if (ms <= 0) return Promise.resolve();
   if (!signal) return sleep(ms);
-  if (signal.aborted) return Promise.resolve();
-  return new Promise(resolve => {
+  if (signal.aborted) return Promise.reject(abortError());
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve, reject) => {
     const t = setTimeout(() => {
       try { signal.removeEventListener("abort", onAbort); } catch { /* noop */ }
       resolve();
     }, ms);
     const onAbort = () => {
       clearTimeout(t);
-      resolve();
+      reject(abortError());
     };
     signal.addEventListener("abort", onAbort, { once: true });
   });
@@ -253,13 +259,11 @@ export function safeFetch(url, {
   retries = 1,
 } = {}) {
   if (signal?.aborted) return Promise.resolve({ data: [], ok: false, aborted: true });
-  // Open breaker: skip PullPush network entirely (return cached/empty fast)
-  // instead of retrying into the rate limit. Arctic is unaffected.
-  if (isPullPushUrl(url) && isPullPushBlocked()) {
-    return Promise.resolve({ data: [], ok: false, blocked: true, status: 429 });
-  }
   const cappedRetries = Math.max(0, Math.min(retries, MAX_RETRIES));
 
+  // Fresh cache first: a fresh hit is served even while the breaker is open
+  // (refresh keeps instant results). Breaker only skips network for
+  // stale/miss PullPush calls.
   if (!bypassCache) {
     const cached = FETCH_CACHE.get(url);
     if (cached && !cached.controller?.signal.aborted) {
@@ -274,13 +278,28 @@ export function safeFetch(url, {
         }
         return shareWithAbort(cached.promise, signal);
       }
+    }
+  }
+  // Open breaker: skip PullPush network entirely (return cached/empty fast)
+  // instead of retrying into the rate limit. Arctic is unaffected. Fresh hits
+  // already returned above, so blocked + stale/miss fails fast here.
+  if (isPullPushUrl(url) && isPullPushBlocked()) {
+    return Promise.resolve({ data: [], ok: false, blocked: true, status: 429 });
+  }
+
+  if (!bypassCache) {
+    const cached = FETCH_CACHE.get(url);
+    if (cached && !cached.controller?.signal.aborted) {
       // Stale-while-revalidate: return stale immediately for perceived speed,
       // revalidate in background (single-flight). Caller gets instant data.
       if (cached.promise && !REVALIDATING.has(url)) {
-        REVALIDATING.add(url);
-        // Background refresh is bounded (timeout) and never retries — stale
-        // bursts must not become retry storms.
-        fetchWithRetry(url, { signal: undefined, retries: 0 }).then(res => {
+        // Respect the PullPush breaker for background refresh too: while open,
+        // don't fire network that would extend the rate limit.
+        if (!(isPullPushUrl(url) && isPullPushBlocked())) {
+          REVALIDATING.add(url);
+          // Background refresh is bounded (timeout) and never retries — stale
+          // bursts must not become retry storms.
+          fetchWithRetry(url, { signal: undefined, retries: 0 }).then(res => {
           const fresh = {
             data: res?.data ?? [],
             ok: !!res?.ok
@@ -293,10 +312,24 @@ export function safeFetch(url, {
               controller: null,
               settled: true,
             });
+          } else {
+            // Failed/empty revalidation: evict the stale entry so an outage
+            // surfaces instead of serving stale forever (mirrors
+            // persistentCache TTL eviction). Guarded so a newer entry that
+            // landed meanwhile (e.g. bypassCache refresh) is never deleted.
+            // Already-returned callers keep their stale promise reference.
+            try {
+              if (FETCH_CACHE.get(url)?.promise === cached.promise) FETCH_CACHE.delete(url);
+            } catch { /* noop */ }
           }
-        }).catch(() => {}).finally(() => {
+        }).catch(() => {
+          try {
+            if (FETCH_CACHE.get(url)?.promise === cached.promise) FETCH_CACHE.delete(url);
+          } catch { /* noop */ }
+        }).finally(() => {
           REVALIDATING.delete(url);
         });
+        }
       }
       if (cached.settled === false && cached.controller && signal) {
         linkCallerToEntry(cached, signal);
