@@ -1,8 +1,12 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <script>try{var l=localStorage.getItem("rosint-lang")||(navigator.language||"").slice(0,2);if(!l||!{en:1,es:1,fr:1,de:1,el:1,ja:1,zh:1}[l])l="en";document.documentElement.lang=l}catch(e){}</script>
+  <script>try{var q=new URLSearchParams(location.search).get("lang");var l=q||localStorage.getItem("rosint-lang")||(navigator.language||"").slice(0,2);if(!l||!{en:1,es:1,fr:1,de:1,el:1,ja:1,zh:1}[l])l="en";if(q&&{en:1,es:1,fr:1,de:1,el:1,ja:1,zh:1}[q]){try{localStorage.setItem("rosint-lang",q)}catch(e){}}if(q==="en"){try{var u=new URL(location.href);u.searchParams.delete("lang");history.replaceState(null,"",u)}catch(e){}}document.documentElement.lang={zh:"zh-CN"}[l]||l}catch(e){}</script>
   <meta charset="UTF-8" />
+  <!-- Theme-color sits before the pre-paint script so the script below can
+       set it to the cached theme bg before first paint (light included);
+       applyTheme() in theme.js keeps it in sync on later theme changes. -->
+  <meta name="theme-color" content="#0d0d0d" />
 
 
   <style>
@@ -16,6 +20,7 @@
       if (c) {
         var d = c.mode === "dark" || (c.mode !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
         var p = d ? c.dark : c.light;
+        document.documentElement.classList.toggle("dark", d);
         var s = document.documentElement.style;
         s.setProperty("--bg", p.bg);
         s.setProperty("--accent", p.accent);
@@ -25,6 +30,27 @@
         var _t = p.tint || p.accent, _b = d ? "white" : "black";
         s.setProperty("--text", "color-mix(in srgb, " + _t + " 30%, " + _b + ")");
         s.setProperty("--text-muted", "color-mix(in srgb, " + _t + " 30%, color-mix(in srgb, " + _b + " 65%, " + p.bg + "))");
+        s.setProperty("--accent-text", "color-mix(in srgb, " + _t + " 70%, " + _b + ")");
+        s.setProperty("--text-faint", "color-mix(in srgb, " + _t + " 20%, color-mix(in srgb, " + _b + " 60%, " + p.bg + "))");
+        s.setProperty("--border", "color-mix(in srgb, color-mix(in srgb, " + _t + " 30%, " + _b + ") 18%, " + p.bg + ")");
+        s.setProperty("--border-hover", "color-mix(in srgb, color-mix(in srgb, " + _t + " 30%, " + _b + ") 28%, " + p.bg + ")");
+        s.setProperty("--bg-elevated", "color-mix(in srgb, color-mix(in srgb, " + _t + " 30%, " + _b + ") 8%, " + p.bg + ")");
+        var _sem = d
+          ? { danger: "#fda4af", warn: "#fcd34d", info: "#93c5fd", success: "#6ee7b7", auth: "#d8b4fe", lib: "#5eead4", neu: "#cbd5e1" }
+          : { danger: "#be123c", warn: "#92400e", info: "#1d4ed8", success: "#047857", auth: "#7e22ce", lib: "#0f766e", neu: "#475569" };
+        s.setProperty("--danger", _sem.danger);
+        s.setProperty("--warn", _sem.warn);
+        s.setProperty("--info", _sem.info);
+        s.setProperty("--success", _sem.success);
+        s.setProperty("--auth-center", _sem.auth);
+        s.setProperty("--lib-center", _sem.lib);
+        s.setProperty("--neutral", _sem.neu);
+        s.setProperty("--quad-auth-left", _sem.danger);
+        s.setProperty("--quad-auth-right", _sem.info);
+        s.setProperty("--quad-lib-left", _sem.success);
+        s.setProperty("--quad-lib-right", _sem.warn);
+        var _meta = document.querySelector('meta[name="theme-color"]');
+        if (_meta) _meta.setAttribute("content", p.bg);
       }
     } catch (e) { /* first visit or corrupted cache — default palette applies */ }
   </script>
@@ -68,8 +94,7 @@
   <meta name="twitter:description" content="Recover deleted posts, removed comments, and browse private Reddit accounts using distributed open-source archives." />
   <meta name="twitter:image" content="https://rosintplus.github.io/og-image.png?v=2" />
 
-  <!-- Theme -->
-  <meta name="theme-color" content="#0d0d0d" />
+  <!-- Theme (moved above, next to charset, for pre-paint updates) -->
 
   
   

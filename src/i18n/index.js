@@ -39,7 +39,9 @@ const RTF_CACHE = new Map();
 const PR_CACHE = new Map();
 
 // Plural-aware translation helper. Convention: keys use CLDR suffixes
-// (One, Many, Other, Few, Two). Falls back Many → Other → baseKey.
+// (One, Many, Other, Few, Two). The raw catalog for `lang` is checked
+// first so t()'s English fallback can't shadow a missing rule key; order
+// is ruleKey → Many → Other → baseKey → en.
 export function tN(t, baseKey, count, lang) {
   const locale = LOCALES[lang] || "en";
   let pr = PR_CACHE.get(locale);
@@ -49,14 +51,28 @@ export function tN(t, baseKey, count, lang) {
   }
   const rule = pr.select(count);
   const ruleKey = `${baseKey}${rule.charAt(0).toUpperCase() + rule.slice(1)}`;
-  let s = t(ruleKey);
-  if (s === ruleKey) s = t(`${baseKey}Many`);
-  if (s === `${baseKey}Many`) s = t(`${baseKey}Other`);
+  const candidates = [ruleKey, `${baseKey}Many`, `${baseKey}Other`, baseKey];
+  const catalog = translations[lang];
+  const key =
+    candidates.find((k) => catalog?.[k] !== undefined) ??
+    candidates.find((k) => en[k] !== undefined) ??
+    ruleKey;
+  const s = t(key);
   let formatted = count;
   try {
     formatted = new Intl.NumberFormat(locale).format(count);
   } catch { /* ignore */ }
   return s.replace("{n}", formatted);
+}
+
+// Locale-aware number formatting for future use (counts, stats, heatmap
+// labels). Falls back to a plain string when Intl is unavailable.
+export function fmtNumLocale(n, lang) {
+  try {
+    return new Intl.NumberFormat(LOCALES[lang] || "en").format(n);
+  } catch {
+    return String(n);
+  }
 }
 
 export function relTime(utcSeconds, lang) {
@@ -89,6 +105,13 @@ export function relTime(utcSeconds, lang) {
 
 let lang = (() => {
   try {
+    const urlLang = new URLSearchParams(window.location.search).get("lang");
+    if (urlLang && LANGS[urlLang]) {
+      try { localStorage.setItem("rosint-lang", urlLang); } catch {/* ignore */}
+      return urlLang;
+    }
+  } catch {/* ignore */}
+  try {
     const stored = localStorage.getItem("rosint-lang");
     if (LANGS[stored]) return stored;
   } catch {/* ignore */}
@@ -96,7 +119,7 @@ let lang = (() => {
   if (LANGS[browser]) return browser;
   return "en";
 })();
-document.documentElement.lang = lang;
+document.documentElement.lang = LOCALES[lang] || lang;
 
 export const listeners = new Set();
 export const subscribe = (fn) => {
@@ -113,6 +136,10 @@ function notify() {
 }
 
 const pendingLoads = new Map();
+// Locales whose async chunk failed to load (offline / chunk error).
+// Cleared on success; consulted by setLang/retrySetLang so re-selecting
+// the active language retries instead of stranding the UI on English.
+const failedLoads = new Set();
 function ensureLocale(code) {
   if (!LANGS[code] || translations[code] || pendingLoads.has(code)) return;
   const loader = localeLoaders[code];
@@ -121,12 +148,14 @@ function ensureLocale(code) {
     (mod) => {
       translations[code] = mod.default || mod;
       pendingLoads.delete(code);
+      failedLoads.delete(code);
       notify();
     },
     () => {
       // Offline / chunk failed: stay on the English fallback; a later
-      // ensureLocale call (next setLang) retries the fetch.
+      // ensureLocale call (same-language setLang / retrySetLang) retries.
       pendingLoads.delete(code);
+      failedLoads.add(code);
     }
   );
   pendingLoads.set(code, p);
@@ -141,14 +170,41 @@ export const getLang = () => lang;
 const getI18nSnapshot = () => `${lang}:${translations[lang] ? "ready" : "loading"}:${version}`;
 
 export function setLang(next) {
-  if (!LANGS[next] || next === lang) return;
+  if (!LANGS[next]) return;
+  if (next === lang) {
+    // Re-selecting the active language retries a pending/failed load
+    // instead of stranding the UI on the English fallback.
+    if (!translations[next]) {
+      failedLoads.delete(next);
+      ensureLocale(next);
+      notify();
+    }
+    return;
+  }
   lang = next;
   try {
     localStorage.setItem("rosint-lang", next);
   } catch {/* ignore */}
-  document.documentElement.lang = next;
+  try {
+    const url = new URL(window.location.href);
+    if (next === "en") url.searchParams.delete("lang");
+    else url.searchParams.set("lang", next);
+    window.history.replaceState({}, "", url);
+  } catch {/* ignore */}
+  document.documentElement.lang = LOCALES[next] || next;
   ensureLocale(next);
   notify();
+}
+
+// Re-attempt a failed locale fetch (defaults to the active language).
+// No-op when the catalog is ready or a fetch is already pending.
+// Returns true when a fetch was (re)started.
+export function retrySetLang(code = lang) {
+  if (!LANGS[code] || translations[code] || pendingLoads.has(code)) return false;
+  failedLoads.delete(code);
+  ensureLocale(code);
+  notify();
+  return true;
 }
 
 export function useI18n() {
