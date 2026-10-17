@@ -80,10 +80,10 @@ export const HoverHint = memo(function HoverHint({
     } catch { /* ignore */ }
     setPos({ x: 16, y: 16 });
   }, []);
-  return <div className={className} tabIndex={0} role="button" aria-describedby={pos ? hintId : undefined} onMouseEnter={track} onMouseMove={track} onMouseLeave={leave} onPointerLeave={leave} onMouseOut={leave} onFocus={showAtAnchor} onBlur={leave} onClick={showAtAnchor} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") showAtAnchor(e); if (e.key === "Escape") leave(); }}>
+  return <div className={className} aria-describedby={pos ? hintId : undefined} onMouseEnter={track} onMouseMove={track} onMouseLeave={leave} onPointerLeave={leave} onMouseOut={leave} onFocus={showAtAnchor} onBlur={leave} onKeyDown={e => { if (e.key === "Escape") { leave(); return; } if (e.target !== e.currentTarget) return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); showAtAnchor(e); } }}>
             {children}
             {pos && createPortal(
-                <span id={hintId} role="tooltip" className="pointer-events-none fixed z-[100] whitespace-nowrap rounded border border-[color:var(--border-hover)] bg-[color:var(--bg)] px-2 py-1 text-[11px] text-[color:var(--text)] shadow-lg shadow-black/40" style={{ left: pos.x, top: pos.y }}>
+                <span id={hintId} role="tooltip" className="pointer-events-none fixed z-[100] whitespace-nowrap rounded-md border border-[color:var(--border-hover)] bg-[color:var(--bg)] px-2 py-1 text-[11px] text-[color:var(--text)] shadow-xl" style={{ left: pos.x, top: pos.y }}>
                     {hint}
                 </span>,
                 document.body

@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components -- shared module: cards + status/thumbnail helpers (by design) */
 import { memo, useState, useMemo, useCallback, useEffect, useRef, Component } from "react";
-import { safeFetch, ARCTIC, REDDIT_BASE } from "../api.js";
-import { useI18n, tN } from "../i18n.js";
+import { safeFetch, ARCTIC, REDDIT_BASE } from "../api/client.js";
+import { useI18n, tN, translations, en, getLang, subscribe, LOCALES } from "../i18n.js";
 import { fmtNum } from "../utils.js";
 import { STROKE_TRANSITION } from "../constants.js";
 import { HoverHint, HoverTime } from "./HoverHint.jsx";
@@ -13,9 +13,13 @@ import { CopyButton } from "./CopyButton.jsx";
 // Single-entry cache covers the common case (one shared highlightTerm);
 // small Map covers transitions (typing a→ab keeps both while deferred lags).
 const _hlCache = new Map();
+// Max highlight/keyword input: longer input returns no-filter, preventing a
+// giant-RegExp self-DoS (KB-long pattern tested per item per keystroke).
+const HIGHLIGHT_MAX_LEN = 200;
 function getCachedHighlightRegexes(highlight) {
   const raw = typeof highlight === "string" ? highlight.trim() : "";
   if (!raw) return { splitRe: null, testRe: null };
+  if (raw.length > HIGHLIGHT_MAX_LEN) return { splitRe: null, testRe: null };
   const cached = _hlCache.get(raw);
   if (cached) return cached;
   const clean = raw.replace(/^(?:r\/|u\/)/i, "").replace(/^["']|["']$/g, "");
@@ -85,13 +89,72 @@ export const HighlightText = memo(function HighlightText({ text, highlight }) {
     return (
       <mark
         key={entry.i}
-        className="bg-amber-400/30 text-[color:var(--text)] font-semibold rounded-[2px] px-0.5"
+        className="bg-[color:var(--warn)]/30 text-[color:var(--text)] font-semibold rounded px-0.5"
       >
         {entry.part}
       </mark>
     );
   });
 });
+
+export function isSafeHttpUrl(value) {
+  if (typeof value !== "string") return false;
+  // Validate the trimmed copy: leading/trailing whitespace (incl. \n) must
+  // not smuggle a non-http scheme past the protocol check.
+  const s = value.trim();
+  if (!s) return false;
+  try {
+    const u = new URL(s);
+    return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+// Callers must render the trimmed copy, not the original: isSafeHttpUrl()
+// validates s = value.trim(), so return that trimmed string here.
+export function safeHttpUrlTrimmed(value) {
+  if (typeof value !== "string") return null;
+  const s = value.trim();
+  return isSafeHttpUrl(s) ? s : null;
+}
+
+// Reddit permalinks are server-encoded paths (e.g. "/r/pics/comments/abc/x/").
+// Only accept root-relative paths; anything else (javascript:, data:, absolute
+// URLs, backslashes, spaces) falls back to a constructed encoded URL.
+// Blocklist also rejects C0 controls + DEL + ZWSP/ZWNJ/ZWJ/bidi isolates +
+// BOM, which can smuggle breaks or spoofed text into hrefs.
+// NOTE: "//evil.com" stays same-origin — `${REDDIT_BASE}//evil.com` resolves
+// to https://www.reddit.com//evil.com (a same-origin path), not a host swap.
+function safePermalinkUrl(permalink, fallback) {
+  // eslint-disable-next-line no-control-regex -- intentional control + invisible-char blocklist
+  const BLOCKED = /[\s\\<>"\x00-\x1f\x7f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/;
+  if (typeof permalink === "string" && permalink.startsWith("/") && !BLOCKED.test(permalink)) {
+    return `${REDDIT_BASE}${permalink}`;
+  }
+  return fallback;
+}
+
+// Archive (Arctic Shift) IDs are bare base36 alphanumerics. Validate before
+// interpolating into API URLs — a raw id containing &/?# would inject extra
+// query params. Returns true only for /^[A-Za-z0-9]+$/.
+function isBareArchiveId(v) {
+  return typeof v === "string" && /^[A-Za-z0-9]+$/.test(v);
+}
+
+function isPrefixedArchiveId(v, prefix) {
+  return typeof v === "string" && v.startsWith(prefix) && isBareArchiveId(v.slice(prefix.length));
+}
+
+function subNameOf(item) {
+  const prefixed = typeof item?.subreddit_name_prefixed === "string" ? item.subreddit_name_prefixed.replace(/^r\//i, "") : "";
+  const bare = typeof item?.subreddit === "string" ? item.subreddit : "";
+  return prefixed || bare || "";
+}
+
+function subredditHref(item) {
+  return `${REDDIT_BASE}/r/${encodeURIComponent(subNameOf(item))}`;
+}
 
 export function getPostThumbnail(post) {
   try {
@@ -100,17 +163,32 @@ export function getPostThumbnail(post) {
       // Prefer a small resolution for the 70x52 list thumb — full source can be MBs.
       const small = img.resolutions?.[0]?.url || img.resolutions?.[Math.min(1, (img.resolutions?.length || 1) - 1)]?.url;
       const src = small || img.source?.url;
-      if (src) return src.replace(/&amp;/g, "&");
+      if (src) {
+        const decoded = src.replace(/&amp;/g, "&");
+        const safe = safeHttpUrlTrimmed(decoded);
+        if (safe) return safe;
+      }
     }
   } catch {/* ignore */}
   try {
     if (post.media_metadata) {
       const first = Object.values(post.media_metadata)[0];
-      if (first?.s?.u) return first.s.u.replace(/&amp;/g, "&");
+      if (first?.s?.u) {
+        const decoded = first.s.u.replace(/&amp;/g, "&");
+        const safe = safeHttpUrlTrimmed(decoded);
+        if (safe) return safe;
+      }
     }
   } catch {/* ignore */}
-  const imageExts = ["jpg", "jpeg", "png", "gif"];
-  if (post.url && imageExts.includes(post.url.split(".").pop()?.toLowerCase())) return post.url;
+  const imageExts = ["jpg", "jpeg", "png", "gif", "webp", "avif"];
+  if (post.url) {
+    const raw = String(post.url);
+    const clean = raw.split(/[?#]/)[0];
+    if (clean && imageExts.includes(clean.split(".").pop()?.toLowerCase())) {
+      const safe = safeHttpUrlTrimmed(raw);
+      if (safe) return safe;
+    }
+  }
   return null;
 }
 
@@ -118,15 +196,25 @@ export function getCommentImage(comment) {
   try {
     if (comment.media_metadata) {
       const first = Object.values(comment.media_metadata)[0];
-      if (first?.s?.u) return first.s.u.replace(/&amp;/g, "&");
+      if (first?.s?.u) {
+        const decoded = first.s.u.replace(/&amp;/g, "&");
+        const safe = safeHttpUrlTrimmed(decoded);
+        if (safe) return safe;
+      }
     }
   } catch {/* ignore */}
   return null;
 }
 
+function tItemUndisplayable() {
+  const lang = getLang();
+  return translations[lang]?.itemUndisplayable ?? en.itemUndisplayable ?? "This item couldn't be displayed.";
+}
+
 export class CardBoundary extends Component {
   state = {
-    failed: false
+    failed: false,
+    prevChildren: undefined
   };
   static getDerivedStateFromError() {
     return {
@@ -134,14 +222,26 @@ export class CardBoundary extends Component {
     };
   }
   static getDerivedStateFromProps(nextProps, prevState) {
-    if (prevState.failed) return { failed: false };
+    // Only retry after a failure when the child identity itself changes —
+    // resetting on any props update re-renders a broken child in a loop.
+    if (nextProps.children !== prevState.prevChildren) {
+      return { failed: false, prevChildren: nextProps.children };
+    }
     return null;
   }
   componentDidCatch() {/* swallow — bad record, nothing to recover */}
+  componentDidMount() {
+    // Class components can't use the useI18n hook; subscribe directly so a
+    // language switch re-renders the fallback text via the module accessor.
+    this._unsub = subscribe(() => this.forceUpdate());
+  }
+  componentWillUnmount() {
+    this._unsub?.();
+  }
   render() {
     if (this.state.failed) {
-      return <div className="bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded px-3 py-2.5 text-[12px] text-[color:var(--text-muted)] italic">
-                    This item couldn't be displayed.
+      return <div className="bg-[color:var(--bg-elevated)] border border-[color:var(--border-hover)] rounded px-3 py-2.5 text-[12px] text-[color:var(--text-muted)] italic">
+                    {tItemUndisplayable()}
                 </div>;
     }
     return this.props.children;
@@ -187,6 +287,10 @@ export function statusBorder(status) {
   return `${statusBorderBase(status)} ${statusBorderHover(status)}`;
 }
 
+// Single badge base for every status badge: rounded (not rounded-full —
+// rounded-full is reserved for flairs/counts), px-1.5 py-0.5, uppercase with
+// tracking. All status badges pair it with brightness-75 dark:brightness-125
+// (spoiler included) so badge luminance follows the app theme.
 export const BADGE = "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide leading-none";
 
 export const StatusBadges = memo(function StatusBadges({
@@ -205,10 +309,10 @@ export const StatusBadges = memo(function StatusBadges({
   return <>
             {removed && <span className={`${BADGE} text-[color:var(--status-removed)] brightness-75 dark:brightness-125 bg-[color:var(--status-removed)]/10 border border-[color:var(--status-removed)]/20`}>{t("badgeRemoved")}</span>}
             {deleted && <span className={`${BADGE} text-[color:var(--status-deleted)] brightness-75 dark:brightness-125 bg-[color:var(--status-deleted)]/10 border border-[color:var(--status-deleted)]/20`}>{t("badgeDeleted")}</span>}
-            {item.over_18 && <span className={`${BADGE} text-[color:var(--accent)] brightness-75 dark:brightness-125 bg-[color:var(--accent)]/10 border border-[color:var(--accent)]/20`}>NSFW</span>}
-            {item.spoiler && <span className={`${BADGE} bg-[color:var(--border)] text-[color:var(--text)] border border-[color:var(--border)]`}>{t("badgeSpoiler")}</span>}
-            {dist === "admin" && <span className={`${BADGE} text-[color:var(--status-mod)] brightness-75 dark:brightness-125 bg-[color:var(--status-mod)]/10 border border-[color:var(--status-mod)]/20`}>Admin</span>}
-            {dist === "moderator" && <span className={`${BADGE} text-[color:var(--accent-text)] brightness-90 dark:brightness-125 bg-[color:var(--accent)]/10 border border-[color:var(--accent)]/20`}>Mod</span>}
+            {item.over_18 && <span className={`${BADGE} text-[color:var(--accent)] brightness-75 dark:brightness-125 bg-[color:var(--accent)]/10 border border-[color:var(--accent)]/20`}>{t("badgeNsfw")}</span>}
+            {item.spoiler && <span className={`${BADGE} bg-[color:var(--border)] text-[color:var(--text)] border border-[color:var(--border)] brightness-75 dark:brightness-125`}>{t("badgeSpoiler")}</span>}
+            {dist === "admin" && <span className={`${BADGE} text-[color:var(--status-admin)] brightness-75 dark:brightness-125 bg-[color:var(--status-admin)]/10 border border-[color:var(--status-admin)]/20`}>{t("badgeAdmin")}</span>}
+            {dist === "moderator" && <span className={`${BADGE} text-[color:var(--status-mod)] brightness-75 dark:brightness-125 bg-[color:var(--status-mod)]/10 border border-[color:var(--status-mod)]/20`}>{t("badgeMod")}</span>}
         </>;
 });
 
@@ -217,15 +321,25 @@ export const PostCard = memo(function PostCard({
   embedded = false,
   highlightTerm = ""
 }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
+  const locale = LOCALES[lang] || "en";
   const [userBodyOpen, setUserBodyOpen] = useState(false);
   const [comments, setComments] = useState(null);
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [moreCommentsCount, setMoreComments] = useState(null);
-  const [imgError, setImgError] = useState(false);
   const commentsAbortRef = useRef(null);
   const thumb = useMemo(() => getCachedPostThumbnail(post), [post]);
-  const postUrl = useMemo(() => post.permalink ? `${REDDIT_BASE}${post.permalink}` : `${REDDIT_BASE}/r/${post.subreddit}/comments/${post.id}`, [post]);
+  // Image load/error state is keyed by URL, not reset in an effect: a reset
+  // effect would also run on React's mount->remount cycle and could wipe a
+  // "loaded" flag *after* the image had already loaded, hiding it permanently.
+  // Deriving from the current thumb means a new post simply starts unloaded.
+  const [loadedThumb, setLoadedThumb] = useState(null);
+  const [erroredThumb, setErroredThumb] = useState(null);
+  const onThumbLoad = useCallback(() => setLoadedThumb(thumb), [thumb]);
+  const onThumbError = useCallback(() => setErroredThumb(thumb), [thumb]);
+  const imgLoaded = loadedThumb === thumb && thumb != null;
+  const imgError = erroredThumb === thumb && thumb != null;
+  const postUrl = useMemo(() => safePermalinkUrl(post.permalink, post.subreddit && post.id ? `${REDDIT_BASE}/r/${encodeURIComponent(String(post.subreddit))}/comments/${encodeURIComponent(String(post.id))}` : REDDIT_BASE), [post]);
   const hasBody = useMemo(() => post.selftext && post.selftext !== "[deleted]" && post.selftext !== "[removed]", [post]);
   const status = useMemo(() => getStatus(post, "posts"), [post]);
 
@@ -237,22 +351,17 @@ export const PostCard = memo(function PostCard({
 
   const bodyOpen = userBodyOpen || hasMatchInBody;
 
-  // Tap on the card toggles the body instead of opening the permalink.
-  // Clicks that land on real links/buttons keep their own behavior.
-  const handleCardClick = useCallback(e => {
-    if (e.target.closest("a, button, [role='button']")) return;
-    if (hasBody) setUserBodyOpen(o => !o);
-  }, [hasBody]);
   useEffect(() => () => { if (commentsAbortRef.current) commentsAbortRef.current.abort(); }, []);
-  useEffect(() => { setImgError(false); }, [post]);
   const handleLoadComments = useCallback(async () => {
     if (commentsLoading) return;
+    // Validate archive id before interpolating — skip fetch when invalid.
+    if (!isBareArchiveId(post.id)) return;
     if (commentsAbortRef.current) commentsAbortRef.current.abort();
     const ctrl = new AbortController();
     commentsAbortRef.current = ctrl;
     setCommentsLoading(true);
     try {
-      const res = await safeFetch(`${ARCTIC}/api/comments/tree?link_id=t3_${post.id}&limit=25`, { signal: ctrl.signal });
+      const res = await safeFetch(`${ARCTIC}/api/comments/tree?link_id=t3_${encodeURIComponent(post.id)}&limit=25`, { signal: ctrl.signal });
       const data = res.data || [];
       const list = [];
       let more = null;
@@ -268,6 +377,8 @@ export const PostCard = memo(function PostCard({
   }, [commentsLoading, post.id]);
   const copyText = useCallback(() => {
     const flag = status.removed ? " [removed]" : status.deleted ? " [deleted]" : "";
+    // Clipboard/copy stays locale-less by design: ISO timestamp + raw
+    // fmtNum (no locale) keep pasted text machine-readable across locales.
     const ts = post.created_utc != null ? new Date(post.created_utc * 1000).toISOString() : "";
     return [
       post.title,
@@ -277,17 +388,17 @@ export const PostCard = memo(function PostCard({
     ].filter(Boolean).join("\n");
   }, [post, status, postUrl]);
 return <>
-            <div onClick={handleCardClick} role={hasBody ? "button" : undefined} tabIndex={hasBody ? 0 : undefined} aria-expanded={hasBody ? bodyOpen : undefined} onKeyDown={hasBody ? (e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setUserBodyOpen(o => !o); } }) : undefined} className={`bg-[color:var(--bg-elevated)] border ${statusBorder(status)} rounded overflow-hidden transition-all duration-150 hover:shadow-lg group ${hasBody ? "cursor-pointer" : ""}`}>
+            <div className={`bg-[color:var(--bg-elevated)] border ${statusBorder(status)} rounded overflow-hidden transition-all duration-150 hover:shadow-lg group`}>
                 <div className="flex">
                     <div className="flex flex-col items-center justify-start gap-1 px-2 py-3 bg-[color:var(--bg)] min-w-[40px]">
                         <IconArrowUp />
-                        <span className="text-[11px] font-bold text-[color:var(--text)] leading-none">{fmtNum(post.score)}</span>
+                        <span className="text-[11px] font-bold text-[color:var(--text)] leading-none">{fmtNum(post.score, locale)}</span>
                     </div>
                     <div className="flex-1 p-3 min-w-0 relative">
                         <div className="flex gap-3">
                             <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-1.5 text-[11px] text-[color:var(--text-muted)] mb-1.5 flex-wrap">
-                                    <a href={`${REDDIT_BASE}/${post.subreddit_name_prefixed || `r/${post.subreddit}`}`} target="_blank" rel="noopener noreferrer" className="relative z-10 font-medium text-[color:var(--text)] hover:underline">
+                                <div className="flex items-center gap-2 text-[11px] text-[color:var(--text-muted)] mb-1.5 flex-wrap">
+                                    <a href={subredditHref(post)} target="_blank" rel="noopener noreferrer" className="relative z-10 font-medium text-[color:var(--text)] hover:underline">
                                         {post.subreddit_name_prefixed || `r/${post.subreddit}`}
                                     </a>
                                     <span>·</span>
@@ -312,7 +423,7 @@ return <>
                     e.preventDefault();
                     if (!comments) handleLoadComments();
                   }} disabled={commentsLoading} className="relative z-10 flex items-center gap-1 hover:text-[color:var(--text)] transition-colors disabled:opacity-50 cursor-pointer">
-                                        <IconComment />{embedded ? t("commentsCount", { n: fmtNum(post.num_comments) }) : t("showCommentsCount", { n: fmtNum(post.num_comments) })}
+                                        <IconComment />{embedded ? tN(t, "commentsCount", post.num_comments ?? 0, lang) : tN(t, "showCommentsCount", post.num_comments ?? 0, lang)}
                                     </button>
                                     <a href={postUrl} target="_blank" rel="noopener noreferrer" className="relative z-10 flex items-center gap-1 text-[color:var(--accent-text)] hover:underline truncate max-w-[200px]">
                                         <IconExternal /><span className="truncate">{post.domain || post.subreddit_name_prefixed || `r/${post.subreddit}`}</span>
@@ -332,14 +443,14 @@ return <>
                                 </div>
                             </div>
                             <div className="flex flex-col items-end justify-between gap-1 flex-shrink-0 self-stretch relative z-10">
-                                {thumb && !imgError && <HoverHint hint={t("openImage")} className="self-end">
-                                    <div role="button" tabIndex={0} onClick={e => {
+                                {thumb && isSafeHttpUrl(thumb) && !imgError && <HoverHint hint={t("openImage")} className="self-end">
+                                    <button type="button" aria-label={t("openImage")} onClick={e => {
                                         e.preventDefault();
                                         e.stopPropagation();
-                                        window.open(thumb, "_blank", "noopener,noreferrer");
-                                    }} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); window.open(thumb, "_blank", "noopener,noreferrer"); } }} className="relative flex items-center justify-center w-[70px] h-[52px] rounded overflow-hidden bg-[color:var(--bg-elevated)] border border-[color:var(--border-hover)] cursor-zoom-in">
-                                        <img src={thumb} alt="" width="70" height="52" className="absolute inset-0 w-full h-full object-cover aspect-[70/52]" loading="lazy" decoding="async" onError={() => setImgError(true)} />
-                                    </div>
+                                        if (isSafeHttpUrl(thumb)) window.open(thumb, "_blank", "noopener,noreferrer");
+                                    }} className={`relative flex items-center justify-center w-[70px] h-[52px] rounded overflow-hidden bg-[color:var(--bg-elevated)] border border-[color:var(--border-hover)] cursor-zoom-in transition-opacity ${imgLoaded ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+                                        <img src={thumb} alt="" width="70" height="52" className={`absolute inset-0 w-full h-full object-cover aspect-[70/52] transition-opacity ${imgLoaded ? 'opacity-100' : 'opacity-0'}`} loading="lazy" decoding="async" onLoad={onThumbLoad} onError={onThumbError} />
+                                    </button>
                                 </HoverHint>}
                             </div>
                         </div>
@@ -358,8 +469,8 @@ return <>
                                 <span className="text-[11px]">{t("loadingLower")}</span>
                             </div> : comments.length === 0 ? <p className="text-[11px] text-[color:var(--text-muted)] italic px-3 py-2">{t("noReplies")}</p> : <div className="flex flex-col gap-0">
                                 <div className="px-3 py-1.5 text-[11px] text-[color:var(--text-muted)]">
-                                    {t("commentsCount", { n: comments.length })}
-                                    {moreCommentsCount > 0 ? ` · ${t("moreNotShown", { n: moreCommentsCount })}` : ""}
+                                    {tN(t, "commentsCount", comments.length, lang)}
+                                    {moreCommentsCount > 0 ? ` · ${t("moreNotShown", { n: fmtNum(moreCommentsCount, locale) })}` : ""}
                                 </div>
                                 <div className="flex flex-col gap-2 px-3 pb-3">
                                     {comments.map(c => <CommentCard key={c.id} comment={c} skipPostLoad={true} highlightTerm={highlightTerm} />)}
@@ -374,23 +485,27 @@ export const ParentChain = memo(function ParentChain({
   parentId,
   depth = 0
 }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
+  const locale = LOCALES[lang] || "en";
   const [comment, setComment] = useState(null);
   const [loading, setLoading] = useState(false);
   const parentAbortRef = useRef(null);
   useEffect(() => () => { if (parentAbortRef.current) parentAbortRef.current.abort(); }, []);
-  if (typeof parentId !== "string" || !parentId.startsWith("t1_")) return null;
+  // Strict prefixed-id gate: bare part must be alphanumerics only, otherwise
+  // the value is never interpolated into the ids= query.
+  if (!isPrefixedArchiveId(parentId, "t1_")) return null;
   if (depth >= 8) return <div className="border-b border-[color:var(--border)] px-3 py-1.5">
             <span className="text-[11px] text-[color:var(--text-faint)]">…</span>
         </div>;
   async function handleLoad() {
     if (loading || comment) return;
+    if (!isPrefixedArchiveId(parentId, "t1_")) return;
     if (parentAbortRef.current) parentAbortRef.current.abort();
     const ctrl = new AbortController();
     parentAbortRef.current = ctrl;
     setLoading(true);
     try {
-      const res = await safeFetch(`${ARCTIC}/api/comments/ids?ids=${parentId}`, { signal: ctrl.signal });
+      const res = await safeFetch(`${ARCTIC}/api/comments/ids?ids=${encodeURIComponent(parentId)}`, { signal: ctrl.signal });
       if (res.data?.[0]) setComment(res.data[0]);
     } catch {/* ignore */}
     setLoading(false);
@@ -401,17 +516,17 @@ export const ParentChain = memo(function ParentChain({
             {comment ? (
     <div className="flex opacity-80">
                     <div className="w-5 bg-[color:var(--bg)] flex-shrink-0" />
-                    <div className="flex flex-col items-center justify-start gap-1 px-2.5 py-2.5 bg-[color:var(--bg)] min-w-[44px]">
+                    <div className="flex flex-col items-center justify-start gap-1 px-2 py-3 bg-[color:var(--bg)] min-w-[40px]">
                         <IconArrowUp />
-                        <span className="text-[11px] font-bold text-[color:var(--text)] leading-none">{fmtNum(comment.score)}</span>
+                        <span className="text-[11px] font-bold text-[color:var(--text)] leading-none">{fmtNum(comment.score, locale)}</span>
                     </div>
                     <div className="flex-1 px-3 py-2.5 min-w-0">
-                        <div className="flex items-center gap-1.5 text-[11px] text-[color:var(--text-muted)] mb-1 flex-wrap">
-                            <a href={`${REDDIT_BASE}/r/${comment.subreddit}`} target="_blank" rel="noopener noreferrer" className="font-medium text-[color:var(--text)] hover:underline">
+                        <div className="flex items-center gap-2 text-[11px] text-[color:var(--text-muted)] mb-1 flex-wrap">
+                            <a href={subredditHref(comment)} target="_blank" rel="noopener noreferrer" className="font-medium text-[color:var(--text)] hover:underline">
                                 {comment.subreddit_name_prefixed || `r/${comment.subreddit}`}
                             </a>
                             <span>{t("by")}</span>
-                            <a href={`${REDDIT_BASE}/u/${comment.author}`} target="_blank" rel="noopener noreferrer" className="text-[color:var(--text)] hover:underline">
+                            <a href={`${REDDIT_BASE}/u/${encodeURIComponent(String(comment.author ?? ""))}`} target="_blank" rel="noopener noreferrer" className="text-[color:var(--text)] hover:underline">
                                 u/{comment.author}
                             </a>
                             <span>·</span>
@@ -439,40 +554,48 @@ export const CommentCard = memo(function CommentCard({
   highlightTerm = ""
 }) {
   const { t, lang } = useI18n();
+  const locale = LOCALES[lang] || "en";
   const [collapsed, setCollapsed] = useState(false);
   const [lineHovered, setLineHovered] = useState(false);
-  const [imgError, setImgError] = useState(false);
+  // URL-keyed image state (see PostCard): deriving from the current `img`
+  // avoids a reset effect wiping a loaded flag after the image decoded.
+  const [loadedImg, setLoadedImg] = useState(null);
+  const [erroredImg, setErroredImg] = useState(null);
   const [post, setPost] = useState(null);
   const [replies, setReplies] = useState(null);
   const [repliesLoading, setRepliesLoading] = useState(false);
   const [moreCount, setMoreCount] = useState(null);
   const repliesAbortRef = useRef(null);
   useEffect(() => () => { if (repliesAbortRef.current) repliesAbortRef.current.abort(); }, []);
-  const threadId = comment.link_id?.replace(/^t3_/, "");
-  const url = useMemo(() => `${REDDIT_BASE}${comment.permalink}`, [comment]);
-  const threadUrl = useMemo(() => threadId ? `${REDDIT_BASE}/comments/${threadId}` : url, [threadId, url]);
+  const threadId = isPrefixedArchiveId(comment.link_id, "t3_") ? comment.link_id.slice(3) : null;
+  const url = useMemo(() => safePermalinkUrl(comment.permalink, null), [comment]);
+  const threadUrl = useMemo(() => threadId && isBareArchiveId(threadId) ? `${REDDIT_BASE}/comments/${encodeURIComponent(threadId)}` : url, [threadId, url]);
   const img = useMemo(() => getCommentImage(comment), [comment]);
+  const imgLoaded = loadedImg === img && img != null;
+  const imgError = erroredImg === img && img != null;
+  const onImgLoad = useCallback(() => setLoadedImg(img), [img]);
+  const onImgError = useCallback(() => setErroredImg(img), [img]);
   const status = useMemo(() => getStatus(comment, "comments"), [comment]);
   const toggleCollapsed = useCallback(() => setCollapsed(o => !o), []);
   const onLineEnter = useCallback(() => setLineHovered(true), []);
   const onLineLeave = useCallback(() => setLineHovered(false), []);
-  const onImgError = useCallback(() => setImgError(true), []);
   useEffect(() => {
-    if (!threadId || isNested || skipPostLoad) return;
+    if (!threadId || !isBareArchiveId(threadId) || isNested || skipPostLoad) return;
     const ctrl = new AbortController();
-    safeFetch(`${ARCTIC}/api/posts/ids?ids=${threadId}`, { signal: ctrl.signal }).then(res => {
+    safeFetch(`${ARCTIC}/api/posts/ids?ids=${encodeURIComponent(threadId)}`, { signal: ctrl.signal }).then(res => {
       if (res.data?.[0]) setPost(res.data[0]);
     }).catch(() => {});
     return () => ctrl.abort();
   }, [threadId, isNested, skipPostLoad]);
   const handleLoadReplies = useCallback(async () => {
-    if (!comment.link_id || repliesLoading) return;
+    if (!comment.link_id || !comment.id || repliesLoading) return;
+    if (!isPrefixedArchiveId(comment.link_id, "t3_") || !isBareArchiveId(comment.id)) return;
     if (repliesAbortRef.current) repliesAbortRef.current.abort();
     const ctrl = new AbortController();
     repliesAbortRef.current = ctrl;
     setRepliesLoading(true);
     try {
-      const res = await safeFetch(`${ARCTIC}/api/comments/tree?link_id=${comment.link_id}&parent_id=t1_${comment.id}&limit=25`, { signal: ctrl.signal });
+      const res = await safeFetch(`${ARCTIC}/api/comments/tree?link_id=${encodeURIComponent(comment.link_id)}&parent_id=t1_${encodeURIComponent(comment.id)}&limit=25`, { signal: ctrl.signal });
       const data = res.data || [];
       const parentItem = data.find(item => item.kind === "t1" && item.data?.id === comment.id);
       const childObjs = parentItem?.data?.replies?.data?.children || [];
@@ -490,6 +613,8 @@ export const CommentCard = memo(function CommentCard({
   }, [comment.link_id, comment.id, repliesLoading]);
   const copyText = useCallback(() => {
     const flag = status.removed ? " [removed]" : status.deleted ? " [deleted]" : "";
+    // Clipboard/copy stays locale-less by design: ISO timestamp + raw
+    // fmtNum (no locale) keep pasted text machine-readable across locales.
     const ts = comment.created_utc != null ? new Date(comment.created_utc * 1000).toISOString() : "";
     return [
       `Comment on: ${comment.link_title || "Post"}`,
@@ -498,7 +623,9 @@ export const CommentCard = memo(function CommentCard({
       comment.body ? `\n${comment.body}` : "",
     ].filter(Boolean).join("\n");
   }, [comment, status, url]);
-  return <div className={`bg-[color:var(--bg)] border ${statusBorderBase(status)} rounded overflow-hidden transition-all duration-150 ${!isNested ? `${statusBorderHover(status)} hover:shadow-lg` : ""}`}>
+  // Cards use bg-elevated; nested replies keep bg so the thread hierarchy
+  // reads against the elevated parent card (documented bg exception).
+  return <div className={`${isNested ? "bg-[color:var(--bg)]" : "bg-[color:var(--bg-elevated)]"} border ${statusBorderBase(status)} rounded overflow-hidden transition-all duration-150 ${!isNested ? `${statusBorderHover(status)} hover:shadow-lg` : ""}`}>
 
             {post && <div className="border-b border-[color:var(--border-hover)]">
                     <PostCard post={post} embedded={true} highlightTerm={highlightTerm} />
@@ -518,17 +645,17 @@ export const CommentCard = memo(function CommentCard({
 
                 <div className="flex flex-col items-center justify-start gap-1 px-2 py-3 bg-[color:var(--bg)] min-w-[40px]">
                     <IconArrowUp />
-                    <span className="text-[11px] font-bold text-[color:var(--text)] leading-none">{fmtNum(comment.score)}</span>
+                    <span className="text-[11px] font-bold text-[color:var(--text)] leading-none">{fmtNum(comment.score, locale)}</span>
                 </div>
 
                 <div className="flex-1 p-3 min-w-0 relative">
-                    <a href={url} target="_blank" rel="noopener noreferrer" className="absolute inset-0 z-0" aria-hidden="true" tabIndex={-1} />
-                    <div className="flex items-center gap-1.5 text-[11px] text-[color:var(--text-muted)] mb-1.5 flex-wrap">
-                        <a href={`${REDDIT_BASE}/r/${comment.subreddit}`} target="_blank" rel="noopener noreferrer" className="relative z-10 font-medium text-[color:var(--text)] hover:underline">
+                    {url && <a href={url} target="_blank" rel="noopener noreferrer" className="absolute inset-0 z-0" aria-hidden="true" tabIndex={-1} />}
+                    <div className="flex items-center gap-2 text-[11px] text-[color:var(--text-muted)] mb-1.5 flex-wrap">
+                        <a href={subredditHref(comment)} target="_blank" rel="noopener noreferrer" className="relative z-10 font-medium text-[color:var(--text)] hover:underline">
                             {comment.subreddit_name_prefixed || `r/${comment.subreddit}`}
                         </a>
                         <span>{t("by")}</span>
-                        <a href={`${REDDIT_BASE}/u/${comment.author}`} target="_blank" rel="noopener noreferrer" className="relative z-10 text-[color:var(--text)] hover:underline">
+                        <a href={`${REDDIT_BASE}/u/${encodeURIComponent(String(comment.author ?? ""))}`} target="_blank" rel="noopener noreferrer" className="relative z-10 text-[color:var(--text)] hover:underline">
                             u/{comment.author}
                         </a>
                         <span>·</span>
@@ -556,9 +683,9 @@ export const CommentCard = memo(function CommentCard({
                                 </p> : <p className="text-sm text-[color:var(--text)] leading-relaxed whitespace-pre-wrap break-words relative z-10">
                                     <HighlightText text={comment.body || t("noContent")} highlight={highlightTerm} />
                                 </p>}
-                            {img && <HoverHint hint={t("openImage")} className="inline-block mt-2 relative z-10">
-                                    <a href={img} target="_blank" rel="noopener noreferrer" className="relative flex items-center justify-center w-24 h-16 rounded overflow-hidden bg-[color:var(--bg-elevated)] border border-[color:var(--border-hover)] cursor-zoom-in">
-                                        <img src={img} alt={t("openImage")} width="96" height="64" className={`absolute inset-0 w-full h-full object-cover transition-opacity ${imgError ? 'opacity-0' : 'opacity-100'}`} loading="lazy" onError={onImgError} />
+                            {img && isSafeHttpUrl(img) && <HoverHint hint={t("openImage")} className="inline-block mt-2 relative z-10">
+                                    <a href={img} target="_blank" rel="noopener noreferrer" aria-label={t("openImage")} className={`relative flex items-center justify-center w-24 h-16 rounded overflow-hidden bg-[color:var(--bg-elevated)] border border-[color:var(--border-hover)] cursor-zoom-in transition-opacity ${imgError || imgLoaded ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+                                        <img src={img} alt="" width="96" height="64" className={`absolute inset-0 w-full h-full object-cover transition-opacity ${imgError ? 'opacity-0' : 'opacity-100'}`} loading="lazy" onLoad={onImgLoad} onError={onImgError} />
                                         {imgError && <IconExternal className="w-4 h-4 text-[color:var(--text-muted)] opacity-50 pointer-events-none" />}
                                     </a>
                                 </HoverHint>}
@@ -601,7 +728,7 @@ export const CommentCard = memo(function CommentCard({
           }} />
                             </div>
                             <div className="flex-1 min-w-0">
-                                {replies.length > 0 ? <div className="flex flex-col gap-1.5 py-1.5 pr-2">
+                                {replies.length > 0 ? <div className="flex flex-col gap-2 py-1.5 pr-2">
                                         {replies.map(reply => <div key={reply.id} className="flex items-start">
                                                 <svg width="14" height="44" viewBox="0 0 14 44" fill="none" className="flex-shrink-0 self-start" style={{
                 marginTop: 19,

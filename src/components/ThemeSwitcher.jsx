@@ -46,9 +46,9 @@ export const ThemeSwitcher = memo(() => {
   const isDarkResolved = colorMode === "dark" || (colorMode === "auto" && window.matchMedia('(prefers-color-scheme: dark)').matches);
   const { lang, t } = useI18n();
 
-  return <div className="flex gap-1.5 sm:gap-2 flex-shrink-0">
+  return <div className="flex gap-2 flex-shrink-0">
             <details className="relative group/lang" onKeyDown={closeOnEscape}>
-                <summary aria-label="Change language" onClick={e => closeOtherMenus(e.currentTarget.closest('details'))} className="flex items-center gap-1.5 bg-[color:var(--bg)] border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] relative z-50 rounded h-9 px-3 sm:h-8 sm:px-2.5 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)] cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                <summary aria-label={t("changeLanguage")} onClick={e => closeOtherMenus(e.currentTarget.closest('details'))} className="flex items-center gap-2 bg-[color:var(--bg)] border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] relative z-50 rounded h-8 px-2.5 transition-colors cursor-pointer list-none [&::-webkit-details-marker]:hidden">
                     <IconGlobe className="w-3.5 h-3.5 text-[color:var(--text-muted)] pointer-events-none" />
                     <span className="hidden sm:inline text-xs text-[color:var(--text-muted)] font-medium pointer-events-none">{LANGS[lang]}</span>
                 </summary>
@@ -64,7 +64,7 @@ export const ThemeSwitcher = memo(() => {
             </details>
 
             <details className="relative group/mode" onKeyDown={closeOnEscape}>
-                <summary aria-label={t("modeAuto")} onClick={e => closeOtherMenus(e.currentTarget.closest('details'))} className="flex items-center gap-1.5 bg-[color:var(--bg)] border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] relative z-50 rounded h-9 px-3 sm:h-8 sm:px-2.5 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)] cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                <summary aria-label={colorMode === "auto" ? t("modeAuto") : colorMode === "dark" ? t("modeDark") : t("modeLight")} onClick={e => closeOtherMenus(e.currentTarget.closest('details'))} className="flex items-center gap-2 bg-[color:var(--bg)] border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] relative z-50 rounded h-8 px-2.5 transition-colors cursor-pointer list-none [&::-webkit-details-marker]:hidden">
                     {colorMode === "dark" ? <IconMoon className="w-3.5 h-3.5 text-[color:var(--text-muted)] pointer-events-none" /> : colorMode === "light" ? <IconSun className="w-3.5 h-3.5 text-[color:var(--text-muted)] pointer-events-none" /> : <IconMonitor className="w-3.5 h-3.5 text-[color:var(--text-muted)] pointer-events-none" />}
                     <span className="hidden sm:inline text-xs text-[color:var(--text-muted)] font-medium pointer-events-none">{colorMode === "auto" ? t("modeAuto") : colorMode === "dark" ? t("modeDark") : t("modeLight")}</span>
                 </summary>
@@ -80,7 +80,7 @@ export const ThemeSwitcher = memo(() => {
             </details>
             
             <details className="relative group/theme" onKeyDown={closeOnEscape}>
-                <summary aria-label={t("themeDefault")} onClick={e => closeOtherMenus(e.currentTarget.closest('details'))} className="flex items-center gap-1.5 bg-[color:var(--bg)] border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] relative z-50 rounded h-9 px-3 sm:h-8 sm:px-2.5 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)] cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                <summary aria-label={theme === "default" ? t("themeDefault") : theme} onClick={e => closeOtherMenus(e.currentTarget.closest('details'))} className="flex items-center gap-2 bg-[color:var(--bg)] border border-[color:var(--border-hover)] text-[color:var(--text-muted)] hover:border-[color:var(--text-muted)] hover:bg-[color:var(--bg-elevated)] hover:text-[color:var(--text)] relative z-50 rounded h-8 px-2.5 transition-colors cursor-pointer list-none [&::-webkit-details-marker]:hidden">
                     <IconPalette className="w-3.5 h-3.5 text-[color:var(--text-muted)] pointer-events-none" />
                     <span className="w-2.5 h-2.5 rounded-full border border-[color:var(--border-hover)] pointer-events-none" style={{ background: "var(--accent)" }} />
                     <span className="hidden sm:inline text-xs text-[color:var(--text-muted)] font-medium pointer-events-none">{theme === "default" ? t("themeDefault") : theme.charAt(0).toUpperCase() + theme.slice(1)}</span>
