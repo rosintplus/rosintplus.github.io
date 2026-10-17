@@ -18,15 +18,19 @@ export const CopyButton = memo(function CopyButton({ getText }) {
       ta.value = text;
       ta.style.position = "fixed";
       ta.style.opacity = "0";
+      ta.setAttribute("aria-hidden", "true");
+      ta.tabIndex = -1;
       document.body.appendChild(ta);
+      let ok = false;
       try {
         ta.select();
-        document.execCommand("copy");
+        ok = document.execCommand("copy");
       } catch {
-        return;
+        ok = false;
       } finally {
         document.body.removeChild(ta);
       }
+      if (!ok) return;
     }
     setDone(true);
     if (timerRef.current) clearTimeout(timerRef.current);

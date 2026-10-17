@@ -1,7 +1,7 @@
-import { memo, useState, useMemo, useEffect, useRef } from "react";
+import { memo, useState, useMemo, useEffect, useRef, useId } from "react";
 import { readStoredList, FLEX_1 } from "../constants.js";
 import { normalizeUsername, normalizeSubreddit } from "../utils.js";
-import { getSavedUsernames } from "../profileData.js";
+import { getSavedUsernames } from "../profile/cache.js";
 import { IconSearch } from "./icons.jsx";
 import { useI18n } from "../i18n.js";
 
@@ -25,8 +25,19 @@ export const SearchBar = memo(function SearchBar({
   const [focused, setFocused] = useState(false);
   const [savedUsers, setSavedUsers] = useState([]);
   const inputRef = useRef(null);
+  // Sync the input when the parent query/mode changes (Back/Forward, mode
+  // switch, ?u post URL). Guard with !focused so in-progress typing is never
+  // clobbered — only an actual prop change while unfocused resyncs.
   useEffect(() => {
-    const fetchSaved = () => getSavedUsernames().then(setSavedUsers);
+    if (!focused && defaultQuery !== username) setUsername(defaultQuery ?? "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultQuery, mode]);
+  useEffect(() => {
+    // Defensive: getSavedUsernames may resolve valid JSON that is not an
+    // array (corrupt rosint_saved_users) — coerce to a string list.
+    const fetchSaved = () => getSavedUsernames()
+      .then(v => setSavedUsers(Array.isArray(v) ? v.filter(s => typeof s === "string") : []))
+      .catch(() => setSavedUsers([]));
     fetchSaved();
     window.addEventListener('savedUsersChanged', fetchSaved);
     window.addEventListener('storage', fetchSaved);
@@ -37,13 +48,21 @@ export const SearchBar = memo(function SearchBar({
   }, []);
   
   const MAX_DROPDOWN = 5;
+  // Guard: corrupt storage can leave savedUsers as valid JSON non-array or
+  // with non-string entries — filter defensively before any .map/.filter.
+  const safeSavedUsers = useMemo(() => (Array.isArray(savedUsers) ? savedUsers.filter(s => typeof s === "string") : []), [savedUsers]);
+  const safeRecent = useMemo(() => (Array.isArray(recent) ? recent.filter(s => typeof s === "string") : []), [recent]);
   const addRecent = (user) => {
     try {
-      const savedSet = new Set(savedUsers.map(u => u.toLowerCase()));
+      const savedSet = new Set(safeSavedUsers.map(u => u.toLowerCase()));
       if (savedSet.has(user.toLowerCase())) return;
-      const room = Math.max(0, MAX_DROPDOWN - savedUsers.length);
+      const room = Math.max(0, MAX_DROPDOWN - safeSavedUsers.length);
+      // Saved profiles already fill the dropdown: keep existing recents
+      // instead of slicing them down to [].
+      if (room <= 0) return;
       const current = readStoredList(RECENT_KEYS[mode]);
-      const next = [user, ...current.filter(u => u !== user && !savedSet.has(u.toLowerCase()))].slice(0, room);
+      const safeCurrent = Array.isArray(current) ? current.filter(s => typeof s === "string") : [];
+      const next = [user, ...safeCurrent.filter(u => u !== user && !savedSet.has(u.toLowerCase()))].slice(0, room);
       localStorage.setItem(RECENT_KEYS[mode], JSON.stringify(next));
       setRecent(next);
     } catch (e) {
@@ -55,7 +74,8 @@ export const SearchBar = memo(function SearchBar({
     e.stopPropagation();
     try {
       const current = readStoredList(RECENT_KEYS[mode]);
-      const next = current.filter(u => u !== user);
+      const safeList = Array.isArray(current) ? current.filter(s => typeof s === "string") : [];
+      const next = safeList.filter(u => u !== user);
       localStorage.setItem(RECENT_KEYS[mode], JSON.stringify(next));
       setRecent(next);
     } catch (e) {
@@ -97,31 +117,57 @@ export const SearchBar = memo(function SearchBar({
     onSearch(normalized);
   };
 
-  const filteredSaved = useMemo(() => mode === "username" ? savedUsers.filter(r => r.toLowerCase().includes(username.trim().toLowerCase())) : [], [mode, savedUsers, username]);
+  const filteredSaved = useMemo(() => mode === "username" ? safeSavedUsers.filter(r => r.toLowerCase().includes(username.trim().toLowerCase())) : [], [mode, safeSavedUsers, username]);
   const maxDropdown = MAX_DROPDOWN;
   const filteredRecent = useMemo(() => {
     const room = Math.max(0, maxDropdown - filteredSaved.length);
-    const savedLower = new Set(savedUsers.map(s => s.toLowerCase()));
-    return recent.filter(r => r.toLowerCase().includes(username.trim().toLowerCase()) && !savedLower.has(r.toLowerCase())).slice(0, room);
-  }, [recent, savedUsers, username, maxDropdown, filteredSaved.length]);
+    const savedLower = new Set(safeSavedUsers.map(s => s.toLowerCase()));
+    return safeRecent.filter(r => r.toLowerCase().includes(username.trim().toLowerCase()) && !savedLower.has(r.toLowerCase())).slice(0, room);
+  }, [safeRecent, safeSavedUsers, username, maxDropdown, filteredSaved.length]);
+
+  // Flat option list (saved first) backing ArrowUp/Down + Enter navigation.
+  const listboxId = useId();
+  const [activeIdx, setActiveIdx] = useState(-1);
+  const options = useMemo(() => ([
+    ...filteredSaved.map(value => ({ value, saved: true })),
+    ...filteredRecent.map(value => ({ value, saved: false })),
+  ]), [filteredSaved, filteredRecent]);
+  const showDropdown = focused && options.length > 0;
+  useEffect(() => { setActiveIdx(-1); }, [username, mode, safeRecent, safeSavedUsers]);
+
+  const onInputKeyDown = e => {
+    if (e.key === "Escape") { setFocused(false); inputRef.current?.blur(); return; }
+    if (!showDropdown) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveIdx(i => (i + 1) % options.length);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveIdx(i => (i - 1 + options.length) % options.length);
+    } else if (e.key === "Enter" && activeIdx >= 0 && options[activeIdx]) {
+      e.preventDefault();
+      handleRecentClick(options[activeIdx].value);
+    }
+  };
+  const removeRecentLabel = r => t("removeRecent", { user: r });
 
   return <form onSubmit={handleSubmit} className="flex gap-2">
             <div className="relative" style={FLEX_1} onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) setFocused(false); }}>
                 {mode !== "post" && <span className="absolute left-[14px] top-1/2 -translate-y-1/2 text-[color:var(--text-muted)] text-sm font-medium">{mode === "subreddit" ? "r/" : "u/"}</span>}
-                <input ref={inputRef} aria-label="Search user" type="text" value={username} onChange={e => setUsername(e.target.value)} onFocus={() => setFocused(true)} placeholder={mode === "subreddit" ? t("subredditPlaceholder") : mode === "post" ? t("searchPlaceholderPost") : t("searchPlaceholder")} name="search_query_osint" id="search_query_osint" autoComplete="off" data-bwignore="true" data-lpignore="true" data-1p-ignore="true" spellCheck="false" className={`w-full bg-[color-mix(in_srgb,var(--bg-elevated)_50%,var(--bg))] border border-[color:var(--border-hover)] rounded py-2.5 text-sm text-[color:var(--text)] placeholder-[color:var(--text-muted)] focus:outline-none focus:border-[color:var(--accent)] transition-colors ${mode === "post" ? "pl-4 pr-10" : "pl-[32px] pr-10"}`} onClick={() => setFocused(true)} onKeyDown={e => { if (e.key === "Escape") { setFocused(false); inputRef.current?.blur(); } }} />
+                <input ref={inputRef} aria-label={mode === "post" ? t("searchPlaceholderPost") : mode === "subreddit" ? t("subredditPlaceholder") : t("searchUser")} role="combobox" aria-expanded={showDropdown} aria-controls={listboxId} aria-activedescendant={activeIdx >= 0 && options[activeIdx] ? `${listboxId}-${activeIdx}` : undefined} aria-autocomplete="list" type="text" value={username} onChange={e => setUsername(e.target.value)} onFocus={() => setFocused(true)} placeholder={mode === "subreddit" ? t("subredditPlaceholder") : mode === "post" ? t("searchPlaceholderPost") : t("searchPlaceholder")} name="search_query_osint" id="search_query_osint" autoComplete="off" data-bwignore="true" data-lpignore="true" data-1p-ignore="true" spellCheck="false" className={`w-full bg-[color-mix(in_srgb,var(--bg-elevated)_50%,var(--bg))] border border-[color:var(--border-hover)] rounded py-2.5 text-sm text-[color:var(--text)] placeholder-[color:var(--text-muted)] focus:outline-none focus:border-[color:var(--accent)] transition-colors ${mode === "post" ? "pl-4 pr-10" : "pl-[32px] pr-10"}`} onClick={() => setFocused(true)} onKeyDown={onInputKeyDown} />
                 {username && (
-                    <button type="button" onMouseDown={e => e.preventDefault()} onClick={() => { setUsername(""); inputRef.current?.focus(); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-[color:var(--text-muted)] hover:text-[color:var(--accent-text)] transition-colors p-1" aria-label="Clear search">
+                    <button type="button" onMouseDown={e => e.preventDefault()} onClick={() => { setUsername(""); inputRef.current?.focus(); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-[color:var(--text-muted)] hover:text-[color:var(--accent-text)] transition-colors p-1" aria-label={t("clearSearch")}>
                         <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                     </button>
                 )}
                 
-                {focused && (filteredRecent.length > 0 || filteredSaved.length > 0) && (
-                  <div onMouseDown={e => e.preventDefault()} className="absolute top-full left-0 right-0 mt-1 bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded-md shadow-lg overflow-hidden z-50">
+                {showDropdown && (
+                  <div id={listboxId} role="listbox" aria-label={t("recent")} onMouseDown={e => e.preventDefault()} className="absolute top-full left-0 right-0 mt-1 bg-[color:var(--bg)] border border-[color:var(--border-hover)] rounded-md shadow-lg overflow-hidden z-50">
                     {mode === "username" && filteredSaved.length > 0 && (
                       <>
                         <div className="px-4 py-3 text-[12px] font-medium text-[color:var(--text-muted)]">{t("savedProfiles")}</div>
-                        {filteredSaved.map(r => (
-                          <button type="button" key={r} onClick={() => handleRecentClick(r)} className="w-full text-left flex items-center gap-3 px-4 py-2.5 hover:bg-[color:var(--bg-elevated)] cursor-pointer group transition-colors">
+                        {filteredSaved.map((r, i) => (
+                          <button type="button" key={r} id={`${listboxId}-${i}`} role="option" aria-selected={activeIdx === i} onClick={() => handleRecentClick(r)} onMouseEnter={() => setActiveIdx(i)} className={`w-full text-left flex items-center gap-3 px-4 py-2.5 hover:bg-[color:var(--bg-elevated)] cursor-pointer group transition-colors ${activeIdx === i ? "bg-[color:var(--bg-elevated)]" : ""}`}>
                             <svg className="w-[18px] h-[18px] text-[color:var(--text-muted)] flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinejoin="round" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
                             <span className="text-[14px] font-medium text-[color:var(--text)] truncate">{r}</span>
                           </button>
@@ -131,17 +177,20 @@ export const SearchBar = memo(function SearchBar({
                     {filteredRecent.length > 0 && (
                       <>
                         <div className="px-4 py-3 text-[12px] font-medium text-[color:var(--text-muted)]">{t("recent")}</div>
-                        {filteredRecent.map(r => (
-                          <div key={r} className="flex items-center hover:bg-[color:var(--bg-elevated)] group transition-colors">
-                            <button type="button" onClick={() => handleRecentClick(r)} className="flex items-center gap-3 flex-1 min-w-0 text-left px-4 py-2.5 cursor-pointer">
+                        {filteredRecent.map((r, j) => {
+                          const i = filteredSaved.length + j;
+                          return (
+                          <div key={r} className={`flex items-center hover:bg-[color:var(--bg-elevated)] group transition-colors ${activeIdx === i ? "bg-[color:var(--bg-elevated)]" : ""}`}>
+                            <button type="button" id={`${listboxId}-${i}`} role="option" aria-selected={activeIdx === i} onClick={() => handleRecentClick(r)} onMouseEnter={() => setActiveIdx(i)} className="flex items-center gap-3 flex-1 min-w-0 text-left px-4 py-2.5 cursor-pointer">
                               <svg className="w-[18px] h-[18px] text-[color:var(--text-muted)] flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                               <span className="text-[14px] font-medium text-[color:var(--text)] truncate">{r}</span>
                             </button>
-                            <button type="button" onClick={(e) => removeRecent(e, r)} className="text-[color:var(--text-muted)] hover:text-[color:var(--text)] transition-colors p-1 mr-3 flex-shrink-0" aria-label={`Remove ${r} from recent searches`}>
+                            <button type="button" onClick={(e) => removeRecent(e, r)} className="text-[color:var(--text-muted)] hover:text-[color:var(--text)] transition-colors p-1 mr-3 flex-shrink-0" aria-label={removeRecentLabel(r)}>
                               <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" /></svg>
                             </button>
                           </div>
-                        ))}
+                          );
+                        })}
                       </>
                     )}
                   </div>

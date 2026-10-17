@@ -6,39 +6,39 @@ export function getArchetypeColorClass(archetype = '') {
     return "bg-[color:var(--bg)] text-[color:var(--text-muted)] border border-[color:var(--border)]";
   }
   if (a.includes('auth-left') || a.includes('socialist') || a.includes('communist')) {
-    return "bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-500/30 font-medium";
+    return "bg-[color:var(--quad-auth-left)]/15 text-[color:var(--quad-auth-left)] border border-[color:var(--quad-auth-left)]/30 font-medium";
   }
   if (a.includes('auth-right') || a.includes('conservative') || a.includes('traditional')) {
-    return "bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-500/30 font-medium";
+    return "bg-[color:var(--quad-auth-right)]/15 text-[color:var(--quad-auth-right)] border border-[color:var(--quad-auth-right)]/30 font-medium";
   }
   if (a.includes('lib-left') || a.includes('progressive') || a.includes('social democrat')) {
-    return "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 font-medium";
+    return "bg-[color:var(--quad-lib-left)]/15 text-[color:var(--quad-lib-left)] border border-[color:var(--quad-lib-left)]/30 font-medium";
   }
   if (a.includes('lib-right') || a.includes('libertarian right') || a.includes('capitalist')) {
-    return "bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 font-medium";
+    return "bg-[color:var(--quad-lib-right)]/15 text-[color:var(--quad-lib-right)] border border-[color:var(--quad-lib-right)]/30 font-medium";
   }
   if (a.includes('libertarian') || a.includes('lib-center')) {
-    return "bg-teal-500/15 text-teal-700 dark:text-teal-300 border border-teal-500/30 font-medium";
+    return "bg-[color:var(--lib-center)]/15 text-[color:var(--lib-center)] border border-[color:var(--lib-center)]/30 font-medium";
   }
   if (a.includes('auth-center') || a.includes('statist')) {
-    return "bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/30 font-medium";
+    return "bg-[color:var(--auth-center)]/15 text-[color:var(--auth-center)] border border-[color:var(--auth-center)]/30 font-medium";
   }
-  return "bg-slate-500/15 text-slate-700 dark:text-slate-300 border border-slate-500/30 font-medium";
+  return "bg-[color:var(--neutral)]/15 text-[color:var(--neutral)] border border-[color:var(--neutral)]/30 font-medium";
 }
 
 export function getPolarityColorClass(polarity = '') {
   const p = polarity.toLowerCase();
   if (p.includes('left') || p.includes('prog')) {
-    return "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30";
+    return "bg-[color:var(--success)]/15 text-[color:var(--success)] border border-[color:var(--success)]/30";
   }
   if (p.includes('right') || p.includes('trad')) {
-    return "bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-500/30";
+    return "bg-[color:var(--info)]/15 text-[color:var(--info)] border border-[color:var(--info)]/30";
   }
   if (p.includes('libertarian') || p.includes('lib')) {
-    return "bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30";
+    return "bg-[color:var(--warn)]/15 text-[color:var(--warn)] border border-[color:var(--warn)]/30";
   }
   if (p.includes('statist') || p.includes('auth') || p.includes('order')) {
-    return "bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/30";
+    return "bg-[color:var(--auth-center)]/15 text-[color:var(--auth-center)] border border-[color:var(--auth-center)]/30";
   }
   return "bg-[color:var(--bg)] text-[color:var(--text-muted)] border border-[color:var(--border)]";
 }

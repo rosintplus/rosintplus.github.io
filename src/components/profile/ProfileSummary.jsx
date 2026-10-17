@@ -1,12 +1,12 @@
 import { memo, useMemo, useState } from 'react';
-import { REDDIT_BASE } from '../../api.js';
+import { REDDIT_BASE } from '../../api/client.js';
 import { useI18n, LOCALES } from '../../i18n.js';
 import { evaluateBotLikelihood } from '../../botDetector.js';
 import { fmtNum } from '../../utils.js';
 
 const RISK_TEXT = {
-  high: 'text-rose-700 dark:text-rose-300 font-bold',
-  medium: 'text-amber-700 dark:text-amber-300 font-semibold',
+  high: 'text-[color:var(--danger)] font-bold',
+  medium: 'text-[color:var(--warn)] font-semibold',
   low: 'text-[color:var(--text)]',
 };
 
@@ -67,6 +67,12 @@ const ProfileSummary = memo(function ProfileSummary({
 
   if (!posts.length && !comments.length) return null;
 
+  const tx = (key, fallback) => {
+    if (!key) return fallback;
+    const s = t(key);
+    return s === key ? fallback : s;
+  };
+
   return <div className="flex flex-col gap-2 mb-3">
             <div className="bg-[color:var(--bg-elevated)] border border-[color:var(--border)] rounded-lg px-2 sm:px-3 py-2.5 sm:py-3 grid grid-cols-5 divide-x divide-[color:var(--border)]">
                 <div className="min-w-0 text-center px-1">
@@ -120,6 +126,9 @@ const ProfileSummary = memo(function ProfileSummary({
                     <div className="flex items-center justify-between gap-2 border-b border-[color:var(--border)] pb-2">
                         <div className="flex flex-wrap items-center gap-2 min-w-0">
                             <span className="font-semibold text-sm">{t("apDuplicatesTitle")}</span>
+                            <span className={`text-[10px] font-semibold ${RISK_TEXT[analysis.riskLevel] || RISK_TEXT.low}`}>
+                                {tx(analysis.verdictKey, analysis.verdict)}
+                            </span>
                             <span className="text-[10px] text-[color:var(--text-faint)]">
                                 {(() => {
                                     const scanned = analysis.metrics.loadedPosts + analysis.metrics.loadedComments;
@@ -129,7 +138,7 @@ const ProfileSummary = memo(function ProfileSummary({
                                     // more than that, say "of N" so the figure is not mistaken
                                     // for the whole history.
                                     if (total > scanned) return t("apBotScannedOf", { scanned: fmt(scanned), total: fmt(total) });
-                                    return t("apBotScanned", { posts: analysis.metrics.loadedPosts, comments: analysis.metrics.loadedComments });
+                                    return t("apBotScanned", { posts: fmt(analysis.metrics.loadedPosts), comments: fmt(analysis.metrics.loadedComments) });
                                 })()}
                             </span>
                         </div>
@@ -138,37 +147,60 @@ const ProfileSummary = memo(function ProfileSummary({
                             onClick={() => setOpen(false)}
                             className="text-[color:var(--text-muted)] hover:text-[color:var(--text)] text-xs px-1 cursor-pointer"
                         >
-                            ✕
+                            ×
                         </button>
                     </div>
                     <p className="text-[11px] text-[color:var(--text-muted)]">{t("apDuplicatesNote")}</p>
 
                     {analysis.flags.length > 0 && (
-                        <div className="flex flex-col gap-1 bg-amber-500/10 border border-amber-500/20 rounded p-2 text-[11px] text-amber-700 dark:text-amber-300">
+                        <div className="flex flex-col gap-1 bg-[color:var(--warn)]/10 border border-[color:var(--warn)]/20 rounded p-2 text-[11px] text-[color:var(--warn)]">
                             <ul className="list-disc list-inside space-y-0.5 text-[11px]">
-                                {analysis.flags.map((flag, idx) => <li key={idx}>{flag}</li>)}
+                                {(analysis.flagKeys?.length ? analysis.flagKeys.map(f => {
+                                    const detailText = tx(f.detailKey, f.params?.detail);
+                                    const s = t(f.key, { detail: detailText });
+                                    return s === f.key ? f.params?.detail : s;
+                                }) : analysis.flags).map((flag, idx) => <li key={idx}>{flag}</li>)}
                             </ul>
                         </div>
                     )}
 
                     {analysis.evidence.length > 0 ? (
-                        <ul className="flex flex-col gap-1.5 text-[11px] text-rose-700 dark:text-rose-300">
-                            {analysis.evidence.map((e, i) => (
+                        <ul className="flex flex-col gap-1.5 text-[11px] text-[color:var(--danger)]">
+                            {analysis.evidence.map((e, i) => {
+                                const label = tx(e.labelKey, e.label);
+                                const line = t("botEvidenceCount", { count: e.count, label });
+                                return (
                                 <li key={i} className="flex flex-wrap items-center gap-1">
-                                    <span className="font-semibold whitespace-nowrap">{e.count}× {e.label.toLowerCase()}</span>
+                                    <span className="font-semibold whitespace-nowrap">{line === "botEvidenceCount" ? `${e.count}× ${label}` : line}</span>
                                     {e.subs && <span className="text-[color:var(--text-faint)]">{e.subs}</span>}
                                     {e.sample && <span className="opacity-80 break-all">· {e.sample}</span>}
                                     {e.posts?.length > 0 && <span className="flex items-center gap-1">
-                                        {e.posts.map(p => (
-                                            <a key={p.id} className="underline" href={p.permalink ? `${REDDIT_BASE}${p.permalink}` : `${REDDIT_BASE}/comments/${p.id}`} target="_blank" rel="noopener noreferrer">{p.id}</a>
-                                        ))}
+                                        {e.posts.map(p => {
+                                            let href = null;
+                                            if (p.permalink) {
+                                                href = `${REDDIT_BASE}${p.permalink}`;
+                                            } else if (e.kind === 'comment') {
+                                                const sub = p.subreddit;
+                                                const rawLink = p.link_id || p.linkId;
+                                                const linkId = rawLink ? String(rawLink).replace(/^t3_/, '') : null;
+                                                href = (sub && linkId && p.id) ? `${REDDIT_BASE}/r/${sub}/comments/${linkId}/_/${p.id}` : null;
+                                            } else {
+                                                href = p.id ? `${REDDIT_BASE}/comments/${p.id}` : null;
+                                            }
+                                            return href ? (
+                                                <a key={p.id} className="underline" href={href} target="_blank" rel="noopener noreferrer">{p.id}</a>
+                                            ) : (
+                                                <span key={p.id}>{p.id}</span>
+                                            );
+                                        })}
                                     </span>}
                                 </li>
-                            ))}
+                                );
+                            })}
                         </ul>
                     ) : (
                         <p className="text-[11px] text-[color:var(--text-muted)]">
-                            No duplicated media, titles or comments in the loaded history.
+                            {t("botNoDuplicates")}
                         </p>
                     )}
                 </div>}

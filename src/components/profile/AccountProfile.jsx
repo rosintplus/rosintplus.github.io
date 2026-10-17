@@ -1,12 +1,14 @@
 import { memo, useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { HoverHint } from '../HoverHint.jsx';
 import { IconInfo } from '../icons.jsx';
-import { REDDIT_BASE, fetchSubredditInteractions } from '../../api.js';
+import { REDDIT_BASE } from '../../api/client.js';
+import { fetchSubredditInteractions } from '../../api/endpoints.js';
 import { useI18n, LOCALES } from '../../i18n.js';
-import { toggleProfileSaved, getSavedUsernames } from '../../profileData.js';
+import { toggleProfileSaved, getSavedUsernames } from '../../profile/cache.js';
 import { evaluatePoliticalCompass, classifyQuadrant } from '../../politicalCompass.js';
 import { getDays, levels, cleanDimensionLabel } from './helpers.js';
 import { getArchetypeColorClass, getPolarityColorClass, weightedCache } from './archetype.js';
+import { fmtNum } from '../../utils.js';
 
 // Memoized heatmap cell: the 7×24 grid mounts 168 HoverHint instances. Without
 // memo, every parent render (crawl progress, AI status) re-renders all 168
@@ -14,7 +16,7 @@ import { getArchetypeColorClass, getPolarityColorClass, weightedCache } from './
 const HeatCell = memo(function HeatCell({ count, maxCount, hint }) {
   const intensity = count === 0 ? 0 : levels[Math.min(3, Math.floor((count / maxCount) * 4))];
   return <HoverHint hint={hint} className="w-full h-full min-h-[12px] flex">
-    <div className="rounded-sm w-full h-full" style={{
+    <div role="img" aria-label={hint} className="rounded-sm w-full h-full" style={{
       backgroundColor: count === 0 ? 'var(--border)' : 'var(--accent)',
       opacity: count === 0 ? 0.2 : intensity
     }}></div>
@@ -26,6 +28,8 @@ const HeatCell = memo(function HeatCell({ count, maxCount, hint }) {
 // only re-renders when the heatmap data itself changes. Combined with the
 // memoized HeatCell above (primitive props only), unchanged cells skip
 // reconciliation entirely during crawl ticks.
+// Locale-neutral: apHeatCell hour/n stay raw ints (axis coordinates, not
+// display numbers) — intentionally not fmtNum.
 const ActivityHeatmap = memo(function ActivityHeatmap({ matrix, maxCount, days, t }) {
   return (
     <div className="min-w-0 w-full overflow-x-auto">
@@ -57,6 +61,20 @@ const AccountProfile = memo(function AccountProfile({
   comments = [],
 }) {
   const { t, lang } = useI18n();
+  const fmtN = n => { try { return Number(n).toLocaleString(LOCALES[lang] || "en"); } catch { return String(n); } };
+  const fmtSigned = n => {
+    const v = Number(n);
+    if (!Number.isFinite(v)) return String(n);
+    const mag = fmtN(Math.abs(v));
+    if (v > 0) return `+${mag}`;
+    if (v < 0) return `-${mag}`;
+    return mag;
+  };
+  const tx = (key, fallback) => {
+    if (!key) return fallback;
+    const s = t(key);
+    return s === key ? fallback : s;
+  };
   const days = useMemo(() => getDays(LOCALES[lang] || "en"), [lang]);
   const [isSaved, setIsSaved] = useState(false);
   const [showCompassSignals, setShowCompassSignals] = useState(false);
@@ -66,7 +84,7 @@ const AccountProfile = memo(function AccountProfile({
     if (!query) return;
     const checkSaved = () => {
       getSavedUsernames()
-        .then(keys => setIsSaved(keys.includes(query.toLowerCase())))
+        .then(keys => setIsSaved(Array.isArray(keys) && keys.some(k => String(k).toLowerCase() === String(query).toLowerCase())))
         .catch(() => setIsSaved(false));
     };
     checkSaved();
@@ -179,6 +197,7 @@ const AccountProfile = memo(function AccountProfile({
         hourTotals[c] += matrix[r][c];
       }
     }
+    if (hourTotals.reduce((a, b) => a + b, 0) === 0) return null;
     let minSum = Infinity;
     let quietestStart = 0;
     for (let start = 0; start < 24; start++) {
@@ -196,11 +215,14 @@ const AccountProfile = memo(function AccountProfile({
     if (offset > 14) offset -= 24;
     const estOffset = Math.round(offset);
     const peakHour = (quietestStart + 16) % 24;
+    // Locale-neutral: apTzHint hour/offset stay raw (UTC hour + +/-offset —
+    // axis values, not display numbers) — intentionally not fmtNum.
     return t("apTzHint", { hour: peakHour, offset: `${estOffset >= 0 ? '+' : ''}${estOffset}` });
   }, [stats, t]);
 
   const commonWords = useMemo(() => {
     if (!stats?.wordFreqs) return { list: [], maxN: 1 };
+    const totalOf = v => (typeof v === 'object' && v !== null ? (v.total ?? 0) : (Number(v) || 0));
 
     let freqs;
     if (activeTab === 'posts') {
@@ -213,20 +235,19 @@ const AccountProfile = memo(function AccountProfile({
         const wf = stats.wordFreqs[type] || {};
         for (const [word, counts] of Object.entries(wf)) {
           if (!freqs[word]) freqs[word] = { total: 0, items: 0 };
-          const cTotal = typeof counts === 'object' ? counts.total : counts;
-          const cItems = typeof counts === 'object' ? counts.items : counts;
+          const cTotal = typeof counts === 'object' && counts !== null ? (counts.total ?? 0) : (Number(counts) || 0);
+          const cItems = typeof counts === 'object' && counts !== null ? (counts.items ?? cTotal) : (Number(counts) || 0);
           freqs[word].total += cTotal;
           freqs[word].items += cItems;
         }
       }
     }
 
-    const key = 'total';
     const sorted = Object.entries(freqs)
-      .sort((a, b) => b[1][key] - a[1][key])
+      .sort((a, b) => totalOf(b[1]) - totalOf(a[1]))
       .slice(0, 20);
-    const maxN = sorted.length > 0 ? sorted[0][1][key] : 1;
-    return { list: sorted.map(([word, counts]) => [word, counts[key]]), maxN };
+    const maxN = sorted.length > 0 ? (totalOf(sorted[0][1]) || 1) : 1;
+    return { list: sorted.map(([word, counts]) => [word, totalOf(counts)]), maxN };
   }, [stats, activeTab]);
 
   const hasItems = (posts?.length || 0) > 0 || (comments?.length || 0) > 0 || Object.keys(stats?.subredditCounts || {}).length > 0;
@@ -267,6 +288,7 @@ const AccountProfile = memo(function AccountProfile({
         prevQuadrant: lastQuadrantRef.current
       });
 
+      const noSignalArchetypeKey = isCrawling ? "compassCrawling" : "compassConfNoSignal";
       return {
         hasSignal: compassResult.hasSignal,
         econ: compassResult.econ,
@@ -277,9 +299,13 @@ const AccountProfile = memo(function AccountProfile({
         archetype: compassResult.hasSignal
           ? classified.label
           : (isCrawling ? "Crawling items..." : "Insufficient signal"),
+        archetypeKey: compassResult.hasSignal
+          ? classified.labelKey
+          : noSignalArchetypeKey,
         quadrant: classified.quadrant,
         heldQuadrant: classified.held,
         confidence: compassResult.confidence,
+        confidenceKey: compassResult.confidenceKey,
         summary: null,
         evidence: compassResult.evidence,
         dimensions: compassResult.dimensions,
@@ -295,9 +321,11 @@ const AccountProfile = memo(function AccountProfile({
       hasSignal: false,
       econ: 0, soc: 0, gov: 0, x: 0, y: 0,
       archetype: isCrawling ? "Crawling items..." : "Gathering evidence",
+      archetypeKey: isCrawling ? "compassCrawling" : "compassGathering",
       quadrant: 'center',
       heldQuadrant: false,
       confidence: isCrawling ? "Collecting user history" : "Gathering evidence",
+      confidenceKey: isCrawling ? "compassCollecting" : "compassGathering",
       summary: null,
       evidence: null,
       dimensions: null,
@@ -342,13 +370,13 @@ const AccountProfile = memo(function AccountProfile({
           })()}
         </span>
         {isCrawling && (
-          <span className="text-[color:var(--accent-text)] italic flex items-center gap-1">
+          <span role="status" className="text-[color:var(--accent-text)] italic flex items-center gap-1">
             <span>· {t("apUpdating")}</span>
             {onStopCrawl && (
               <button
                 type="button"
                 onClick={onStopCrawl}
-                className="text-[10px] text-rose-700 dark:text-rose-300 hover:text-rose-800 dark:hover:text-rose-200 font-semibold px-1.5 py-0.5 rounded bg-rose-500/10 border border-rose-500/20 hover:bg-rose-500/20 transition-colors cursor-pointer not-italic ml-1"
+                className="text-[10px] text-[color:var(--danger)] font-semibold px-1.5 py-0.5 rounded bg-[color:var(--danger)]/10 border border-[color:var(--danger)]/20 hover:bg-[color:var(--danger)]/20 transition-colors cursor-pointer not-italic ml-1"
                 title={t("apStopCrawlTitle")}
               >
                 {t("apStopCrawl")}
@@ -373,7 +401,7 @@ const AccountProfile = memo(function AccountProfile({
         <span>&middot;</span>
         <button
           onClick={handleToggleSave}
-          className={`flex items-center gap-1 transition-colors px-1.5 py-0.5 -mx-1.5 rounded cursor-pointer ${isSaved ? 'text-amber-500 hover:text-amber-600 bg-amber-500/10' : 'text-[color:var(--text-muted)] hover:text-[color:var(--accent)] hover:bg-[color:var(--accent)]/10'}`}
+          className={`flex items-center gap-1 transition-colors px-1.5 py-0.5 -mx-1.5 rounded cursor-pointer ${isSaved ? 'text-[color:var(--warn)] hover:text-[color:var(--warn)] bg-[color:var(--warn)]/10' : 'text-[color:var(--text-muted)] hover:text-[color:var(--accent)] hover:bg-[color:var(--accent)]/10'}`}
           title={isSaved ? t("apSavedTitle") : t("apSaveTitle")}
         >
           <svg viewBox="0 0 24 24" className="w-3 h-3 flex-shrink-0" stroke="currentColor" strokeWidth="1.5" fill={isSaved ? "currentColor" : "none"} strokeLinecap="round" strokeLinejoin="round">
@@ -394,7 +422,7 @@ const AccountProfile = memo(function AccountProfile({
                         <a href={`${REDDIT_BASE}/r/${sub}`} target="_blank" rel="noopener noreferrer" className="font-medium text-[color:var(--text)] hover:underline pl-1.5 truncate">
                             r/{sub}
                         </a>
-                        <span className="text-[color:var(--text-muted)] font-medium pr-1.5">{count}</span>
+                        <span className="text-[color:var(--text-muted)] font-medium pr-1.5">{fmtNum(count, LOCALES[lang] || "en")}</span>
                     </div>)}
             </div>
         </div>
@@ -433,7 +461,7 @@ const AccountProfile = memo(function AccountProfile({
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-1.5">
               <h3 className="text-sm font-semibold text-[color:var(--text)]">{t("apCommonWords")}</h3>
-              <HoverHint hint={t("apCountsFrom", { tab: activeTab })}>
+              <HoverHint hint={t("apCountsFrom", { tab: activeTab === 'comments' ? t("commentsWord") : activeTab === 'posts' ? t("postsWord") : `${t("postsWord")} + ${t("commentsWord")}` })}>
                 <div className="text-[color:var(--text-muted)] hover:text-[color:var(--text)] transition-colors cursor-help flex items-center justify-center translate-y-[1px]">
                   <IconInfo />
                 </div>
@@ -478,7 +506,7 @@ const AccountProfile = memo(function AccountProfile({
 
             {compassAnalysis.archetype && (
               <span className={`px-2 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase truncate max-w-[200px] ${getArchetypeColorClass(compassAnalysis.archetype)}`}>
-                {compassAnalysis.archetype}
+                {tx(compassAnalysis.archetypeKey, compassAnalysis.archetype)}
               </span>
             )}
           </div>
@@ -487,7 +515,11 @@ const AccountProfile = memo(function AccountProfile({
             {compassAnalysis.hasSignal && (compassAnalysis.econ !== 0 || compassAnalysis.gov !== 0) ? (
               <>
                 <span className="text-[10px] sm:text-[10.5px] font-mono text-[color:var(--text-muted)]">
-                  Econ: {compassAnalysis.econ > 0 ? `+${compassAnalysis.econ}` : compassAnalysis.econ} · Gov: {compassAnalysis.gov > 0 ? `+${compassAnalysis.gov}` : compassAnalysis.gov}
+                  {/* Locale-neutral: apEconGov signed decimals stay via fmtSigned (grouped, not compact) — axis values, not display counts. */}
+                  {t("apEconGov", {
+                    econ: fmtSigned(compassAnalysis.econ),
+                    gov: fmtSigned(compassAnalysis.gov),
+                  })}
                 </span>
                 {compassAnalysis.provisional && (
                   <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-[color:var(--bg)] text-[color:var(--text-faint)] border border-[color:var(--border)]">
@@ -506,7 +538,7 @@ const AccountProfile = memo(function AccountProfile({
 
         {/* Clear Crawling Status / Live Progress Banner */}
         {isCrawling && (
-          <div className="flex items-center justify-between bg-[color:var(--bg)] border border-[color:var(--border)] rounded-md p-2.5 text-xs text-[color:var(--text-muted)]">
+          <div role="status" className="flex items-center justify-between bg-[color:var(--bg)] border border-[color:var(--border)] rounded-md p-2.5 text-xs text-[color:var(--text-muted)]">
             <div className="flex items-center gap-2.5 min-w-0">
               <span className="w-2 h-2 rounded-full bg-[color:var(--accent)] animate-ping shrink-0"></span>
               <div className="flex flex-col gap-0.5 min-w-0">
@@ -520,10 +552,10 @@ const AccountProfile = memo(function AccountProfile({
               <button
                 type="button"
                 onClick={onStopCrawl}
-                className="px-2 py-1 rounded bg-[color:var(--bg-elevated)] hover:bg-rose-500/15 border border-[color:var(--border)] hover:border-rose-500/30 text-[11px] font-semibold text-rose-700 dark:text-rose-300 transition-colors cursor-pointer shrink-0 ml-2"
+                className="px-2 py-1 rounded bg-[color:var(--bg-elevated)] hover:bg-[color:var(--danger)]/15 border border-[color:var(--border)] hover:border-[color:var(--danger)]/30 text-[11px] font-semibold text-[color:var(--danger)] transition-colors cursor-pointer shrink-0 ml-2"
                 title={t("apStopCrawlTitle")}
               >
-                ✕ {t("apStopCrawl")}
+                × {t("apStopCrawl")}
               </button>
             )}
           </div>
@@ -556,22 +588,22 @@ const AccountProfile = memo(function AccountProfile({
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10.5px] text-[color:var(--text-faint)] px-0.5">
             <span className="font-semibold uppercase tracking-wider">{t("apCompassMethod")}</span>
             <span aria-hidden="true">·</span>
-            <span>{compassAnalysis.confidence}</span>
+            <span>{tx(compassAnalysis.confidenceKey, compassAnalysis.confidence)}</span>
             <span aria-hidden="true">·</span>
             <span className="font-mono">
               {t("apCompassEvidence", {
-                weight: compassAnalysis.evidence.totalWeight,
-                topics: compassAnalysis.evidence.distinctTopics,
-                subs: compassAnalysis.evidence.communityWeight > 0 ? Math.max(1, (compassAnalysis.topSubSignals || []).length) : 0,
-                reliability: compassAnalysis.evidence.reliability,
+                weight: fmtN(compassAnalysis.evidence.totalWeight),
+                topics: fmtN(compassAnalysis.evidence.distinctTopics),
+                subs: fmtN(compassAnalysis.evidence.communityWeight > 0 ? Math.max(1, (compassAnalysis.topSubSignals || []).length) : 0),
+                reliability: fmtN(compassAnalysis.evidence.reliability),
               })}
             </span>
             {compassAnalysis.evidence.se && (
               <span className="font-mono" title={t("apCompassMethodNote")}>
                 {t("apCompassSe", {
-                  e: compassAnalysis.evidence.se.econ ?? 0,
-                  s: compassAnalysis.evidence.se.soc ?? 0,
-                  g: compassAnalysis.evidence.se.gov ?? 0,
+                  e: fmtN(compassAnalysis.evidence.se.econ ?? 0),
+                  s: fmtN(compassAnalysis.evidence.se.soc ?? 0),
+                  g: fmtN(compassAnalysis.evidence.se.gov ?? 0),
                 })}
               </span>
             )}
@@ -586,17 +618,17 @@ const AccountProfile = memo(function AccountProfile({
               <div className="relative w-full max-w-[280px] mx-auto md:max-w-none h-full min-h-[220px] aspect-square md:aspect-auto bg-[color:var(--bg)] border border-[color:var(--border)] rounded-lg overflow-hidden select-none">
                 {/* 4 Quadrants with Authentic Compass Colors */}
                 <div className="absolute inset-0 grid grid-cols-2 grid-rows-2 pointer-events-none">
-                  <div className="border-r border-b border-[color:var(--border)] bg-rose-500/15 relative p-2 sm:p-2.5 flex items-start justify-start">
-                    <span className="text-[9px] sm:text-[9.5px] font-bold text-rose-700 dark:text-rose-300 uppercase tracking-wider">Auth-Left</span>
+                  <div className="border-r border-b border-[color:var(--border)] bg-[color:var(--quad-auth-left)]/15 relative p-2 sm:p-2.5 flex items-start justify-start">
+                    <span className="text-[9px] sm:text-[9.5px] font-bold text-[color:var(--quad-auth-left)] uppercase tracking-wider">{t("compassGridAuthLeft")}</span>
                   </div>
-                  <div className="border-b border-[color:var(--border)] bg-blue-500/15 relative p-2 sm:p-2.5 flex items-start justify-end">
-                    <span className="text-[9px] sm:text-[9.5px] font-bold text-blue-700 dark:text-blue-300 uppercase tracking-wider">Auth-Right</span>
+                  <div className="border-b border-[color:var(--border)] bg-[color:var(--quad-auth-right)]/15 relative p-2 sm:p-2.5 flex items-start justify-end">
+                    <span className="text-[9px] sm:text-[9.5px] font-bold text-[color:var(--quad-auth-right)] uppercase tracking-wider">{t("compassGridAuthRight")}</span>
                   </div>
-                  <div className="border-r border-[color:var(--border)] bg-emerald-500/15 relative p-2 sm:p-2.5 flex items-end justify-start">
-                    <span className="text-[9px] sm:text-[9.5px] font-bold text-emerald-700 dark:text-emerald-300 uppercase tracking-wider">Lib-Left</span>
+                  <div className="border-r border-[color:var(--border)] bg-[color:var(--quad-lib-left)]/15 relative p-2 sm:p-2.5 flex items-end justify-start">
+                    <span className="text-[9px] sm:text-[9.5px] font-bold text-[color:var(--quad-lib-left)] uppercase tracking-wider">{t("compassGridLibLeft")}</span>
                   </div>
-                  <div className="bg-amber-500/15 relative p-2 sm:p-2.5 flex items-end justify-end">
-                    <span className="text-[9px] sm:text-[9.5px] font-bold text-amber-700 dark:text-amber-300 uppercase tracking-wider">Lib-Right</span>
+                  <div className="bg-[color:var(--quad-lib-right)]/15 relative p-2 sm:p-2.5 flex items-end justify-end">
+                    <span className="text-[9px] sm:text-[9.5px] font-bold text-[color:var(--quad-lib-right)] uppercase tracking-wider">{t("compassGridLibRight")}</span>
                   </div>
                 </div>
 
@@ -609,7 +641,7 @@ const AccountProfile = memo(function AccountProfile({
                   }}
                 >
                   <div className="relative flex items-center justify-center">
-                    <span className="w-3.5 h-3.5 rounded-full bg-white border-2 border-[color:var(--bg)] shadow-lg shadow-black/60"></span>
+                    <span className="w-3.5 h-3.5 rounded-full bg-[color:var(--bg)] border-2 border-[color:var(--text-muted)] shadow-lg shadow-black/60"></span>
                   </div>
                 </div>
               </div>
@@ -624,11 +656,11 @@ const AccountProfile = memo(function AccountProfile({
                 <div className="flex flex-col gap-1.5">
                   <div className="flex items-center justify-between gap-2 text-[11px] sm:text-[11.5px]">
                     <span className="text-[color:var(--text-muted)] font-medium shrink-0">{t("apEconomy")}</span>
-                    <span className="font-semibold text-blue-700 dark:text-blue-300 text-right">{cleanDimensionLabel(compassAnalysis.dimensions?.econ?.label)}</span>
+                    <span className="font-semibold text-[color:var(--info)] text-right">{cleanDimensionLabel(tx(compassAnalysis.dimensions?.econ?.labelKey, compassAnalysis.dimensions?.econ?.label))}</span>
                   </div>
                   <div className="relative h-2 bg-[color:var(--bg-elevated)] border border-[color:var(--border)] rounded-full overflow-hidden">
                     <div
-                      className="absolute top-0 bottom-0 bg-blue-500 rounded-full transition-all duration-500 shadow-sm"
+                      className="absolute top-0 bottom-0 bg-[color:var(--info)] rounded-full transition-all duration-500 shadow-sm"
                       style={{
                         left: `${Math.min(50, 50 + (compassAnalysis.econ * 5))}%`,
                         width: `${Math.max(4, Math.abs(compassAnalysis.econ * 5))}%`,
@@ -646,11 +678,11 @@ const AccountProfile = memo(function AccountProfile({
                 <div className="flex flex-col gap-1.5">
                   <div className="flex items-center justify-between gap-2 text-[11px] sm:text-[11.5px]">
                     <span className="text-[color:var(--text-muted)] font-medium shrink-0">{t("apSocial")}</span>
-                    <span className="font-semibold text-emerald-700 dark:text-emerald-300 text-right">{cleanDimensionLabel(compassAnalysis.dimensions?.soc?.label)}</span>
+                    <span className="font-semibold text-[color:var(--success)] text-right">{cleanDimensionLabel(tx(compassAnalysis.dimensions?.soc?.labelKey, compassAnalysis.dimensions?.soc?.label))}</span>
                   </div>
                   <div className="relative h-2 bg-[color:var(--bg-elevated)] border border-[color:var(--border)] rounded-full overflow-hidden">
                     <div
-                      className="absolute top-0 bottom-0 bg-emerald-500 rounded-full transition-all duration-500 shadow-sm"
+                      className="absolute top-0 bottom-0 bg-[color:var(--success)] rounded-full transition-all duration-500 shadow-sm"
                       style={{
                         left: `${Math.min(50, 50 + (compassAnalysis.soc * 5))}%`,
                         width: `${Math.max(4, Math.abs(compassAnalysis.soc * 5))}%`,
@@ -668,11 +700,11 @@ const AccountProfile = memo(function AccountProfile({
                 <div className="flex flex-col gap-1.5">
                   <div className="flex items-center justify-between gap-2 text-[11px] sm:text-[11.5px]">
                     <span className="text-[color:var(--text-muted)] font-medium shrink-0">{t("apGovernance")}</span>
-                    <span className="font-semibold text-purple-700 dark:text-purple-300 text-right">{cleanDimensionLabel(compassAnalysis.dimensions?.gov?.label)}</span>
+                    <span className="font-semibold text-[color:var(--auth-center)] text-right">{cleanDimensionLabel(tx(compassAnalysis.dimensions?.gov?.labelKey, compassAnalysis.dimensions?.gov?.label))}</span>
                   </div>
                   <div className="relative h-2 bg-[color:var(--bg-elevated)] border border-[color:var(--border)] rounded-full overflow-hidden">
                     <div
-                      className="absolute top-0 bottom-0 bg-purple-500 rounded-full transition-all duration-500 shadow-sm"
+                      className="absolute top-0 bottom-0 bg-[color:var(--auth-center)] rounded-full transition-all duration-500 shadow-sm"
                       style={{
                         left: `${Math.min(50, 50 + (compassAnalysis.gov * 5))}%`,
                         width: `${Math.max(4, Math.abs(compassAnalysis.gov * 5))}%`,
@@ -709,7 +741,7 @@ const AccountProfile = memo(function AccountProfile({
                           <div className="flex items-center justify-between">
                             <span className="font-bold text-[color:var(--text-muted)] text-[11px] uppercase tracking-wide">{pos.topic}</span>
                             <span className={`text-[10px] px-2 py-0.5 rounded font-medium ${getPolarityColorClass(pos.polarity)}`}>
-                              {pos.polarity}
+                              {pos.polarityKeys?.length ? pos.polarityKeys.map((k, i) => tx(k, String(pos.polarity || '').split(" · ")[i] || k)).join(" · ") : pos.polarity}
                             </span>
                           </div>
                           <div className="font-semibold text-[color:var(--text)] text-[13px] leading-snug">{pos.stance}</div>
@@ -751,9 +783,9 @@ const AccountProfile = memo(function AccountProfile({
                           className="px-2 py-1 rounded bg-[color:var(--bg-elevated)] border border-[color:var(--border)] hover:border-[color:var(--accent)] hover:text-[color:var(--accent-text)] text-[10px] transition-colors cursor-pointer flex items-center gap-1.5"
                         >
                           <span className="font-medium">r/{s.sub}</span>
-                          <span className="text-[color:var(--text-muted)]">({s.count})</span>
+                          <span className="text-[color:var(--text-muted)]">({fmtNum(s.count, LOCALES[lang] || "en")})</span>
                           {s.interactionTag && (
-                            <span className="text-[9px] px-1.5 py-0.2 rounded font-medium bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                            <span className="text-[9px] px-1.5 py-0.5 rounded font-medium bg-[color:var(--warn)]/20 text-[color:var(--warn)] border border-[color:var(--warn)]/30">
                               {s.interactionTag}
                             </span>
                           )}
