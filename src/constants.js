@@ -23,9 +23,32 @@ export function readStoredList(key) {
 export function tJsx(tFn, key, vars) {
   const raw = tFn(key);
   if (!vars) return raw;
-  const names = Object.keys(vars).join('|');
-  const parts = raw.split(new RegExp(`\\{(${names})\\}`, 'g'));
+  // Harden: escape each var name before joining into a RegExp alternation.
+  // Keys are internal today, but an unescaped key (e.g. "a|b)" or "x+") would
+  // break out of the \{...\} group and corrupt the split pattern.
+  const keys = Object.keys(vars);
+  if (keys.length === 0) return raw;
+  const names = keys.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join('|');
+  const parts = raw.split(getPlaceholderSplitRegex(names));
   return parts.map((part, i) => i % 2 === 0 ? part : vars[part]);
+}
+
+// Placeholder-split regex cache for tJsx(). tJsx() runs on every render of
+// every translated string with variables, so compiling a RegExp per call is
+// wasteful. Cache by the joined var-name key (Map capped to bound memory,
+// mirroring the getKeywordMatcher approach below).
+const _tJsxSplitCache = new Map();
+const T_JSX_SPLIT_CACHE_CAP = 20;
+
+function getPlaceholderSplitRegex(names) {
+  let re = _tJsxSplitCache.get(names);
+  if (!re) {
+    re = new RegExp(`\\{(${names})\\}`, 'g');
+    if (_tJsxSplitCache.size >= T_JSX_SPLIT_CACHE_CAP) _tJsxSplitCache.delete(_tJsxSplitCache.keys().next().value);
+    _tJsxSplitCache.set(names, re);
+  }
+  re.lastIndex = 0; // split() resets this per spec; reset defensively for reuse
+  return re;
 }
 
 export function matchKeyword(item, kw, type) {
@@ -54,6 +77,9 @@ let _kwCacheMatcher = null;
 export function getKeywordMatcher(kw) {
   const raw = typeof kw === "string" ? kw.trim() : "";
   if (!raw) return null;
+  // Giant-input guard: a KB-long keyword would compile a giant RegExp and
+  // re-test it per item per keystroke (self-DoS). Treat as no-filter.
+  if (raw.length > 200) return null;
   if (raw === _kwCacheRaw) return _kwCacheMatcher;
   const matcher = buildKeywordMatcher(raw);
   _kwCacheRaw = raw;
@@ -62,16 +88,20 @@ export function getKeywordMatcher(kw) {
 }
 
 function buildKeywordMatcher(raw) {
-  // Strict subreddit filter when query is formatted as "r/subname" or "/r/subname"
-  if (/^(?:\/?r\/)/i.test(raw)) {
-    const subClean = raw.replace(/^(?:\/?r\/)/i, "").toLowerCase();
-    return { kind: "sub", value: subClean, regex: null };
+  // Strict subreddit filter only for a bare "r/name" token. A bare "r/" is
+  // not a filter, and anything with spaces or extra characters (e.g.
+  // "r/bike lanes") falls through to a plain text search.
+  if (/^\/?r\//i.test(raw)) {
+    const subMatch = raw.match(/^\/?r\/([A-Za-z0-9_+-]+)$/i);
+    if (subMatch) return { kind: "sub", value: subMatch[1].toLowerCase(), regex: null };
+    if (!raw.replace(/^\/?r\//i, "")) return null;
   }
 
-  // Strict author filter when query is formatted as "u/username" or "/u/username"
-  if (/^(?:\/?u\/)/i.test(raw)) {
-    const userClean = raw.replace(/^(?:\/?u\/)/i, "").toLowerCase();
-    return { kind: "user", value: userClean, regex: null };
+  // Strict author filter only for a bare "u/name" token (same rules as r/).
+  if (/^\/?u\//i.test(raw)) {
+    const userMatch = raw.match(/^\/?u\/([A-Za-z0-9_+-]+)$/i);
+    if (userMatch) return { kind: "user", value: userMatch[1].toLowerCase(), regex: null };
+    if (!raw.replace(/^\/?u\//i, "")) return null;
   }
 
   const clean = raw.replace(/^["']|["']$/g, "");

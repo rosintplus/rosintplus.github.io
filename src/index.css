@@ -2,12 +2,40 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Style scale — single source of truth (do not invent new steps):
+   - Buttons: h-8 standard pills. Exceptions: Load More h-10 (hero) and
+     ModeSelector / sort segmented controls h-6 (see App.jsx comments).
+   - Shadows: cards hover:shadow-lg, menus/dropdowns/tooltips shadow-xl,
+     panels shadow-sm. No shadow-black/* color modifiers (theme vars cover color).
+   - Radii: rounded for cards/pills/inputs/buttons, rounded-md for
+     menus/dropdowns/tooltips, rounded-lg for panels, rounded-full for
+     flairs/counts/dots, rounded-xl for the outage hero only.
+   - Vote rails: min-w-[40px] px-2 py-3. Layout gaps use the 2/3 scale;
+     tight inline icon-text stacks (gap-1) are intentional. */
+
 @layer base {
   :root {
     --status-removed: #f4776b;
     --status-deleted: #d6a35c;
     --status-admin: #ff5c8a;
     --status-mod: #ff6a33;
+
+    /* Semantic status colors (dark-mode defaults; applyTheme() in theme.js
+       swaps these per light/dark to preserve the old 700/300 brightness
+       behavior). Quadrant hues reuse them: auth-left≈danger/rose,
+       auth-right≈info/blue, lib-left≈success/emerald, lib-right≈warn/amber,
+       auth-center≈purple, lib-center≈teal, neutral≈slate. */
+    --danger: #fda4af;
+    --warn: #fcd34d;
+    --info: #93c5fd;
+    --success: #6ee7b7;
+    --auth-center: #d8b4fe;
+    --lib-center: #5eead4;
+    --neutral: #cbd5e1;
+    --quad-auth-left: var(--danger);
+    --quad-auth-right: var(--info);
+    --quad-lib-left: var(--success);
+    --quad-lib-right: var(--warn);
 
     --bg: #0d0d0d;
     --accent: #ff4500;
@@ -17,11 +45,49 @@
     --accent-text: color-mix(in srgb, var(--tint) 70%, var(--text-base, white));
     --text: color-mix(in srgb, var(--tint) 30%, var(--text-base, white));
     --text-muted: color-mix(in srgb, var(--tint) 30%, color-mix(in srgb, var(--text-base, white) 65%, var(--bg)));
-    --text-faint: color-mix(in srgb, var(--tint) 20%, color-mix(in srgb, var(--text-base, white) 45%, var(--bg)));
+    --text-faint: color-mix(in srgb, var(--tint) 20%, color-mix(in srgb, var(--text-base, white) 60%, var(--bg)));
     --border: color-mix(in srgb, color-mix(in srgb, var(--tint) 30%, var(--text-base, white)) 18%, var(--bg));
     --border-hover: color-mix(in srgb, color-mix(in srgb, var(--tint) 30%, var(--text-base, white)) 28%, var(--bg));
     --bg-elevated: color-mix(in srgb, color-mix(in srgb, var(--tint) 30%, var(--text-base, white)) 8%, var(--bg));
 }
+
+  /* Light-mode status hues: the dark defaults above drop below 2.6:1 on
+     light backgrounds, so swap in darker hues (verified worst across
+     all 9 light bgs, all >=4.5:1: removed/danger 5.20, deleted/warn
+     5.87, admin 4.99, mod 6.05, success 4.54, info 5.54).
+     Deleted/warn use amber-800 (#92400e) — amber-700 (#b45309) fell to
+     4.15:1 on cyber #fcee0a. Mod uses orange-800 (#9a3412) — orange-700
+     (#c2410c) fell to 4.28:1 on cyber.
+     Hooked on the `dark` class that applyTheme() in theme.js toggles
+     (tailwind darkMode: "class"); the :root.dark block below pins the
+     dark values explicitly. */
+  :root:not(.dark) {
+    --status-removed: #be123c;
+    --status-deleted: #92400e;
+    --status-admin: #be185d;
+    --status-mod: #9a3412;
+    --danger: #be123c;
+    --warn: #92400e;
+    --info: #1d4ed8;
+    --success: #047857;
+    --auth-center: #7e22ce;
+    --lib-center: #0f766e;
+    --neutral: #475569;
+    --quad-auth-left: #be123c;
+    --quad-auth-right: #1d4ed8;
+    --quad-lib-left: #047857;
+    --quad-lib-right: #92400e;
+  }
+
+  /* Explicit dark hook for the status vars (mirrors the :root defaults
+     above) so badge brightness always follows the app theme's `dark`
+     class rather than the OS prefers-color-scheme default. */
+  :root.dark {
+    --status-removed: #f4776b;
+    --status-deleted: #d6a35c;
+    --status-admin: #ff5c8a;
+    --status-mod: #ff6a33;
+  }
 
   html, body {
     font-family: ui-monospace, 'JetBrains Mono', 'Cascadia Code', Consolas, monospace, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', 'Yu Gothic UI', 'Yu Gothic', Meiryo, 'MS PGothic', 'Noto Sans JP', 'Noto Sans CJK JP', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
@@ -63,13 +129,12 @@
 }
 
 /* Keyboard focus ring. Guarantees a visible focus indicator on every
-   interactive element for keyboard users — including the many controls that
-   set Tailwind's `outline-none`, hence !important. Mouse clicks (which don't
-   match :focus-visible) stay ring-free.
-   Text inputs/textareas/selects are excluded: browsers treat those as
-   focus-visible on mouse click too (typing is expected next), and they
-   already get their own `focus:border-[color:var(--accent)]` treatment. */
-:where(a, button, summary, [tabindex]:not([tabindex="-1"])):focus-visible {
+   interactive element for keyboard users — including inputs, checkboxes,
+   date pickers and selects, plus the many controls that set Tailwind's
+   `outline-none`, hence !important. Mouse clicks (which don't match
+   :focus-visible) stay ring-free. The 2px accent (#ff4500) outline clears
+   3:1 against both themes' backgrounds (3.13:1 on light #f3f4f6). */
+:where(a, button, summary, input, select, textarea, [tabindex]:not([tabindex="-1"])):focus-visible {
     outline: 2px solid var(--accent) !important;
     outline-offset: 2px;
 }
@@ -140,7 +205,8 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover {
         transition-duration: 0.01ms !important;
         scroll-behavior: auto !important;
     }
-    .skeleton {
+    .skeleton,
+    .skeleton-card {
         animation: none;
         background: var(--border);
     }

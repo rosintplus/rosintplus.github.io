@@ -51,9 +51,20 @@ export function mix(hex1, hex2, t) {
 }
 export function applyTheme(t, isDark) {
   const d = document.documentElement;
+  // Class hook for Tailwind `dark:` variants (darkMode: "class") and the
+  // light-mode overrides in index.css — keeps badge brightness tied to the
+  // app theme instead of the OS prefers-color-scheme default.
+  d.classList.toggle("dark", isDark);
   const tint = t.tint || t.accent;
   const base = isDark ? "#ffffff" : "#000000";
   const tintBase = mix(tint, base, 0.3);
+  // Semantic status/quadrant hues. Fixed across all 9 themes (only the
+  // light/dark step changes, mirroring the old *-700 / *-300 pairing).
+  // Light warn uses amber-800 (#92400e, worst 5.87:1 across all 9 light
+  // bgs) — amber-700 (#b45309) fell to 4.15:1 on cyber #fcee0a.
+  const sem = isDark
+    ? { danger: "#fda4af", warn: "#fcd34d", info: "#93c5fd", success: "#6ee7b7", authCenter: "#d8b4fe", libCenter: "#5eead4", neutral: "#cbd5e1" }
+    : { danger: "#be123c", warn: "#92400e", info: "#1d4ed8", success: "#047857", authCenter: "#7e22ce", libCenter: "#0f766e", neutral: "#475569" };
   d.style.cssText = [
     `--bg:${t.bg}`,
     `--accent:${t.accent}`,
@@ -63,10 +74,21 @@ export function applyTheme(t, isDark) {
     `--accent-text:${mix(tint, base, 0.7)}`,
     `--text:${tintBase}`,
     `--text-muted:${mix(tint, mix(base, t.bg, 0.65), 0.3)}`,
-    `--text-faint:${mix(tint, mix(base, t.bg, 0.45), 0.2)}`,
+    `--text-faint:${mix(tint, mix(base, t.bg, 0.6), 0.2)}`,
     `--border:${mix(tintBase, t.bg, 0.18)}`,
     `--border-hover:${mix(tintBase, t.bg, 0.28)}`,
     `--bg-elevated:${mix(tintBase, t.bg, 0.08)}`,
+    `--danger:${sem.danger}`,
+    `--warn:${sem.warn}`,
+    `--info:${sem.info}`,
+    `--success:${sem.success}`,
+    `--auth-center:${sem.authCenter}`,
+    `--lib-center:${sem.libCenter}`,
+    `--neutral:${sem.neutral}`,
+    `--quad-auth-left:${sem.danger}`,
+    `--quad-auth-right:${sem.info}`,
+    `--quad-lib-left:${sem.success}`,
+    `--quad-lib-right:${sem.warn}`,
   ].join(";");
   let meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.setAttribute("content", t.bg);
