@@ -29,6 +29,11 @@ const BOT_DISCLAIMER_PATTERNS = [
   /this bot (?:was|is) (?:made|created|running)/i,
 ];
 
+// Cheap single-regex prefilter covering every disclaimer above (each one
+// contains bot, beep, boop or automat). Rejects non-candidates before the
+// 8-pattern find runs.
+const BOT_DISCLAIMER_PREFILTER = /bot|beep|boop|automat/i;
+
 // Community naming convention: bots identify themselves in the handle.
 const BOT_NAME_REGEX = /(?:^auto_|[_-]bot$|^bot(?:[_-]|$)|_automod|transcriber|helperbot|bot_)/i;
 
@@ -57,43 +62,57 @@ function dedupeById(items) {
 /**
  * Find the first bot-disclosure match inside a text blob.
  * @param {string} text - Text to scan.
- * @returns {{ kind: string, detail: string }|null} Disclosure finding or null.
+ * @returns {{ kind: string, detail: string, detailKey: string, detailParams: object }|null} Disclosure finding or null.
  */
 function matchDisclaimer(text) {
   if (!text || text === '[deleted]' || text === '[removed]') return null;
+  if (!BOT_DISCLAIMER_PREFILTER.test(text)) return null;
   const pattern = BOT_DISCLAIMER_PATTERNS.find(p => p.test(text));
   if (!pattern) return null;
   const match = text.match(pattern)?.[0];
-  return { kind: 'text', detail: `Discloses automation in its own content${match ? `: "${match}"` : ''}` };
+  if (match) {
+    return { kind: 'text', detail: `Discloses automation in its own content${match ? `: "${match}"` : ''}`, detailKey: 'botDetailText', detailParams: { match } };
+  }
+  return { kind: 'text', detail: `Discloses automation in its own content`, detailKey: 'botDetailTextBare', detailParams: {} };
 }
 
 function findDisclosure(username, posts, comments) {
   if (BOT_NAME_REGEX.test(username)) {
-    return { kind: 'handle', detail: `Handle follows the bot naming convention ("${username}")` };
+    return { kind: 'handle', detail: `Handle follows the bot naming convention ("${username}")`, detailKey: 'botDetailHandle', detailParams: { username } };
   }
-  for (const c of comments.slice(0, 50)) {
+  for (const c of comments) {
     const hit = matchDisclaimer(c?.body);
     if (hit) return hit;
   }
-  for (const p of posts.slice(0, 30)) {
-    const hit = matchDisclaimer(`${p?.title || ''}\n${p?.selftext || ''}`.trim());
+  for (const p of posts) {
+    const title = p?.title || '';
+    const selftext = p?.selftext || '';
+    if (!title && !selftext) continue;
+    // Avoid the combined template allocation until the cheap prefilter hits
+    // on one side; matchDisclaimer re-checks the combined text so a match
+    // spanning the title/selftext boundary still reports.
+    if (!BOT_DISCLAIMER_PREFILTER.test(title) && !BOT_DISCLAIMER_PREFILTER.test(selftext)) continue;
+    const hit = matchDisclaimer(`${title}\n${selftext}`.trim());
     if (hit) return hit;
   }
   return null;
 }
 
 // Groups items that share the same key; only repeats (2+) are returned.
-function duplicateGroups(items, keyFn) {
+// displayFn provides the original-casing text for the evidence sample — the
+// grouping key is normalised (lowercased) for matching, but the sample shown
+// to the user preserves the author's own casing.
+function duplicateGroups(items, keyFn, displayFn) {
   const map = new Map();
   for (const item of items) {
     const key = keyFn(item);
     if (!key) continue;
-    if (!map.has(key)) map.set(key, []);
-    map.get(key).push(item);
+    if (!map.has(key)) map.set(key, { key, items: [], display: displayFn ? (displayFn(item) || key) : key });
+    map.get(key).items.push(item);
   }
   const groups = [];
-  for (const [key, list] of map) {
-    if (list.length >= 2) groups.push({ key, items: list });
+  for (const { key, items, display } of map.values()) {
+    if (items.length >= 2) groups.push({ key, items, display: display ?? key });
   }
   groups.sort((a, b) => b.items.length - a.items.length);
   return groups;
@@ -109,21 +128,43 @@ function subList(items, max = 5) {
   return subs.join(', ');
 }
 
-function toEvidence(label, kind, groups) {
-  return groups.slice(0, MAX_GROUPS).map(group => ({
-    kind,
-    label,
-    count: group.items.length,
-    subs: subList(group.items),
-    sample: group.key.length > 80 ? `${group.key.slice(0, 80)}…` : group.key,
-    posts: group.items.slice(0, 6).map(p => ({ id: p.id, permalink: p.permalink })),
-  }));
+export const BOT_VERDICT_KEYS = {
+  'No Duplicates': 'botVerdictNoDuplicates',
+  'Disclosed Automation': 'botVerdictDisclosed',
+  'Repost Pattern': 'botVerdictRepost',
+  'Duplicate Posts': 'botVerdictDuplicates',
+};
+
+export const BOT_EVIDENCE_LABEL_KEYS = {
+  media: 'botEvidenceMedia',
+  title: 'botEvidenceTitles',
+  comment: 'botEvidenceComments',
+};
+
+function toEvidence(label, labelKey, kind, groups) {
+  return groups.slice(0, MAX_GROUPS).map(group => {
+    const raw = group.display ?? group.key;
+    return {
+      kind,
+      label,
+      labelKey,
+      count: group.items.length,
+      subs: subList(group.items),
+      sample: raw.length > 80 ? `${raw.slice(0, 80)}…` : raw,
+      posts: group.items.slice(0, 6).map(p => ({
+        id: p.id,
+        permalink: p.permalink,
+        subreddit: p.subreddit || (p.subreddit_name_prefixed ? String(p.subreddit_name_prefixed).replace(/^r\//, '') : undefined),
+        link_id: p.link_id || p.linkId || undefined,
+      })),
+    };
+  });
 }
 
 /**
  * Assess bot likelihood from already-loaded profile history (no network).
  * @param {{ username?: string, posts?: Array, comments?: Array }} args - Profile history.
- * @returns {{ verdict: string, riskLevel: string, flags: string[], evidence: Array, metrics: object }} Bot assessment.
+ * @returns {{ verdict: string, verdictKey: string, riskLevel: string, flags: string[], flagKeys: Array, evidence: Array, metrics: object }} Bot assessment.
  */
 export function evaluateBotLikelihood({
   username = '',
@@ -144,23 +185,37 @@ function evaluateBotLikelihoodUncached({
 
   // Native crossposts are a Reddit feature, not duplication.
   const ownPosts = uniquePosts.filter(p => !isCrosspost(p));
+  const normalizeMediaUrl = u => {
+    try {
+      const noFrag = String(u || "").split("#")[0];
+      const noQuery = noFrag.split("?")[0];
+      let out = noQuery.trim().replace(/\/+$/, "");
+      out = out.replace(/^http:/i, "https:");
+      return out.toLowerCase();
+    } catch {
+      return String(u || "").toLowerCase();
+    }
+  };
   const mediaGroups = duplicateGroups(
     ownPosts.filter(p => p?.url && MEDIA_URL_REGEX.test(p.url)),
-    p => p.url.split('?')[0]
+    p => normalizeMediaUrl(p.url),
+    p => (p.url || '')
   );
   const titleGroups = duplicateGroups(
     ownPosts,
-    p => (norm(p.title).length >= MIN_TITLE_CHARS ? norm(p.title) : '')
+    p => (norm(p.title).length >= MIN_TITLE_CHARS ? norm(p.title) : ''),
+    p => (p.title || '')
   );
   const bodyGroups = duplicateGroups(
     uniqueComments.filter(c => c?.body && c.body !== '[deleted]' && c.body !== '[removed]'),
-    c => (norm(c.body).length >= MIN_COMMENT_CHARS ? norm(c.body) : '')
+    c => (norm(c.body).length >= MIN_COMMENT_CHARS ? norm(c.body) : ''),
+    c => (c.body || '')
   );
 
   const evidence = [
-    ...toEvidence('Duplicate media', 'media', mediaGroups),
-    ...toEvidence('Duplicate titles', 'title', titleGroups),
-    ...toEvidence('Duplicate comments', 'comment', bodyGroups),
+    ...toEvidence('Duplicate media', 'botEvidenceMedia', 'media', mediaGroups),
+    ...toEvidence('Duplicate titles', 'botEvidenceTitles', 'title', titleGroups),
+    ...toEvidence('Duplicate comments', 'botEvidenceComments', 'comment', bodyGroups),
   ].sort((a, b) => b.count - a.count);
 
   // Count repeated items once even when both their title and media match.
@@ -173,6 +228,14 @@ function evaluateBotLikelihoodUncached({
   }
 
   const flags = disclosure ? [`Bot disclosure: ${disclosure.detail}`] : [];
+  const flagKeys = disclosure
+    ? [{
+        key: 'botFlagDisclosure',
+        params: { detail: disclosure.detail },
+        detailKey: disclosure.detailKey,
+        detailParams: disclosure.detailParams || {},
+      }]
+    : [];
 
   const maxCopies = Math.max(
     mediaGroups[0]?.items.length || 0,
@@ -187,22 +250,28 @@ function evaluateBotLikelihoodUncached({
   // both media and title recycling at scale. A single repeated item is common
   // human behaviour (re-sharing your own content) and stays at medium.
   let verdict = 'No Duplicates';
+  let verdictKey = 'botVerdictNoDuplicates';
   let riskLevel = 'low';
   if (disclosure) {
     verdict = 'Disclosed Automation';
+    verdictKey = 'botVerdictDisclosed';
     riskLevel = 'high';
   } else if (maxCopies >= 5 || (maxMedia >= 3 && maxTitle >= 3)) {
     verdict = 'Repost Pattern';
+    verdictKey = 'botVerdictRepost';
     riskLevel = 'high';
   } else if (hasGroups) {
     verdict = 'Duplicate Posts';
+    verdictKey = 'botVerdictDuplicates';
     riskLevel = 'medium';
   }
 
   return {
     verdict,
+    verdictKey,
     riskLevel,
     flags,
+    flagKeys,
     evidence,
     metrics: {
       loadedPosts: uniquePosts.length,

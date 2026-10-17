@@ -40,7 +40,7 @@ export const SUBREDDIT_POLITICAL_MAP = {
   onguardforthee: { econ: -5.5, soc: -6.0, gov: -5.0, weight: 0.8, side: 'left' },
   greenparty: { econ: -6.5, soc: -7.0, gov: -6.5, weight: 0.8, side: 'left' },
   lostgeneration: { econ: -7.0, soc: -5.0, gov: -5.0, weight: 0.75, side: 'left' },
-  socialistRA: { econ: -8.0, soc: -8.0, gov: -8.5, weight: 0.9, side: 'left' },
+  socialistra: { econ: -8.0, soc: -8.0, gov: -8.5, weight: 0.9, side: 'left' },
   liberalgunowners: { econ: -4.0, soc: -7.0, gov: -7.5, weight: 0.8, side: 'left' },
   conservativeterrorism: { econ: -6.0, soc: -6.5, gov: -5.0, weight: 0.8, side: 'left' },
 

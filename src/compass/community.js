@@ -146,12 +146,23 @@ export function estimateFromCommunities(subredditCounts, textBySub) {
     };
   }
 
-  const totalMass = rows.reduce((s, r) => s + r.mass, 0);
+  let cappedTotal = rows.reduce((s, r) => s + r.mass, 0);
 
-  // Cap any single community's share of the evidence mass.
-  const cap = totalMass * COMMUNITY_WEIGHT_CAP;
-  for (const r of rows) if (r.mass > cap) r.mass = cap;
-  const cappedTotal = rows.reduce((s, r) => s + r.mass, 0);
+  // Cap any single community's share of the evidence mass. A single pass is
+  // not enough: capping the leader shrinks the total, so the leader can
+  // still exceed 50% of the new total. Iterate until no community exceeds
+  // the cap (at most one row can exceed 50% at a time). Skipped for a
+  // single community, where 100% share is unavoidable.
+  if (rows.length > 1) {
+    // Closed form: leader may contribute at most the sum of all others.
+    const total = rows.reduce((s, r) => s + r.mass, 0);
+    const peak = Math.max(...rows.map((r) => r.mass));
+    if (peak > total * COMMUNITY_WEIGHT_CAP) {
+      const sumOthers = total - peak;
+      for (const r of rows) if (r.mass === peak) { r.mass = sumOthers; break; }
+    }
+    cappedTotal = rows.reduce((s, r) => s + r.mass, 0);
+  }
 
   const dimensions = {};
   for (const dim of ["econ", "soc", "gov"]) {

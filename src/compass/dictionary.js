@@ -398,13 +398,13 @@ export const DISAGREEMENT_WORDS = new Set([
   "no", "nope", "wrong", "disagree", "disagreeing", "disagreed", "nonsense",
   "rubbish", "garbage", "bullshit", "bs", "ridiculous", "absurd", "false",
   "debunked", "debunk", "myth", "lies", "lying", "liar", "propaganda",
-  "actually", "however", "but", "except", "unfortunately", "regardless",
+  "except", "unfortunately", "regardless",
   "oppose", "opposed", "opposing", "against", "reject", "rejected", "rejecting",
   "deny", "denies", "denying", "refute", "refuted", "refuting", "counter",
   "misleading", "misinformation", "disinformation", "delusional", "cult",
   "brainwashed", "sheep", "ignorant", "stupid", "idiot", "idiots", "moron",
   "morons", "clown", "clowns", "disgrace", "embarrassing", "shameful",
-  "never", "stop", "quit", "enough", "tired", "sick", "hate", "worst",
+  "quit", "enough", "tired", "sick", "hate", "worst",
   "criticise", "criticize", "criticised", "criticized", "criticism",
 ]);
 

@@ -38,6 +38,10 @@ export function processItem(stats, item, isComment) {
   const text = isComment ? (item.body || "") : (item.selftext || item.title || "");
   if (text && text !== "[deleted]" && text !== "[removed]") {
     if (!stats.sampleItems) stats.sampleItems = [];
+    // Bounded sample buffer: at most 1000 items are retained so the stats
+    // bucket stays O(1) in memory. Samples are engine input (see analyze.js
+    // poolItems / cache key); eviction is oldest-last by construction since
+    // callers append in crawl order and mergeStats truncates to the cap.
     if (stats.sampleItems.length < 1000) {
       stats.sampleItems.push({
         id: item.id,
@@ -84,6 +88,10 @@ export function mergeStats(target, source) {
   }
   if (source.sampleItems && Array.isArray(source.sampleItems)) {
     if (!target.sampleItems) target.sampleItems = [];
+    // Canonical merge: concatenate then truncate to the same 1000-item cap
+    // as processItem. Dedupe is NOT done here — analyze.js poolItems pools
+    // by kind:id (id-bearing streams are the authority; legacy id-less
+    // samples by content), so merging never double-counts downstream.
     if (target.sampleItems.length < 1000) {
       target.sampleItems = target.sampleItems.concat(source.sampleItems).slice(0, 1000);
     }
